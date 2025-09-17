@@ -51,7 +51,7 @@ blueprint:
     # Open (skipped) notification
     notify_title_open:
       name: Open/Skipped title
-      default: "🚨 Auto-lock Failed"
+      default: "⚠️ Auto-lock failed: Door is open"
       selector:
         text:
     notify_message_open:
@@ -63,12 +63,12 @@ blueprint:
     # Failure to confirm locked (mechanical/jam/battery) notification
     notify_title_failed:
       name: Lock confirmation failed title
-      default: "⚠️ Auto-lock did not complete"
+      default: "⚠️ Auto-lock failed: lock error"
       selector:
         text:
     notify_message_failed:
       name: Lock confirmation failed message
-      default: "Tried to lock, but the lock never reported 'locked'. Check the lock (jam/low battery?)."
+      default: "Door lock never reported 'locked'. Check the lock (jam/low battery?)."
       selector:
         text:
 
