@@ -1,9 +1,10 @@
 blueprint:
-  name: Auto-lock door after duration (notify on success or skipped)
+  name: Auto-lock door after duration (notify on success, open, or failure)
   description: >
     When the selected lock has been UNLOCKED for the chosen duration, lock it
-    only if the contact sensor is CLOSED. Notify on successful lock, or if
-    locking is skipped because the door is open.
+    only if the contact sensor is CLOSED. Notify on successful lock, when
+    locking is skipped because the door is open, or when the lock fails to
+    confirm 'locked' within a timeout.
   domain: automation
   input:
     lock_entity:
@@ -25,7 +26,7 @@ blueprint:
         duration:
     confirm_timeout:
       name: Lock confirmation timeout
-      description: How long to wait for the lock to report "locked" before giving up on the success notification.
+      description: How long to wait for the lock to report "locked" before considering it a failure.
       default: 00:00:20
       selector:
         duration:
@@ -34,6 +35,8 @@ blueprint:
       description: e.g. notify.mobile_app_fold_6
       selector:
         text:
+
+    # Success (locked) notification
     notify_title_success:
       name: Success title
       default: "🔒 Door auto-locked"
@@ -41,17 +44,31 @@ blueprint:
         text:
     notify_message_success:
       name: Success message
-      default: "The door was unlocked beyond the set duration and has now been locked."
+      default: "The door was left unlocked. Backup auto-lock engaged."
       selector:
         text:
+
+    # Open (skipped) notification
     notify_title_open:
-      name: Skipped title
-      default: "🚪 Auto-lock skipped"
+      name: Open/Skipped title
+      default: "🚨 Auto-lock Failed"
       selector:
         text:
     notify_message_open:
-      name: Skipped message
-      default: "The door is open, so auto-lock did not run. Close it to allow locking."
+      name: Open/Skipped message
+      default: "The door is open, cannot auto-lock."
+      selector:
+        text:
+
+    # Failure to confirm locked (mechanical/jam/battery) notification
+    notify_title_failed:
+      name: Lock confirmation failed title
+      default: "⚠️ Auto-lock did not complete"
+      selector:
+        text:
+    notify_message_failed:
+      name: Lock confirmation failed message
+      default: "Tried to lock, but the lock never reported 'locked'. Check the lock (jam/low battery?)."
       selector:
         text:
 
@@ -67,7 +84,7 @@ condition: []
 
 action:
   - choose:
-      # ✅ Door is CLOSED -> lock it
+      # ✅ Door is CLOSED -> try to lock it
       - conditions:
           - condition: state
             entity_id: !input contact_entity
@@ -77,7 +94,7 @@ action:
             target:
               entity_id: !input lock_entity
 
-          # Wait for the lock to actually report "locked" before notifying success
+          # Wait for the lock to actually report "locked"
           - wait_for_trigger:
               - platform: state
                 entity_id: !input lock_entity
@@ -85,8 +102,9 @@ action:
             timeout: !input confirm_timeout
             continue_on_timeout: true
 
-          # Notify ONLY if the lock confirmed "locked"
+          # Notify based on result:
           - choose:
+              # Success path: lock confirmed
               - conditions:
                   - condition: template
                     value_template: "{{ wait.completed }}"
@@ -95,9 +113,16 @@ action:
                     data:
                       title: !input notify_title_success
                       message: !input notify_message_success
-    # ❌ Door is OPEN -> notify
+            # Failure path: lock did not confirm
+            default:
+              - service: !input notify_service
+                data:
+                  title: !input notify_title_failed
+                  message: !input notify_message_failed
+
+    # ❌ Door is OPEN -> notify (no lock attempt)
     default:
       - service: !input notify_service
         data:
-          title: "🚪 Auto-lock skipped"
-          message: "The door is open, so auto-lock did not run."
+          title: !input notify_title_open
+          message: !input notify_message_open
