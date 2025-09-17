@@ -1,9 +1,9 @@
 blueprint:
-  name: Auto-lock door after duration (only if closed)
+  name: Auto-lock door after duration (notify on success or skipped)
   description: >
     When the selected lock has been UNLOCKED for the chosen duration, lock it
-    only if the contact sensor reports CLOSED. If the door is open, send a
-    notification.
+    only if the contact sensor is CLOSED. Notify on successful lock, or if
+    locking is skipped because the door is open.
   domain: automation
   input:
     lock_entity:
@@ -23,9 +23,35 @@ blueprint:
       default: 00:05:00
       selector:
         duration:
+    confirm_timeout:
+      name: Lock confirmation timeout
+      description: How long to wait for the lock to report "locked" before giving up on the success notification.
+      default: 00:00:20
+      selector:
+        duration:
     notify_service:
-      name: Notify service
+      name: Notify service (required)
       description: e.g. notify.mobile_app_fold_6
+      selector:
+        text:
+    notify_title_success:
+      name: Success title
+      default: "🔒 Door auto-locked"
+      selector:
+        text:
+    notify_message_success:
+      name: Success message
+      default: "The door was unlocked beyond the set duration and has now been locked."
+      selector:
+        text:
+    notify_title_open:
+      name: Skipped title
+      default: "🚪 Auto-lock skipped"
+      selector:
+        text:
+    notify_message_open:
+      name: Skipped message
+      default: "The door is open, so auto-lock did not run. Close it to allow locking."
       selector:
         text:
 
@@ -45,11 +71,30 @@ action:
       - conditions:
           - condition: state
             entity_id: !input contact_entity
-            state: "off"   # 'off' = closed for most door contacts
+            state: "off"    # 'off' = closed for most door contacts
         sequence:
           - service: lock.lock
             target:
               entity_id: !input lock_entity
+
+          # Wait for the lock to actually report "locked" before notifying success
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input lock_entity
+                to: "locked"
+            timeout: !input confirm_timeout
+            continue_on_timeout: true
+
+          # Notify ONLY if the lock confirmed "locked"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ wait.completed }}"
+                sequence:
+                  - service: !input notify_service
+                    data:
+                      title: !input notify_title_success
+                      message: !input notify_message_success
     # ❌ Door is OPEN -> notify
     default:
       - service: !input notify_service
