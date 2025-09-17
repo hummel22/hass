@@ -1,83 +1,58 @@
 blueprint:
   name: Auto-lock door after duration (only if closed)
   description: >
-    When the selected lock has been UNLOCKED for the chosen duration, this
-    automation will lock it if the door contact reports CLOSED. If the door is
-    still open, it sends a notification (or creates a persistent notification
-    if no notify service is provided).
+    When the selected lock has been UNLOCKED for the chosen duration, lock it
+    only if the contact sensor reports CLOSED. If the door is open, send a
+    notification.
   domain: automation
   input:
     lock_entity:
       name: Door lock
-      description: Select the lock entity to control.
       selector:
         entity:
           domain: lock
     contact_entity:
       name: Door contact sensor
-      description: Binary sensor that indicates if the door is open/closed.
+      description: Usually 'off' = closed, 'on' = open.
       selector:
         entity:
           domain: binary_sensor
           device_class: door
     unlock_duration:
       name: Time unlocked before auto-lock
-      description: How long the door may remain unlocked before this runs.
       default: 00:05:00
       selector:
         duration:
     notify_service:
-      name: (Optional) Mobile notify service
-      description: >
-        Example: notify.mobile_app_fold_6. Leave blank to use a persistent
-        notification instead.
-      default: ""
-      selector:
-        text:
-    notify_title:
-      name: Notification title
-      default: "🚪 Auto-lock skipped"
-      selector:
-        text:
-    notify_message:
-      name: Notification message
-      default: "The door stayed unlocked past the set duration, but it is still open. Please close it to allow auto-lock."
+      name: Notify service
+      description: e.g. notify.mobile_app_fold_6
       selector:
         text:
 
 mode: restart
 
-triggers:
+trigger:
   - platform: state
     entity_id: !input lock_entity
     to: "unlocked"
     for: !input unlock_duration
 
-conditions: []
+condition: []
 
-actions:
+action:
   - choose:
       # ✅ Door is CLOSED -> lock it
       - conditions:
-          - condition: template
-            value_template: "{{ is_state( !input contact_entity , 'off') }}"
+          - condition: state
+            entity_id: !input contact_entity
+            state: "off"   # 'off' = closed for most door contacts
         sequence:
           - service: lock.lock
             target:
               entity_id: !input lock_entity
     # ❌ Door is OPEN -> notify
     default:
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: "{{ ( !input notify_service ) | length > 0 }}"
-            sequence:
-              - service: !input notify_service
-                data:
-                  title: !input notify_title
-                  message: !input notify_message
-        default:
-          - service: persistent_notification.create
-            data:
-              title: !input notify_title
-              message: !input notify_message
+      - service: !input notify_service
+        data:
+          title: "🚪 Auto-lock skipped"
+          message: "The door is open, so auto-lock did not run."
