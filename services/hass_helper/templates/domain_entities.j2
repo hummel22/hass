@@ -1,64 +1,72 @@
 {%- set integration_id = find_integration %}
-{%- set ns = namespace(entities=[], devices=[], seen_entities=[], seen_devices=[]) %}
+{%- set ns = namespace(devices=[], seen_devices=[], seen_entities=[]) %}
 {%- if integration_id %}
   {%- set devices = states | map(attribute='entity_id') | map('device_id') | unique | reject('eq', None) | list %}
   {%- for device in devices %}
+    {%- if device in ns.seen_devices %}
+      {%- continue %}
+    {%- endif %}
     {%- set identifiers = device_attr(device, 'identifiers') | default([], true) | list %}
-    {%- set first_identifier = identifiers | first %}
-    {%- if first_identifier and first_identifier is iterable and first_identifier is not string %}
-      {%- set device_integration = first_identifier | first %}
-    {%- elif first_identifier %}
-      {%- set device_integration = first_identifier %}
-    {%- else %}
-      {%- set device_integration = None %}
-    {%- endif %}
-    {%- if device_integration == integration_id %}
-      {%- if device not in ns.seen_devices %}
-        {%- set normalized_identifiers = [] %}
-        {%- for identifier in identifiers %}
-          {%- if identifier is iterable and identifier is not string %}
-            {%- set normalized_identifiers = normalized_identifiers + [identifier | list] %}
-          {%- else %}
-            {%- set normalized_identifiers = normalized_identifiers + [identifier] %}
-          {%- endif %}
-        {%- endfor %}
-        {%- set ns.devices = ns.devices + [{
-          'id': device,
-          'name': device_attr(device, 'name'),
-          'name_by_user': device_attr(device, 'name_by_user'),
-          'manufacturer': device_attr(device, 'manufacturer'),
-          'model': device_attr(device, 'model'),
-          'sw_version': device_attr(device, 'sw_version'),
-          'configuration_url': device_attr(device, 'configuration_url'),
-          'area_id': area_id(device),
-          'via_device_id': device_attr(device, 'via_device_id'),
-          'identifiers': normalized_identifiers,
-          'integration_id': integration_id
-        }] %}
-        {%- set ns.seen_devices = ns.seen_devices + [device] %}
-      {%- endif %}
-      {%- set entity_ids = device_entities(device) | default([], true) %}
-      {%- for entity_id in entity_ids %}
-        {%- if entity_id not in ns.seen_entities %}
-          {%- set state = states(entity_id) %}
-          {%- if state %}
-            {%- set ns.entities = ns.entities + [{
-              'entity_id': entity_id,
-              'name': state.name,
-              'original_name': state.attributes.get('friendly_name'),
-              'device_id': device,
-              'area_id': area_id(entity_id),
-              'unique_id': state_attr(entity_id, 'unique_id'),
-              'state': state.state,
-              'attributes': state.attributes,
-              'disabled_by': state_attr(entity_id, 'disabled_by'),
-              'integration_id': integration_id
-            }] %}
-            {%- set ns.seen_entities = ns.seen_entities + [entity_id] %}
-          {%- endif %}
+    {%- set matches_domain = false %}
+    {%- for identifier in identifiers %}
+      {%- if identifier is iterable and identifier is not string %}
+        {%- if identifier | length > 0 and identifier | first == integration_id %}
+          {%- set matches_domain = true %}
         {%- endif %}
-      {%- endfor %}
+      {%- elif identifier == integration_id %}
+        {%- set matches_domain = true %}
+      {%- endif %}
+    {%- endfor %}
+    {%- if not matches_domain %}
+      {%- continue %}
     {%- endif %}
+    {%- set normalized_identifiers = [] %}
+    {%- for identifier in identifiers %}
+      {%- if identifier is iterable and identifier is not string %}
+        {%- set normalized_identifiers = normalized_identifiers + [identifier | list] %}
+      {%- else %}
+        {%- set normalized_identifiers = normalized_identifiers + [identifier] %}
+      {%- endif %}
+    {%- endfor %}
+    {%- set entity_ids = device_entities(device) | default([], true) %}
+    {%- set entity_records = [] %}
+    {%- for entity_id in entity_ids %}
+      {%- if entity_id in ns.seen_entities %}
+        {%- continue %}
+      {%- endif %}
+      {%- set state = states(entity_id) %}
+      {%- if not state %}
+        {%- continue %}
+      {%- endif %}
+      {%- set entity_records = entity_records + [{
+        'entity_id': entity_id,
+        'name': state.name,
+        'original_name': state.attributes.get('friendly_name'),
+        'device_id': device,
+        'area_id': area_id(entity_id),
+        'unique_id': state_attr(entity_id, 'unique_id'),
+        'state': state.state,
+        'attributes': state.attributes,
+        'disabled_by': state_attr(entity_id, 'disabled_by'),
+        'integration_id': integration_id
+      }] %}
+      {%- set ns.seen_entities = ns.seen_entities + [entity_id] %}
+    {%- endfor %}
+    {%- set ns.devices = ns.devices + [{
+      'id': device,
+      'name': device_attr(device, 'name'),
+      'name_by_user': device_attr(device, 'name_by_user'),
+      'manufacturer': device_attr(device, 'manufacturer'),
+      'model': device_attr(device, 'model'),
+      'sw_version': device_attr(device, 'sw_version'),
+      'configuration_url': device_attr(device, 'configuration_url'),
+      'area_id': area_id(device),
+      'via_device_id': device_attr(device, 'via_device_id'),
+      'identifiers': normalized_identifiers,
+      'integration_id': integration_id,
+      'entities': entity_records
+    }] %}
+    {%- set ns.seen_devices = ns.seen_devices + [device] %}
   {%- endfor %}
 {%- endif %}
-{{ {'entities': ns.entities, 'devices': ns.devices} | to_json }}
+{{ ns.devices | to_json }}

@@ -16,7 +16,6 @@ class DomainSelectionRequest(BaseModel):
 
 
 class EntitiesIngestResponse(BaseModel):
-    entities: List[Dict[str, Any]]
     devices: List[Dict[str, Any]]
 
 
@@ -57,11 +56,16 @@ class DeviceRecord(BaseModel):
     area_id: Optional[str] = None
     via_device_id: Optional[str] = None
     identifiers: List[Any] = Field(default_factory=list)
+    integration_id: Optional[str] = None
+
+
+class DeviceEntitiesRecord(DeviceRecord):
+    entities: List[EntityRecord] = Field(default_factory=list)
 
 
 class EntitiesResponse(BaseModel):
     entities: List[EntityRecord]
-    devices: List[DeviceRecord]
+    devices: List[DeviceEntitiesRecord]
 
 
 class BlacklistResponse(BaseModel):

@@ -67,7 +67,7 @@ class DataRepository:
             data_dir / "integrations.json", {"selected_domains": []}
         )
         self.entities_store = JSONStorage(
-            data_dir / "entities.json", {"entities": [], "devices": []}
+            data_dir / "entities.json", {"devices": []}
         )
         self.blacklist_store = JSONStorage(
             data_dir / "blacklist.json", {"entities": [], "devices": []}
@@ -132,11 +132,58 @@ class DataRepository:
         return list(updated.get("selected_domains", []))
 
     # Entities ------------------------------------------------------------
-    def save_entities(self, entities: List[Dict[str, Any]], devices: List[Dict[str, Any]]) -> None:
-        self.entities_store.write({"entities": entities, "devices": devices})
+    def save_entities(self, devices: List[Dict[str, Any]]) -> None:
+        self.entities_store.write({"devices": devices})
 
     def get_entities(self) -> Dict[str, Any]:
-        return self.entities_store.read()
+        data = self.entities_store.read()
+        if not isinstance(data, dict):
+            return {"devices": []}
+        devices = data.get("devices")
+        if isinstance(devices, list) and all(isinstance(device, dict) for device in devices):
+            sanitized = json.loads(json.dumps({"devices": devices}))
+            # Ensure each device entry has an entity list.
+            for device in sanitized.get("devices", []):
+                entities = device.get("entities")
+                if not isinstance(entities, list):
+                    device["entities"] = []
+            return sanitized
+
+        # Backwards compatibility: migrate old entity/device split format.
+        legacy_entities = data.get("entities")
+        legacy_devices = data.get("devices")
+
+        device_map: Dict[str, Dict[str, Any]] = {}
+
+        if isinstance(legacy_devices, list):
+            for item in legacy_devices:
+                if not isinstance(item, dict):
+                    continue
+                device_id = item.get("id")
+                if not device_id:
+                    continue
+                record = json.loads(json.dumps(item))
+                record["entities"] = []
+                device_map[device_id] = record
+
+        if isinstance(legacy_entities, list):
+            for entity in legacy_entities:
+                if not isinstance(entity, dict):
+                    continue
+                device_id = entity.get("device_id")
+                if not device_id:
+                    continue
+                record = device_map.setdefault(
+                    device_id,
+                    {"id": device_id, "entities": []},
+                )
+                if not isinstance(record.get("entities"), list):
+                    record["entities"] = []
+                record["entities"].append(json.loads(json.dumps(entity)))
+
+        migrated = {"devices": list(device_map.values())}
+        self.entities_store.write(migrated)
+        return migrated
 
     # Blacklist -----------------------------------------------------------
     def get_blacklist(self) -> Dict[str, List[str]]:

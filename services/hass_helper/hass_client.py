@@ -162,22 +162,22 @@ class HomeAssistantClient:
             raise HomeAssistantError("Unexpected response while fetching domains")
         return [domain for domain in data if isinstance(domain, str)]
 
-    async def fetch_domain_entities(self, domain: str) -> Dict[str, Any]:
-        """Return entity and device metadata for a single integration/domain."""
+    async def fetch_domain_devices(self, domain: str) -> List[Dict[str, Any]]:
+        """Return device metadata (with nested entities) for a single domain."""
 
         domain = (domain or "").strip()
         if not domain:
-            return {"entities": [], "devices": []}
+            return []
         data = await self.render_template(
             DOMAIN_ENTITIES_TEMPLATE, {"find_integration": domain}
         )
-        if not isinstance(data, dict):
+        if not isinstance(data, list):
             raise HomeAssistantError("Unexpected response while fetching domain snapshot")
-        entities = data.get("entities", [])
-        devices = data.get("devices", [])
-        if not isinstance(entities, list) or not isinstance(devices, list):
-            raise HomeAssistantError("Unexpected template payload structure")
-        return {"entities": entities, "devices": devices}
+        devices: List[Dict[str, Any]] = []
+        for item in data:
+            if isinstance(item, dict):
+                devices.append(item)
+        return devices
 
 
 __all__ = [

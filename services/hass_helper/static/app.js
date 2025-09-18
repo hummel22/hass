@@ -101,6 +101,22 @@ async function fetchJson(url, options = {}) {
   return response.text();
 }
 
+function formatMeasurement(entity) {
+  if (!entity) return "";
+  const value = entity.state;
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  const attributes = entity.attributes || {};
+  const unit =
+    attributes.unit_of_measurement ??
+    attributes.unit ??
+    attributes.measurement ??
+    attributes.native_unit_of_measurement;
+  const valueText = typeof value === "number" ? String(value) : `${value}`;
+  return unit ? `${valueText} ${unit}` : valueText;
+}
+
 function renderSelectedDomains() {
   const tbody = document.querySelector("#domains-table tbody");
   if (!tbody) return;
@@ -192,8 +208,11 @@ function renderWhitelist() {
 function renderEntities() {
   const entityBody = document.querySelector("#entities-table tbody");
   const entityCount = document.getElementById("entity-count");
-  const deviceBody = document.querySelector("#devices-table tbody");
-  const deviceCount = document.getElementById("device-count");
+  const deviceLookup = new Map();
+  state.devices.forEach((device) => {
+    if (!device || !device.id) return;
+    deviceLookup.set(device.id, device);
+  });
 
   if (entityBody) {
     entityBody.innerHTML = "";
@@ -204,13 +223,20 @@ function renderEntities() {
     } else {
       state.entities.forEach((entity) => {
         const row = document.createElement("tr");
+        const device = deviceLookup.get(entity.device_id ?? "") || null;
+        const deviceLabel =
+          (device?.name_by_user || device?.name || device?.id || entity.device_id || "");
+        const integrationLabel =
+          entity.integration_id || device?.integration_id || "";
+        const areaLabel = entity.area_id || device?.area_id || "";
+        const measurementLabel = formatMeasurement(entity);
         row.innerHTML = `
+          <td data-label="Device">${deviceLabel}</td>
           <td data-label="Entity ID">${entity.entity_id}</td>
+          <td data-label="Integration">${integrationLabel}</td>
           <td data-label="Name">${entity.name || entity.original_name || ""}</td>
-          <td data-label="State">${entity.state ?? ""}</td>
-          <td data-label="Device ID">${entity.device_id ?? ""}</td>
-          <td data-label="Area">${entity.area_id ?? ""}</td>
-          <td data-label="Integration">${entity.integration_id ?? ""}</td>
+          <td data-label="Measurement">${measurementLabel}</td>
+          <td data-label="Area">${areaLabel}</td>
         `;
         entityBody.appendChild(row);
       });
@@ -218,30 +244,6 @@ function renderEntities() {
   }
   if (entityCount) {
     entityCount.textContent = `${state.entities.length} entities`;
-  }
-
-  if (deviceBody) {
-    deviceBody.innerHTML = "";
-    if (!state.devices.length) {
-      const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="5" data-label="Message">No devices ingested yet.</td>';
-      deviceBody.appendChild(row);
-    } else {
-      state.devices.forEach((device) => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td data-label="Device ID">${device.id}</td>
-          <td data-label="Name">${device.name || device.name_by_user || ""}</td>
-          <td data-label="Manufacturer">${device.manufacturer || ""}</td>
-          <td data-label="Model">${device.model || ""}</td>
-          <td data-label="Area">${device.area_id || ""}</td>
-        `;
-        deviceBody.appendChild(row);
-      });
-    }
-  }
-  if (deviceCount) {
-    deviceCount.textContent = `${state.devices.length} devices`;
   }
 }
 

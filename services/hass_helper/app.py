@@ -173,7 +173,6 @@ async def remove_whitelist_entry(entity_id: str) -> WhitelistResponse:
 
 
 def _build_filtered_snapshot(
-    raw_entities: List[Dict[str, Any]],
     raw_devices: List[Dict[str, Any]],
     *,
     allowed_domains: set[str] | None = None,
@@ -187,73 +186,104 @@ def _build_filtered_snapshot(
             if entry.get("domain")
         }
 
-    filtered_entities: List[Dict[str, Any]] = []
-    seen_entities: set[str] = set()
-    for entry in raw_entities:
-        if not isinstance(entry, dict):
-            continue
-        entity_id = entry.get("entity_id")
-        if not entity_id or entity_id in seen_entities:
-            continue
-        integration_id = entry.get("integration_id") or entry.get("integration")
-        if not integration_id or (
-            allowed_domains and integration_id not in allowed_domains
-        ):
-            continue
-        device_id = entry.get("device_id")
-        if not repository.is_entity_allowed(
-            entity_id,
-            device_id,
-            blacklist=blacklist,
-            whitelist=whitelist,
-        ):
-            continue
-        attributes = entry.get("attributes")
-        if not isinstance(attributes, dict):
-            attributes = {}
-        filtered_entities.append(
-            {
-                "entity_id": entity_id,
-                "name": entry.get("name") or entry.get("original_name"),
-                "original_name": entry.get("original_name") or entry.get("name"),
-                "device_id": device_id,
-                "area_id": entry.get("area_id"),
-                "unique_id": entry.get("unique_id"),
-                "integration_id": integration_id,
-                "state": entry.get("state"),
-                "attributes": attributes,
-                "disabled_by": entry.get("disabled_by"),
-            }
-        )
-        seen_entities.add(entity_id)
-
     blacklist_devices = set(blacklist.get("devices", []))
-    allowed_device_ids = {
-        entity.get("device_id")
-        for entity in filtered_entities
-        if entity.get("device_id")
-    }
 
+    filtered_entities: List[Dict[str, Any]] = []
     filtered_devices: List[Dict[str, Any]] = []
+    seen_entities: set[str] = set()
     seen_devices: set[str] = set()
-    for device in raw_devices:
-        if not isinstance(device, dict):
-            continue
+
+    def _normalize_identifiers(values: Any) -> List[Any]:
+        result: List[Any] = []
+        if isinstance(values, list):
+            iterable = values
+        elif isinstance(values, (set, tuple)):
+            iterable = list(values)
+        else:
+            iterable = [values] if values else []
+        for item in iterable:
+            if isinstance(item, (set, tuple, list)):
+                result.append(list(item))
+            else:
+                result.append(item)
+        return result
+
+    devices_sorted = sorted(
+        [device for device in raw_devices if isinstance(device, dict)],
+        key=lambda item: (item.get("id") or "").lower(),
+    )
+
+    for device in devices_sorted:
         device_id = device.get("id")
-        if (
-            not device_id
-            or device_id in seen_devices
-            or device_id not in allowed_device_ids
-            or device_id in blacklist_devices
+        if not device_id or device_id in seen_devices:
+            continue
+
+        integration_id = device.get("integration_id") or device.get("integration")
+        if allowed_domains and (
+            not integration_id or integration_id not in allowed_domains
         ):
             continue
-        identifiers_raw = device.get("identifiers") or []
-        identifiers: List[Any] = []
-        for identifier in identifiers_raw:
-            if isinstance(identifier, (set, tuple, list)):
-                identifiers.append(list(identifier))
-            else:
-                identifiers.append(identifier)
+        if device_id in blacklist_devices:
+            continue
+
+        identifiers = _normalize_identifiers(device.get("identifiers") or [])
+
+        entity_records = []
+        entities = device.get("entities")
+        if not isinstance(entities, list):
+            entities = []
+
+        # Sort entities for stable ordering.
+        entities_sorted = sorted(
+            [entity for entity in entities if isinstance(entity, dict)],
+            key=lambda entry: (entry.get("entity_id") or "").lower(),
+        )
+
+        for entity in entities_sorted:
+            entity_id = entity.get("entity_id")
+            if not entity_id or entity_id in seen_entities:
+                continue
+            entity_integration = (
+                entity.get("integration_id")
+                or entity.get("integration")
+                or integration_id
+            )
+            if allowed_domains and (
+                not entity_integration or entity_integration not in allowed_domains
+            ):
+                continue
+            device_ref = entity.get("device_id") or device_id
+            if not repository.is_entity_allowed(
+                entity_id,
+                device_ref,
+                blacklist=blacklist,
+                whitelist=whitelist,
+            ):
+                continue
+
+            attributes = entity.get("attributes")
+            if not isinstance(attributes, dict):
+                attributes = {}
+
+            record = {
+                "entity_id": entity_id,
+                "name": entity.get("name") or entity.get("original_name"),
+                "original_name": entity.get("original_name") or entity.get("name"),
+                "device_id": device_ref,
+                "area_id": entity.get("area_id") or device.get("area_id"),
+                "unique_id": entity.get("unique_id"),
+                "integration_id": entity_integration,
+                "state": entity.get("state"),
+                "attributes": attributes,
+                "disabled_by": entity.get("disabled_by"),
+            }
+            entity_records.append(record)
+            filtered_entities.append(record)
+            seen_entities.add(entity_id)
+
+        if not entity_records:
+            continue
+
         filtered_devices.append(
             {
                 "id": device_id,
@@ -266,8 +296,8 @@ def _build_filtered_snapshot(
                 "area_id": device.get("area_id"),
                 "via_device_id": device.get("via_device_id"),
                 "identifiers": identifiers,
-                "integration_id": device.get("integration_id")
-                or device.get("integration"),
+                "integration_id": integration_id,
+                "entities": entity_records,
             }
         )
         seen_devices.add(device_id)
@@ -296,25 +326,84 @@ async def _ingest_entities() -> EntitiesResponse:
     try:
         snapshots = await asyncio.gather(
             *[
-                hass_client.fetch_domain_entities(domain)
+                hass_client.fetch_domain_devices(domain)
                 for domain in selected_domains
             ]
         )
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
 
-    raw_entities: List[Dict[str, Any]] = []
-    raw_devices: List[Dict[str, Any]] = []
-    for snapshot in snapshots:
-        entities = snapshot.get("entities", []) if isinstance(snapshot, dict) else []
-        devices = snapshot.get("devices", []) if isinstance(snapshot, dict) else []
-        raw_entities.extend([entry for entry in entities if isinstance(entry, dict)])
-        raw_devices.extend([entry for entry in devices if isinstance(entry, dict)])
+    device_map: Dict[str, Dict[str, Any]] = {}
+    for domain, devices in zip(selected_domains, snapshots):
+        if not isinstance(devices, list):
+            continue
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+            device_id = device.get("id")
+            if not device_id:
+                continue
 
-    repository.save_entities(raw_entities, raw_devices)
+            integration_id = (
+                device.get("integration_id")
+                or device.get("integration")
+                or domain
+            )
+
+            # Shallow copy scalar fields and normalise the entity list.
+            sanitized = {
+                key: value
+                for key, value in device.items()
+                if key != "entities"
+            }
+            sanitized["integration_id"] = integration_id
+
+            entities_raw = device.get("entities")
+            normalized_entities: List[Dict[str, Any]] = []
+            if isinstance(entities_raw, list):
+                for entity in entities_raw:
+                    if not isinstance(entity, dict):
+                        continue
+                    entity_record = dict(entity)
+                    if not entity_record.get("integration_id"):
+                        entity_record["integration_id"] = (
+                            entity_record.get("integration") or integration_id
+                        )
+                    if not entity_record.get("device_id"):
+                        entity_record["device_id"] = device_id
+                    normalized_entities.append(entity_record)
+            normalized_entities.sort(
+                key=lambda entry: (entry.get("entity_id") or "").lower()
+            )
+
+            existing = device_map.get(device_id)
+            if existing:
+                if not existing.get("integration_id"):
+                    existing["integration_id"] = integration_id
+                existing_entities = existing.setdefault("entities", [])
+                seen_entity_ids = {
+                    entry.get("entity_id")
+                    for entry in existing_entities
+                    if isinstance(entry, dict)
+                }
+                for entity in normalized_entities:
+                    entity_id = entity.get("entity_id")
+                    if not entity_id or entity_id in seen_entity_ids:
+                        continue
+                    existing_entities.append(entity)
+                    seen_entity_ids.add(entity_id)
+            else:
+                sanitized["entities"] = normalized_entities
+                device_map[device_id] = sanitized
+
+    raw_devices = [
+        device_map[key]
+        for key in sorted(device_map.keys(), key=lambda item: str(item).lower())
+    ]
+
+    repository.save_entities(raw_devices)
 
     filtered = _build_filtered_snapshot(
-        raw_entities,
         raw_devices,
         allowed_domains=set(selected_domains),
     )
@@ -332,7 +421,6 @@ async def _ingest_entities() -> EntitiesResponse:
 @app.get("/api/entities", response_model=EntitiesResponse)
 async def get_entities() -> EntitiesResponse:
     data = repository.get_entities()
-    raw_entities = data.get("entities", []) if isinstance(data, dict) else []
     raw_devices = data.get("devices", []) if isinstance(data, dict) else []
     allowed_domains = {
         entry.get("domain")
@@ -340,7 +428,6 @@ async def get_entities() -> EntitiesResponse:
         if entry.get("domain")
     }
     return _build_filtered_snapshot(
-        list(raw_entities),
         list(raw_devices),
         allowed_domains=set(allowed_domains),
     )
