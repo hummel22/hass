@@ -148,7 +148,7 @@ class HomeAssistantClient:
         return data
 
     async def fetch_domains(self) -> List[str]:
-        """Return a sorted list of available domains derived from entity states."""
+        """Return a sorted list of available integrations derived from device identifiers."""
 
         data = await self.render_template(DOMAIN_LIST_TEMPLATE)
         if not isinstance(data, list):
@@ -156,7 +156,7 @@ class HomeAssistantClient:
         return [domain for domain in data if isinstance(domain, str)]
 
     async def fetch_domain_snapshot(self, domains: Iterable[str]) -> Dict[str, Any]:
-        """Return entity and device metadata for the provided domains."""
+        """Return entity and device metadata for the provided integrations."""
 
         domains = [domain for domain in domains if domain]
         if not domains:

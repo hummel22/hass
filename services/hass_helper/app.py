@@ -212,8 +212,8 @@ async def _ingest_entities() -> EntitiesResponse:
         entity_id = entry.get("entity_id")
         if not entity_id:
             continue
-        domain = entity_id.split(".")[0]
-        if domain not in selected_domains:
+        integration_id = entry.get("integration_id") or entry.get("integration")
+        if not integration_id or integration_id not in selected_domains:
             continue
         device_id = entry.get("device_id")
         if not repository.is_entity_allowed(
@@ -234,7 +234,7 @@ async def _ingest_entities() -> EntitiesResponse:
                 "device_id": device_id,
                 "area_id": entry.get("area_id"),
                 "unique_id": entry.get("unique_id"),
-                "integration_id": None,
+                "integration_id": integration_id,
                 "state": entry.get("state"),
                 "attributes": attributes,
                 "disabled_by": entry.get("disabled_by"),
@@ -270,6 +270,7 @@ async def _ingest_entities() -> EntitiesResponse:
                 "area_id": device.get("area_id"),
                 "via_device_id": device.get("via_device_id"),
                 "identifiers": identifiers,
+                "integration_id": device.get("integration_id") or device.get("integration"),
             }
         )
 
