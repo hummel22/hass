@@ -1,4 +1,6 @@
-const statusEl = document.getElementById("status");
+const toastEl = document.getElementById("toast");
+const toastMessageEl = toastEl?.querySelector(".toast-message") ?? null;
+const toastCloseEl = toastEl?.querySelector(".toast-close") ?? null;
 let statusTimer;
 
 const state = {
@@ -10,24 +12,69 @@ const state = {
   devices: [],
 };
 
+function setButtonLoading(button, loadingText = "Working…") {
+  if (!(button instanceof HTMLButtonElement)) return;
+  if (!button.dataset.originalLabel) {
+    button.dataset.originalLabel = button.textContent ?? "";
+  }
+  button.textContent = loadingText;
+  button.disabled = true;
+  button.classList.add("loading");
+}
+
+function clearButtonLoading(button) {
+  if (!(button instanceof HTMLButtonElement)) return;
+  const originalLabel = button.dataset.originalLabel ?? "";
+  button.textContent = originalLabel;
+  button.disabled = false;
+  button.classList.remove("loading");
+  delete button.dataset.originalLabel;
+}
+
+async function withButtonLoading(button, action, loadingText = "Working…") {
+  const target = button instanceof HTMLButtonElement ? button : null;
+  if (target) {
+    setButtonLoading(target, loadingText);
+  }
+  try {
+    return await action();
+  } finally {
+    if (target) {
+      clearButtonLoading(target);
+    }
+  }
+}
+
 function showStatus(message, type = "info", timeout = 5000) {
-  if (!statusEl) return;
+  if (!toastEl || !toastMessageEl) return;
   clearTimeout(statusTimer);
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", type === "error");
-  statusEl.hidden = false;
+  toastEl.setAttribute("role", type === "error" ? "alert" : "status");
+  toastEl.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+  toastMessageEl.textContent = message;
+  toastEl.classList.toggle("toast--error", type === "error");
+  toastEl.classList.toggle("toast--info", type !== "error");
+  toastEl.hidden = false;
+  if (type === "error") {
+    timeout = 0;
+  }
   if (timeout > 0) {
     statusTimer = setTimeout(() => {
-      statusEl.hidden = true;
+      hideStatus();
     }, timeout);
   }
 }
 
 function hideStatus() {
-  if (!statusEl) return;
+  if (!toastEl || !toastMessageEl) return;
   clearTimeout(statusTimer);
-  statusEl.hidden = true;
+  toastEl.hidden = true;
+  toastMessageEl.textContent = "";
+  toastEl.classList.remove("toast--error", "toast--info");
+  toastEl.setAttribute("role", "status");
+  toastEl.setAttribute("aria-live", "polite");
 }
+
+toastCloseEl?.addEventListener("click", () => hideStatus());
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -363,10 +410,11 @@ async function removeWhitelistEntry(id) {
 }
 
 function setupEventHandlers() {
-  document.getElementById("add-domain")?.addEventListener("click", async () => {
+  document.getElementById("add-domain")?.addEventListener("click", async (event) => {
     const modal = document.getElementById("domain-modal");
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
     try {
-      await fetchAvailableDomains();
+      await withButtonLoading(button, () => fetchAvailableDomains(), "Loading…");
       if (modal) {
         modal.classList.add("active");
         modal.setAttribute("aria-hidden", "false");
@@ -384,16 +432,17 @@ function setupEventHandlers() {
     }
   });
 
-  document.getElementById("confirm-domain")?.addEventListener("click", async () => {
+  document.getElementById("confirm-domain")?.addEventListener("click", async (event) => {
     const select = document.getElementById("domain-select");
     if (!(select instanceof HTMLSelectElement)) return;
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
     const domain = select.value;
     if (!domain) {
       showStatus("Select a domain before adding.", "error", 4000);
       return;
     }
     try {
-      await addDomain(domain);
+      await withButtonLoading(button, () => addDomain(domain), "Adding…");
       const modal = document.getElementById("domain-modal");
       if (modal) {
         modal.classList.remove("active");
@@ -404,9 +453,12 @@ function setupEventHandlers() {
     }
   });
 
-  document.getElementById("refresh-domains")?.addEventListener("click", async () => {
-    await loadSelectedDomains();
-    showStatus("Domains refreshed.");
+  document.getElementById("refresh-domains")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    await withButtonLoading(button, async () => {
+      await loadSelectedDomains();
+      showStatus("Domains refreshed.");
+    }, "Refreshing…");
   });
 
   document.querySelector("#domains-table tbody")?.addEventListener("click", (event) => {
@@ -414,12 +466,12 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-domain") {
       const domain = target.dataset.id;
       if (domain) {
-        removeDomain(domain);
+        void withButtonLoading(target, () => removeDomain(domain), "Removing…");
       }
     }
   });
 
-  document.getElementById("blacklist-form")?.addEventListener("submit", (event) => {
+  document.getElementById("blacklist-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -430,10 +482,14 @@ function setupEventHandlers() {
       showStatus("Provide both target type and ID.", "error", 4000);
       return;
     }
-    addBlacklistEntry(type.toString(), id).then(() => form.reset());
+    const submitButton = form.querySelector("button[type='submit']");
+    await withButtonLoading(submitButton, async () => {
+      await addBlacklistEntry(type.toString(), id);
+      form.reset();
+    }, "Saving…");
   });
 
-  document.getElementById("whitelist-form")?.addEventListener("submit", (event) => {
+  document.getElementById("whitelist-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -443,7 +499,11 @@ function setupEventHandlers() {
       showStatus("Provide an entity ID.", "error", 4000);
       return;
     }
-    addWhitelistEntry(id).then(() => form.reset());
+    const submitButton = form.querySelector("button[type='submit']");
+    await withButtonLoading(submitButton, async () => {
+      await addWhitelistEntry(id);
+      form.reset();
+    }, "Saving…");
   });
 
   document.querySelector("#blacklist-entities tbody")?.addEventListener("click", (event) => {
@@ -451,7 +511,7 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-blacklist") {
       const id = target.dataset.id;
       if (id) {
-        removeBlacklistEntry("entity", id);
+        void withButtonLoading(target, () => removeBlacklistEntry("entity", id), "Removing…");
       }
     }
   });
@@ -461,7 +521,7 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-blacklist") {
       const id = target.dataset.id;
       if (id) {
-        removeBlacklistEntry("device", id);
+        void withButtonLoading(target, () => removeBlacklistEntry("device", id), "Removing…");
       }
     }
   });
@@ -471,13 +531,19 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-whitelist") {
       const id = target.dataset.id;
       if (id) {
-        removeWhitelistEntry(id);
+        void withButtonLoading(target, () => removeWhitelistEntry(id), "Removing…");
       }
     }
   });
 
-  document.getElementById("load-entities")?.addEventListener("click", () => loadEntities(true));
-  document.getElementById("ingest-entities")?.addEventListener("click", () => ingestEntities());
+  document.getElementById("load-entities")?.addEventListener("click", (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    void withButtonLoading(button, () => loadEntities(true), "Loading…");
+  });
+  document.getElementById("ingest-entities")?.addEventListener("click", (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    void withButtonLoading(button, () => ingestEntities(), "Refreshing…");
+  });
 }
 
 async function init() {

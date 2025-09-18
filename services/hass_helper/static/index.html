@@ -12,11 +12,20 @@
       <p class="subtitle">Manage integrations, entity ingest, and curation lists.</p>
     </header>
     <main>
-      <div id="status" class="status-bar" hidden></div>
-      <nav class="tabs">
-        <button class="tab-button active" data-target="entity-tab">Entity</button>
-      </nav>
-      <section id="entity-tab" class="tab-content active">
+      <div
+        id="toast"
+        class="toast"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <span class="toast-message"></span>
+        <button type="button" class="toast-close" aria-label="Dismiss notification">
+          &times;
+        </button>
+      </div>
+      <section id="entity-tab">
         <article class="panel">
           <div class="panel-header">
             <h2>Domains</h2>
