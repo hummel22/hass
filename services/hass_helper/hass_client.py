@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -23,7 +23,7 @@ def _load_template(name: str) -> str:
 
 
 DOMAIN_LIST_TEMPLATE = _load_template("domain_list.j2")
-DOMAIN_SNAPSHOT_TEMPLATE = _load_template("domain_snapshot.j2")
+DOMAIN_ENTITIES_TEMPLATE = _load_template("domain_entities.j2")
 
 
 class HomeAssistantError(RuntimeError):
@@ -162,14 +162,14 @@ class HomeAssistantClient:
             raise HomeAssistantError("Unexpected response while fetching domains")
         return [domain for domain in data if isinstance(domain, str)]
 
-    async def fetch_domain_snapshot(self, domains: Iterable[str]) -> Dict[str, Any]:
-        """Return entity and device metadata for the provided integrations."""
+    async def fetch_domain_entities(self, domain: str) -> Dict[str, Any]:
+        """Return entity and device metadata for a single integration/domain."""
 
-        domains = [domain for domain in domains if domain]
-        if not domains:
+        domain = (domain or "").strip()
+        if not domain:
             return {"entities": [], "devices": []}
         data = await self.render_template(
-            DOMAIN_SNAPSHOT_TEMPLATE, {"domains": sorted(set(domains))}
+            DOMAIN_ENTITIES_TEMPLATE, {"find_integration": domain}
         )
         if not isinstance(data, dict):
             raise HomeAssistantError("Unexpected response while fetching domain snapshot")

@@ -172,48 +172,33 @@ async def remove_whitelist_entry(entity_id: str) -> WhitelistResponse:
     return WhitelistResponse(**data)
 
 
-async def _ingest_entities() -> EntitiesResponse:
-    selected = repository.get_selected_domains()
-    selected_domains = {entry.get("domain") for entry in selected if entry.get("domain")}
-    if not selected_domains:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No domains have been selected for ingestion.",
-        )
-
-    ensure_hass_configured()
-
-    try:
-        snapshot = await hass_client.fetch_domain_snapshot(selected_domains)
-    except HomeAssistantError as exc:
-        raise translate_error(exc) from exc
-
-    logger.info(
-        "Starting entity ingest",
-        extra={"domains": sorted(selected_domains)},
-    )
-
+def _build_filtered_snapshot(
+    raw_entities: List[Dict[str, Any]],
+    raw_devices: List[Dict[str, Any]],
+    *,
+    allowed_domains: set[str] | None = None,
+) -> EntitiesResponse:
     blacklist = repository.get_blacklist()
     whitelist = repository.get_whitelist()
+    if allowed_domains is None:
+        allowed_domains = {
+            entry.get("domain")
+            for entry in repository.get_selected_domains()
+            if entry.get("domain")
+        }
 
-    raw_entities: List[Dict[str, Any]] = [
-        entry
-        for entry in snapshot.get("entities", [])
-        if isinstance(entry, dict)
-    ]
-    raw_devices: List[Dict[str, Any]] = [
-        entry
-        for entry in snapshot.get("devices", [])
-        if isinstance(entry, dict)
-    ]
-
-    entities: List[Dict[str, object]] = []
+    filtered_entities: List[Dict[str, Any]] = []
+    seen_entities: set[str] = set()
     for entry in raw_entities:
+        if not isinstance(entry, dict):
+            continue
         entity_id = entry.get("entity_id")
-        if not entity_id:
+        if not entity_id or entity_id in seen_entities:
             continue
         integration_id = entry.get("integration_id") or entry.get("integration")
-        if not integration_id or integration_id not in selected_domains:
+        if not integration_id or (
+            allowed_domains and integration_id not in allowed_domains
+        ):
             continue
         device_id = entry.get("device_id")
         if not repository.is_entity_allowed(
@@ -226,7 +211,7 @@ async def _ingest_entities() -> EntitiesResponse:
         attributes = entry.get("attributes")
         if not isinstance(attributes, dict):
             attributes = {}
-        entities.append(
+        filtered_entities.append(
             {
                 "entity_id": entity_id,
                 "name": entry.get("name") or entry.get("original_name"),
@@ -240,25 +225,36 @@ async def _ingest_entities() -> EntitiesResponse:
                 "disabled_by": entry.get("disabled_by"),
             }
         )
+        seen_entities.add(entity_id)
 
-    allowed_devices = {entity["device_id"] for entity in entities if entity.get("device_id")}
     blacklist_devices = set(blacklist.get("devices", []))
+    allowed_device_ids = {
+        entity.get("device_id")
+        for entity in filtered_entities
+        if entity.get("device_id")
+    }
 
-    devices: List[Dict[str, object]] = []
+    filtered_devices: List[Dict[str, Any]] = []
+    seen_devices: set[str] = set()
     for device in raw_devices:
-        device_id = device.get("id")
-        if not device_id or device_id not in allowed_devices:
+        if not isinstance(device, dict):
             continue
-        if device_id in blacklist_devices:
+        device_id = device.get("id")
+        if (
+            not device_id
+            or device_id in seen_devices
+            or device_id not in allowed_device_ids
+            or device_id in blacklist_devices
+        ):
             continue
         identifiers_raw = device.get("identifiers") or []
-        identifiers: List[object] = []
+        identifiers: List[Any] = []
         for identifier in identifiers_raw:
-            if isinstance(identifier, (set, tuple)):
+            if isinstance(identifier, (set, tuple, list)):
                 identifiers.append(list(identifier))
             else:
                 identifiers.append(identifier)
-        devices.append(
+        filtered_devices.append(
             {
                 "id": device_id,
                 "name": device.get("name"),
@@ -270,22 +266,84 @@ async def _ingest_entities() -> EntitiesResponse:
                 "area_id": device.get("area_id"),
                 "via_device_id": device.get("via_device_id"),
                 "identifiers": identifiers,
-                "integration_id": device.get("integration_id") or device.get("integration"),
+                "integration_id": device.get("integration_id")
+                or device.get("integration"),
             }
         )
+        seen_devices.add(device_id)
 
-    repository.save_entities(entities, devices)
+    return EntitiesResponse(entities=filtered_entities, devices=filtered_devices)
+
+
+async def _ingest_entities() -> EntitiesResponse:
+    selected = repository.get_selected_domains()
+    selected_domains = sorted(
+        {entry.get("domain") for entry in selected if entry.get("domain")}
+    )
+    if not selected_domains:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No domains have been selected for ingestion.",
+        )
+
+    ensure_hass_configured()
+
+    logger.info(
+        "Starting entity ingest",
+        extra={"domains": selected_domains},
+    )
+
+    try:
+        snapshots = await asyncio.gather(
+            *[
+                hass_client.fetch_domain_entities(domain)
+                for domain in selected_domains
+            ]
+        )
+    except HomeAssistantError as exc:
+        raise translate_error(exc) from exc
+
+    raw_entities: List[Dict[str, Any]] = []
+    raw_devices: List[Dict[str, Any]] = []
+    for snapshot in snapshots:
+        entities = snapshot.get("entities", []) if isinstance(snapshot, dict) else []
+        devices = snapshot.get("devices", []) if isinstance(snapshot, dict) else []
+        raw_entities.extend([entry for entry in entities if isinstance(entry, dict)])
+        raw_devices.extend([entry for entry in devices if isinstance(entry, dict)])
+
+    repository.save_entities(raw_entities, raw_devices)
+
+    filtered = _build_filtered_snapshot(
+        raw_entities,
+        raw_devices,
+        allowed_domains=set(selected_domains),
+    )
+
     logger.info(
         "Entity ingest completed",
-        extra={"entity_count": len(entities), "device_count": len(devices)},
+        extra={
+            "entity_count": len(filtered.entities),
+            "device_count": len(filtered.devices),
+        },
     )
-    return EntitiesResponse(entities=entities, devices=devices)
+    return filtered
 
 
 @app.get("/api/entities", response_model=EntitiesResponse)
 async def get_entities() -> EntitiesResponse:
     data = repository.get_entities()
-    return EntitiesResponse(entities=data.get("entities", []), devices=data.get("devices", []))
+    raw_entities = data.get("entities", []) if isinstance(data, dict) else []
+    raw_devices = data.get("devices", []) if isinstance(data, dict) else []
+    allowed_domains = {
+        entry.get("domain")
+        for entry in repository.get_selected_domains()
+        if entry.get("domain")
+    }
+    return _build_filtered_snapshot(
+        list(raw_entities),
+        list(raw_devices),
+        allowed_domains=set(allowed_domains),
+    )
 
 
 @app.post("/api/entities/ingest", response_model=EntitiesResponse)
