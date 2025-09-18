@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HASS Helper</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Home Assistant Entity Helper</h1>
+      <p class="subtitle">Manage integrations, entity ingest, and curation lists.</p>
+    </header>
+    <main>
+      <div id="status" class="status-bar" hidden></div>
+      <nav class="tabs">
+        <button class="tab-button active" data-target="entity-tab">Entity</button>
+      </nav>
+      <section id="entity-tab" class="tab-content active">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Integrations</h2>
+            <div class="panel-actions">
+              <button id="refresh-integrations" class="secondary">Refresh</button>
+              <button id="add-integration" class="primary">Add integration</button>
+            </div>
+          </div>
+          <p>
+            The integrations listed below are used when ingesting entities and devices.
+            Add additional integrations to include their entities in the export.
+          </p>
+          <table id="integrations-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Domain</th>
+                <th>Entry ID</th>
+                <th class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Blacklist</h2>
+          </div>
+          <p>
+            Entities and devices in the blacklist will be excluded from ingested data. Whitelisted
+            entities always override blacklist entries.
+          </p>
+          <form id="blacklist-form" class="inline">
+            <select name="targetType" aria-label="Blacklist target type">
+              <option value="entity">Entity</option>
+              <option value="device">Device</option>
+            </select>
+            <input
+              type="text"
+              name="targetId"
+              placeholder="Entity or device ID"
+              aria-label="Blacklist target ID"
+              required
+            />
+            <button type="submit" class="primary">Add to blacklist</button>
+          </form>
+          <div class="grid two">
+            <div>
+              <h3>Entity IDs</h3>
+              <table id="blacklist-entities">
+                <thead>
+                  <tr>
+                    <th>Entity ID</th>
+                    <th class="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div>
+              <h3>Device IDs</h3>
+              <table id="blacklist-devices">
+                <thead>
+                  <tr>
+                    <th>Device ID</th>
+                    <th class="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Whitelist</h2>
+          </div>
+          <p>
+            Whitelist specific entities to include them even if they are otherwise filtered or
+            blacklisted by device.
+          </p>
+          <form id="whitelist-form" class="inline">
+            <input
+              type="text"
+              name="entityId"
+              placeholder="Entity ID"
+              aria-label="Whitelist entity ID"
+              required
+            />
+            <button type="submit" class="primary">Add to whitelist</button>
+          </form>
+          <table id="whitelist-table">
+            <thead>
+              <tr>
+                <th>Entity ID</th>
+                <th class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Entities</h2>
+            <div class="panel-actions">
+              <button id="load-entities" class="secondary">Load stored data</button>
+              <button id="ingest-entities" class="primary">Refresh from Home Assistant</button>
+            </div>
+          </div>
+          <p>
+            The table below reflects the most recent ingest results filtered by the integration and
+            curation settings above.
+          </p>
+          <small class="muted" id="entity-count"></small>
+          <table id="entities-table">
+            <thead>
+              <tr>
+                <th>Entity ID</th>
+                <th>Name</th>
+                <th>State</th>
+                <th>Device ID</th>
+                <th>Area</th>
+                <th>Integration</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <h3>Devices</h3>
+          <small class="muted" id="device-count"></small>
+          <table id="devices-table">
+            <thead>
+              <tr>
+                <th>Device ID</th>
+                <th>Name</th>
+                <th>Manufacturer</th>
+                <th>Model</th>
+                <th>Area</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+
+    <div class="modal" id="integration-modal" role="dialog" aria-modal="true" aria-hidden="true">
+      <div class="modal-content">
+        <h3>Select an integration</h3>
+        <p>Select a Home Assistant integration to add to the ingest list.</p>
+        <label for="integration-select" class="muted">Available integrations</label>
+        <select id="integration-select"></select>
+        <div class="modal-actions">
+          <button id="cancel-integration" class="secondary">Cancel</button>
+          <button id="confirm-integration" class="primary">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
