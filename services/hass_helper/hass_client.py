@@ -139,12 +139,30 @@ class HomeAssistantClient:
         return data
 
     async def fetch_device_registry(self) -> List[Dict[str, Any]]:
+        """Return the list of registered devices.
+
+        Some Home Assistant deployments do not expose the device registry REST
+        endpoint. In that scenario we treat the registry as empty instead of
+        failing the ingest process.
+        """
+
         try:
             data = await self._request("GET", "/api/config/device_registry/list")
         except HomeAssistantError as exc:
             if exc.status_code not in {404, 405}:
                 raise
-            data = await self._request("POST", "/api/config/device_registry/list", json={})
+            try:
+                data = await self._request(
+                    "POST", "/api/config/device_registry/list", json={}
+                )
+            except HomeAssistantError as post_exc:
+                if post_exc.status_code not in {404, 405}:
+                    raise
+                self._logger.debug(
+                    "device_registry_unavailable",
+                    extra={"status_code": post_exc.status_code},
+                )
+                return []
         if not isinstance(data, list):
             raise HomeAssistantError("Unexpected response while fetching device registry")
         return data
