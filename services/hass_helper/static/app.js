@@ -109,6 +109,7 @@ function formatMeasurement(entity) {
   }
   const attributes = entity.attributes || {};
   const unit =
+    entity.unit ??
     attributes.unit_of_measurement ??
     attributes.unit ??
     attributes.measurement ??
@@ -210,8 +211,10 @@ function renderEntities() {
   const entityCount = document.getElementById("entity-count");
   const deviceLookup = new Map();
   state.devices.forEach((device) => {
-    if (!device || !device.id) return;
-    deviceLookup.set(device.id, device);
+    if (!device) return;
+    const key = device.id ?? device.device_id;
+    if (!key) return;
+    deviceLookup.set(key, device);
   });
 
   if (entityBody) {
@@ -225,10 +228,15 @@ function renderEntities() {
         const row = document.createElement("tr");
         const device = deviceLookup.get(entity.device_id ?? "") || null;
         const deviceLabel =
-          (device?.name_by_user || device?.name || device?.id || entity.device_id || "");
+          device?.name_by_user ||
+          device?.name ||
+          device?.id ||
+          device?.device_id ||
+          entity.device_id ||
+          "";
         const integrationLabel =
           entity.integration_id || device?.integration_id || "";
-        const areaLabel = entity.area_id || device?.area_id || "";
+        const areaLabel = entity.area_id || device?.area_id || device?.area || "";
         const measurementLabel = formatMeasurement(entity);
         row.innerHTML = `
           <td data-label="Device">${deviceLabel}</td>

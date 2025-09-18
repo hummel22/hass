@@ -210,11 +210,13 @@ def _build_filtered_snapshot(
 
     devices_sorted = sorted(
         [device for device in raw_devices if isinstance(device, dict)],
-        key=lambda item: (item.get("id") or "").lower(),
+        key=lambda item: str(
+            item.get("id") or item.get("device_id") or ""
+        ).lower(),
     )
 
     for device in devices_sorted:
-        device_id = device.get("id")
+        device_id = device.get("id") or device.get("device_id")
         if not device_id or device_id in seen_devices:
             continue
 
@@ -262,16 +264,41 @@ def _build_filtered_snapshot(
                 continue
 
             attributes = entity.get("attributes")
-            if not isinstance(attributes, dict):
+            if isinstance(attributes, dict):
+                attributes = dict(attributes)
+            else:
                 attributes = {}
+            unit_value = (
+                entity.get("unit")
+                or entity.get("unit_of_measurement")
+                or attributes.get("unit_of_measurement")
+            )
+            if unit_value is not None:
+                attributes.setdefault("unit_of_measurement", unit_value)
+            for attr_key in ("device_class", "state_class", "icon", "friendly_name"):
+                attr_val = entity.get(attr_key) or attributes.get(attr_key)
+                if attr_val is not None:
+                    attributes.setdefault(attr_key, attr_val)
+            if entity.get("last_changed") is not None:
+                attributes.setdefault("last_changed", entity.get("last_changed"))
 
             record = {
                 "entity_id": entity_id,
-                "name": entity.get("name") or entity.get("original_name"),
-                "original_name": entity.get("original_name") or entity.get("name"),
+                "name": entity.get("name")
+                or entity.get("original_name")
+                or entity.get("friendly_name")
+                or attributes.get("friendly_name"),
+                "original_name": entity.get("original_name")
+                or entity.get("name")
+                or entity.get("friendly_name")
+                or attributes.get("friendly_name"),
                 "device_id": device_ref,
-                "area_id": entity.get("area_id") or device.get("area_id"),
-                "unique_id": entity.get("unique_id"),
+                "area_id": entity.get("area_id")
+                or entity.get("area")
+                or device.get("area_id")
+                or device.get("area"),
+                "unique_id": entity.get("unique_id")
+                or entity.get("object_id"),
                 "integration_id": entity_integration,
                 "state": entity.get("state"),
                 "attributes": attributes,
@@ -340,7 +367,7 @@ async def _ingest_entities() -> EntitiesResponse:
         for device in devices:
             if not isinstance(device, dict):
                 continue
-            device_id = device.get("id")
+            device_id = device.get("id") or device.get("device_id")
             if not device_id:
                 continue
 
@@ -350,13 +377,24 @@ async def _ingest_entities() -> EntitiesResponse:
                 or domain
             )
 
-            # Shallow copy scalar fields and normalise the entity list.
+            # Normalise device level fields into the structure we persist.
+            identifiers = device.get("identifiers")
+            if not isinstance(identifiers, list):
+                identifiers = []
+
             sanitized = {
-                key: value
-                for key, value in device.items()
-                if key != "entities"
+                "id": device_id,
+                "name": device.get("name"),
+                "name_by_user": device.get("name_by_user"),
+                "manufacturer": device.get("manufacturer"),
+                "model": device.get("model"),
+                "sw_version": device.get("sw_version"),
+                "configuration_url": device.get("configuration_url"),
+                "area_id": device.get("area_id") or device.get("area"),
+                "via_device_id": device.get("via_device_id"),
+                "identifiers": identifiers,
+                "integration_id": integration_id,
             }
-            sanitized["integration_id"] = integration_id
 
             entities_raw = device.get("entities")
             normalized_entities: List[Dict[str, Any]] = []
@@ -364,13 +402,50 @@ async def _ingest_entities() -> EntitiesResponse:
                 for entity in entities_raw:
                     if not isinstance(entity, dict):
                         continue
-                    entity_record = dict(entity)
-                    if not entity_record.get("integration_id"):
-                        entity_record["integration_id"] = (
-                            entity_record.get("integration") or integration_id
-                        )
-                    if not entity_record.get("device_id"):
-                        entity_record["device_id"] = device_id
+                    entity_id = entity.get("entity_id")
+                    if not entity_id:
+                        continue
+
+                    attributes = entity.get("attributes")
+                    if isinstance(attributes, dict):
+                        attributes = dict(attributes)
+                    else:
+                        attributes = {}
+
+                    def _ensure_attr(key: str, value: Any) -> None:
+                        if value is None:
+                            return
+                        attributes.setdefault(key, value)
+
+                    _ensure_attr("unit_of_measurement", entity.get("unit"))
+                    _ensure_attr("device_class", entity.get("device_class"))
+                    _ensure_attr("state_class", entity.get("state_class"))
+                    _ensure_attr("icon", entity.get("icon"))
+                    _ensure_attr("friendly_name", entity.get("friendly_name"))
+                    _ensure_attr("last_changed", entity.get("last_changed"))
+                    _ensure_attr("object_id", entity.get("object_id"))
+
+                    entity_record = {
+                        "entity_id": entity_id,
+                        "name": entity.get("name")
+                        or entity.get("friendly_name")
+                        or attributes.get("friendly_name"),
+                        "original_name": entity.get("original_name")
+                        or entity.get("friendly_name")
+                        or attributes.get("friendly_name"),
+                        "device_id": entity.get("device_id") or device_id,
+                        "area_id": entity.get("area_id")
+                        or entity.get("area")
+                        or sanitized.get("area_id"),
+                        "unique_id": entity.get("unique_id")
+                        or entity.get("object_id"),
+                        "integration_id": entity.get("integration_id")
+                        or entity.get("integration")
+                        or integration_id,
+                        "state": entity.get("state"),
+                        "attributes": attributes,
+                        "disabled_by": entity.get("disabled_by"),
+                    }
                     normalized_entities.append(entity_record)
             normalized_entities.sort(
                 key=lambda entry: (entry.get("entity_id") or "").lower()
