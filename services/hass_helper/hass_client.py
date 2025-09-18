@@ -82,36 +82,43 @@ class HomeAssistantClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         client = await self._get_client()
         start = time.perf_counter()
+        template_expr: Optional[str] = None
+        if path == "/api/template":
+            json_payload = kwargs.get("json")
+            if isinstance(json_payload, dict):
+                template_value = json_payload.get("template")
+                if isinstance(template_value, str):
+                    template_expr = template_value
         try:
             response = await client.request(method, path, **kwargs)
             duration_ms = (time.perf_counter() - start) * 1000
-            self._logger.debug(
-                "home_assistant_http_call",
-                extra={
-                    "method": method,
-                    "path": path,
-                    "url": str(response.request.url),
-                    "status_code": response.status_code,
-                    "duration_ms": round(duration_ms, 3),
-                },
-            )
+            extra = {
+                "method": method,
+                "path": path,
+                "url": str(response.request.url),
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 3),
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             response = exc.response
             request = response.request if response is not None else None
-            self._logger.debug(
-                "home_assistant_http_call",
-                extra={
-                    "method": method,
-                    "path": path,
-                    "url": str(request.url) if request else path,
-                    "status_code": response.status_code if response else None,
-                    "reason": response.reason_phrase if response else None,
-                    "duration_ms": round(duration_ms, 3),
-                    "error": True,
-                },
-            )
+            extra = {
+                "method": method,
+                "path": path,
+                "url": str(request.url) if request else path,
+                "status_code": response.status_code if response else None,
+                "reason": response.reason_phrase if response else None,
+                "duration_ms": round(duration_ms, 3),
+                "error": True,
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             raise HomeAssistantError(
                 f"Home Assistant request failed: {exc.response.status_code} {exc.response.reason_phrase}",
                 status_code=exc.response.status_code,
@@ -120,17 +127,17 @@ class HomeAssistantClient:
             duration_ms = (time.perf_counter() - start) * 1000
             request = getattr(exc, "request", None)
             url = str(request.url) if request else path
-            self._logger.debug(
-                "home_assistant_http_call",
-                extra={
-                    "method": method,
-                    "path": path,
-                    "url": url,
-                    "duration_ms": round(duration_ms, 3),
-                    "error": True,
-                    "exception": exc.__class__.__name__,
-                },
-            )
+            extra = {
+                "method": method,
+                "path": path,
+                "url": url,
+                "duration_ms": round(duration_ms, 3),
+                "error": True,
+                "exception": exc.__class__.__name__,
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             raise HomeAssistantError("Error communicating with Home Assistant") from exc
         if response.content:
             return response.json()
