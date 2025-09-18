@@ -80,23 +80,25 @@ async def index() -> HTMLResponse:
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
+def _format_domain_title(domain: str) -> str:
+    cleaned = domain.replace("_", " ").replace("-", " ")
+    if cleaned.upper() in {"MQTT", "ZIGBEE", "Z-WAVE", "Z WAVE", "ZIGBEE2MQTT"}:
+        return cleaned.upper()
+    return cleaned.title()
+
+
 @app.get("/api/integrations/available", response_model=List[DomainEntry])
 async def available_integrations() -> List[DomainEntry]:
     ensure_hass_configured()
     try:
-        integrations = await hass_client.fetch_integrations()
+        domains = await hass_client.fetch_domains()
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
-    domains: Dict[str, DomainEntry] = {}
-    for entry in integrations:
-        domain = entry.get("domain")
-        if not domain:
-            continue
-        if domain not in domains:
-            domains[domain] = DomainEntry(domain=domain, title=entry.get("title"))
-    return sorted(
-        domains.values(), key=lambda item: (item.title or item.domain or "").lower()
-    )
+    entries = [
+        DomainEntry(domain=domain, title=_format_domain_title(domain))
+        for domain in domains
+    ]
+    return sorted(entries, key=lambda item: (item.title or item.domain or "").lower())
 
 
 @app.get("/api/integrations/selected", response_model=List[DomainEntry])
@@ -108,15 +110,14 @@ async def selected_integrations() -> List[DomainEntry]:
 async def add_domain(request: DomainSelectionRequest) -> List[DomainEntry]:
     ensure_hass_configured()
     try:
-        integrations = await hass_client.fetch_integrations()
+        domains = await hass_client.fetch_domains()
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
 
-    matching = [entry for entry in integrations if entry.get("domain") == request.domain]
-    if not matching:
+    if request.domain not in domains:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
 
-    title = matching[0].get("title")
+    title = _format_domain_title(request.domain)
     logger.info("Domain added to selection", extra={"domain": request.domain})
     repository.add_domain(request.domain, title=title)
     return [DomainEntry(**entry) for entry in repository.get_selected_domains()]
@@ -183,47 +184,36 @@ async def _ingest_entities() -> EntitiesResponse:
     ensure_hass_configured()
 
     try:
-        integrations = await hass_client.fetch_integrations()
-        entity_registry, device_registry, states = await asyncio.gather(
-            hass_client.fetch_entity_registry(),
-            hass_client.fetch_device_registry(),
-            hass_client.fetch_states(),
-        )
+        snapshot = await hass_client.fetch_domain_snapshot(selected_domains)
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
 
-    integration_ids = {
-        entry.get("entry_id")
-        for entry in integrations
-        if entry.get("domain") in selected_domains and entry.get("entry_id")
-    }
-    if not integration_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No integration entries found for the selected domains.",
-        )
-
     logger.info(
         "Starting entity ingest",
-        extra={"domains": sorted(selected_domains), "integration_ids": sorted(integration_ids)},
+        extra={"domains": sorted(selected_domains)},
     )
-
-    state_map: Dict[str, Dict[str, Any]] = {}
-    for state in states:
-        entity_id = state.get("entity_id")
-        if entity_id:
-            state_map[entity_id] = state
 
     blacklist = repository.get_blacklist()
     whitelist = repository.get_whitelist()
 
+    raw_entities: List[Dict[str, Any]] = [
+        entry
+        for entry in snapshot.get("entities", [])
+        if isinstance(entry, dict)
+    ]
+    raw_devices: List[Dict[str, Any]] = [
+        entry
+        for entry in snapshot.get("devices", [])
+        if isinstance(entry, dict)
+    ]
+
     entities: List[Dict[str, object]] = []
-    for entry in entity_registry:
-        config_entry_id = entry.get("config_entry_id")
-        if config_entry_id not in integration_ids:
-            continue
+    for entry in raw_entities:
         entity_id = entry.get("entity_id")
         if not entity_id:
+            continue
+        domain = entity_id.split(".")[0]
+        if domain not in selected_domains:
             continue
         device_id = entry.get("device_id")
         if not repository.is_entity_allowed(
@@ -233,18 +223,20 @@ async def _ingest_entities() -> EntitiesResponse:
             whitelist=whitelist,
         ):
             continue
-        state_info = state_map.get(entity_id, {})
+        attributes = entry.get("attributes")
+        if not isinstance(attributes, dict):
+            attributes = {}
         entities.append(
             {
                 "entity_id": entity_id,
-                "name": entry.get("name"),
-                "original_name": entry.get("original_name"),
+                "name": entry.get("name") or entry.get("original_name"),
+                "original_name": entry.get("original_name") or entry.get("name"),
                 "device_id": device_id,
                 "area_id": entry.get("area_id"),
                 "unique_id": entry.get("unique_id"),
-                "integration_id": config_entry_id,
-                "state": state_info.get("state"),
-                "attributes": state_info.get("attributes", {}),
+                "integration_id": None,
+                "state": entry.get("state"),
+                "attributes": attributes,
                 "disabled_by": entry.get("disabled_by"),
             }
         )
@@ -253,7 +245,7 @@ async def _ingest_entities() -> EntitiesResponse:
     blacklist_devices = set(blacklist.get("devices", []))
 
     devices: List[Dict[str, object]] = []
-    for device in device_registry:
+    for device in raw_devices:
         device_id = device.get("id")
         if not device_id or device_id not in allowed_devices:
             continue

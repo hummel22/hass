@@ -5,9 +5,81 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
+
+
+DOMAIN_LIST_TEMPLATE = """
+{% set domain_list = [] %}
+{% for s in states %}
+  {% if s.entity_id %}
+    {% set domain = s.entity_id.split('.')[0] %}
+    {% if domain and domain not in domain_list %}
+      {% set domain_list = domain_list + [domain] %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+{{ domain_list | sort | to_json }}
+"""
+
+
+DOMAIN_SNAPSHOT_TEMPLATE = """
+{% set target_domains = domains or [] %}
+{% set entity_results = [] %}
+{% set device_results = [] %}
+{% set seen_devices = [] %}
+{% for s in states %}
+  {% if s.entity_id %}
+    {% set domain = s.entity_id.split('.')[0] %}
+    {% if domain in target_domains %}
+      {% set entity = {
+        'entity_id': s.entity_id,
+        'name': s.name,
+        'original_name': s.attributes.get('friendly_name'),
+        'device_id': device_id(s.entity_id),
+        'area_id': area_id(s.entity_id),
+        'unique_id': state_attr(s.entity_id, 'unique_id'),
+        'state': s.state,
+        'attributes': s.attributes,
+        'disabled_by': state_attr(s.entity_id, 'disabled_by')
+      } %}
+      {% set entity_results = entity_results + [entity] %}
+
+      {% set dev_id = entity.device_id %}
+      {% if dev_id %}
+        {% set raw_identifiers = device_attr(dev_id, 'identifiers') or [] %}
+        {% set identifiers = [] %}
+        {% for identifier in raw_identifiers %}
+          {% if identifier is iterable and identifier is not string %}
+            {% set identifiers = identifiers + [identifier | list] %}
+          {% else %}
+            {% set identifiers = identifiers + [identifier] %}
+          {% endif %}
+        {% endfor %}
+
+        {% if dev_id not in seen_devices %}
+          {% set device_info = {
+            'id': dev_id,
+            'name': device_attr(dev_id, 'name'),
+            'name_by_user': device_attr(dev_id, 'name_by_user'),
+            'manufacturer': device_attr(dev_id, 'manufacturer'),
+            'model': device_attr(dev_id, 'model'),
+            'sw_version': device_attr(dev_id, 'sw_version'),
+            'configuration_url': device_attr(dev_id, 'configuration_url'),
+            'area_id': area_id(dev_id),
+            'via_device_id': device_attr(dev_id, 'via_device_id'),
+            'identifiers': identifiers
+          } %}
+          {% set device_results = device_results + [device_info] %}
+          {% set seen_devices = seen_devices + [dev_id] %}
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+{{ {'entities': entity_results, 'devices': device_results} | to_json }}
+"""
 
 
 class HomeAssistantError(RuntimeError):
@@ -120,58 +192,41 @@ class HomeAssistantClient:
             return response.json()
         return None
 
-    async def fetch_integrations(self) -> List[Dict[str, Any]]:
-        """Return the list of configured integration entries."""
-        data = await self._request("GET", "/api/config/config_entries/entry")
-        if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching integrations")
+    async def render_template(
+        self, template: str, variables: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        payload: Dict[str, Any] = {"template": template}
+        if variables:
+            payload["variables"] = variables
+        data = await self._request("POST", "/api/template", json=payload)
+        if data is None:
+            raise HomeAssistantError("Template response was empty")
         return data
 
-    async def fetch_entity_registry(self) -> List[Dict[str, Any]]:
-        try:
-            data = await self._request("GET", "/api/config/entity_registry/list")
-        except HomeAssistantError as exc:
-            if exc.status_code not in {404, 405}:
-                raise
-            data = await self._request("POST", "/api/config/entity_registry/list", json={})
+    async def fetch_domains(self) -> List[str]:
+        """Return a sorted list of available domains derived from entity states."""
+
+        data = await self.render_template(DOMAIN_LIST_TEMPLATE)
         if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching entity registry")
-        return data
+            raise HomeAssistantError("Unexpected response while fetching domains")
+        return [domain for domain in data if isinstance(domain, str)]
 
-    async def fetch_device_registry(self) -> List[Dict[str, Any]]:
-        """Return the list of registered devices.
+    async def fetch_domain_snapshot(self, domains: Iterable[str]) -> Dict[str, Any]:
+        """Return entity and device metadata for the provided domains."""
 
-        Some Home Assistant deployments do not expose the device registry REST
-        endpoint. In that scenario we treat the registry as empty instead of
-        failing the ingest process.
-        """
-
-        try:
-            data = await self._request("GET", "/api/config/device_registry/list")
-        except HomeAssistantError as exc:
-            if exc.status_code not in {404, 405}:
-                raise
-            try:
-                data = await self._request(
-                    "POST", "/api/config/device_registry/list", json={}
-                )
-            except HomeAssistantError as post_exc:
-                if post_exc.status_code not in {404, 405}:
-                    raise
-                self._logger.debug(
-                    "device_registry_unavailable",
-                    extra={"status_code": post_exc.status_code},
-                )
-                return []
-        if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching device registry")
-        return data
-
-    async def fetch_states(self) -> List[Dict[str, Any]]:
-        data = await self._request("GET", "/api/states")
-        if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching states")
-        return data
+        domains = [domain for domain in domains if domain]
+        if not domains:
+            return {"entities": [], "devices": []}
+        data = await self.render_template(
+            DOMAIN_SNAPSHOT_TEMPLATE, {"domains": sorted(set(domains))}
+        )
+        if not isinstance(data, dict):
+            raise HomeAssistantError("Unexpected response while fetching domain snapshot")
+        entities = data.get("entities", [])
+        devices = data.get("devices", [])
+        if not isinstance(entities, list) or not isinstance(devices, list):
+            raise HomeAssistantError("Unexpected template payload structure")
+        return {"entities": entities, "devices": devices}
 
 
 __all__ = [
