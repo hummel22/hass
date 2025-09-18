@@ -1,0 +1,10 @@
+{% set domain_list = [] %}
+{% for s in states %}
+  {% if s.entity_id %}
+    {% set domain = s.entity_id.split('.')[0] %}
+    {% if domain and domain not in domain_list %}
+      {% set domain_list = domain_list + [domain] %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+{{ domain_list | sort | to_json }}

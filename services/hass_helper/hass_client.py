@@ -5,81 +5,25 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
 
 
-DOMAIN_LIST_TEMPLATE = """
-{% set domain_list = [] %}
-{% for s in states %}
-  {% if s.entity_id %}
-    {% set domain = s.entity_id.split('.')[0] %}
-    {% if domain and domain not in domain_list %}
-      {% set domain_list = domain_list + [domain] %}
-    {% endif %}
-  {% endif %}
-{% endfor %}
-{{ domain_list | sort | to_json }}
-"""
+_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 
-DOMAIN_SNAPSHOT_TEMPLATE = """
-{% set target_domains = domains or [] %}
-{% set entity_results = [] %}
-{% set device_results = [] %}
-{% set seen_devices = [] %}
-{% for s in states %}
-  {% if s.entity_id %}
-    {% set domain = s.entity_id.split('.')[0] %}
-    {% if domain in target_domains %}
-      {% set entity = {
-        'entity_id': s.entity_id,
-        'name': s.name,
-        'original_name': s.attributes.get('friendly_name'),
-        'device_id': device_id(s.entity_id),
-        'area_id': area_id(s.entity_id),
-        'unique_id': state_attr(s.entity_id, 'unique_id'),
-        'state': s.state,
-        'attributes': s.attributes,
-        'disabled_by': state_attr(s.entity_id, 'disabled_by')
-      } %}
-      {% set entity_results = entity_results + [entity] %}
+def _load_template(name: str) -> str:
+    path = _TEMPLATE_DIR / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:  # pragma: no cover - environment specific failure
+        raise RuntimeError(f"Unable to load template '{name}'") from exc
 
-      {% set dev_id = entity.device_id %}
-      {% if dev_id %}
-        {% set raw_identifiers = device_attr(dev_id, 'identifiers') or [] %}
-        {% set identifiers = [] %}
-        {% for identifier in raw_identifiers %}
-          {% if identifier is iterable and identifier is not string %}
-            {% set identifiers = identifiers + [identifier | list] %}
-          {% else %}
-            {% set identifiers = identifiers + [identifier] %}
-          {% endif %}
-        {% endfor %}
 
-        {% if dev_id not in seen_devices %}
-          {% set device_info = {
-            'id': dev_id,
-            'name': device_attr(dev_id, 'name'),
-            'name_by_user': device_attr(dev_id, 'name_by_user'),
-            'manufacturer': device_attr(dev_id, 'manufacturer'),
-            'model': device_attr(dev_id, 'model'),
-            'sw_version': device_attr(dev_id, 'sw_version'),
-            'configuration_url': device_attr(dev_id, 'configuration_url'),
-            'area_id': area_id(dev_id),
-            'via_device_id': device_attr(dev_id, 'via_device_id'),
-            'identifiers': identifiers
-          } %}
-          {% set device_results = device_results + [device_info] %}
-          {% set seen_devices = seen_devices + [dev_id] %}
-        {% endif %}
-      {% endif %}
-    {% endif %}
-  {% endif %}
-{% endfor %}
-{{ {'entities': entity_results, 'devices': device_results} | to_json }}
-"""
+DOMAIN_LIST_TEMPLATE = _load_template("domain_list.j2")
+DOMAIN_SNAPSHOT_TEMPLATE = _load_template("domain_snapshot.j2")
 
 
 class HomeAssistantError(RuntimeError):
