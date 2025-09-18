@@ -7,10 +7,19 @@ whitelists, and to trigger ingestion runs.
 
 ## Configuration
 
-Set the following environment variables before starting the service:
+Set the following environment variables before starting the service. The application will
+automatically load them from a `.env` file located either beside the code in
+`services/hass_helper/.env` or at the repository root.
 
 - `HASS_BASE_URL` – Base URL of the Home Assistant instance (e.g. `http://homeassistant.local:8123`).
 - `HASS_ACCESS_TOKEN` – Long-lived access token used to authenticate API requests.
+
+Use the provided `.env.example` as a template:
+
+```bash
+cp services/hass_helper/.env.example services/hass_helper/.env
+# then edit services/hass_helper/.env with your Home Assistant details
+```
 
 ## Data Files
 
@@ -32,3 +41,23 @@ services/hass_helper/start.sh
 
 The FastAPI app listens on `http://0.0.0.0:8000/` by default. Open the root URL in a browser to
 access the management UI.
+
+## Container usage
+
+Build a container image with the helper script (defaults to the `hass-helper:latest` tag):
+
+```bash
+services/hass_helper/build.sh
+```
+
+To build with a custom name or tag, pass them as arguments, e.g. `services/hass_helper/build.sh my-org/hass-helper v1`.
+
+Run the service with Docker Compose, which mounts the local `data/` directory for persistence and
+loads environment variables from `services/hass_helper/.env`:
+
+```bash
+cd services/hass_helper
+docker compose up --build
+```
+
+Once the container is running, browse to `http://localhost:8000/` to use the UI.

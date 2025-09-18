@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +27,13 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR = BASE_DIR / "data"
+
+for env_path in (
+    BASE_DIR / ".env",
+    BASE_DIR.parent / ".env",
+    Path.cwd() / ".env",
+):
+    load_dotenv(dotenv_path=env_path, override=False)
 
 settings = HomeAssistantSettings(
     base_url=os.getenv("HASS_BASE_URL", "http://homeassistant.local:8123"),
