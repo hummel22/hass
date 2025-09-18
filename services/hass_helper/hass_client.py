@@ -152,6 +152,10 @@ class HomeAssistantClient:
         data = await self._request("POST", "/api/template", json=payload)
         if data is None:
             raise HomeAssistantError("Template response was empty")
+        extra: Dict[str, Any] = {"template": template, "result": data}
+        if variables:
+            extra["variables"] = variables
+        self._logger.debug("home_assistant_template_response", extra=extra)
         return data
 
     async def fetch_domains(self) -> List[str]:
