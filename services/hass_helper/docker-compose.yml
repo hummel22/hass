@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  hass-helper:
+    build:
+      context: ../..
+      dockerfile: services/hass_helper/Dockerfile
+    image: hass-helper:latest
+    container_name: hass-helper
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/services/hass_helper/data
+    restart: unless-stopped
