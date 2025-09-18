@@ -10,10 +10,20 @@ const state = {
   whitelist: [],
   entities: [],
   devices: [],
+  expandedDevices: new Set(),
 };
+
+const UNKNOWN_DEVICE_KEY = "__no_device__";
 
 function setButtonLoading(button, loadingText = "Working…") {
   if (!(button instanceof HTMLButtonElement)) return;
+  const loadingStyle = button.dataset.loadingStyle || "text";
+  button.setAttribute("aria-busy", "true");
+  if (loadingStyle === "icon") {
+    button.disabled = true;
+    button.classList.add("loading-icon");
+    return;
+  }
   if (!button.dataset.originalLabel) {
     button.dataset.originalLabel = button.textContent ?? "";
   }
@@ -24,10 +34,16 @@ function setButtonLoading(button, loadingText = "Working…") {
 
 function clearButtonLoading(button) {
   if (!(button instanceof HTMLButtonElement)) return;
+  const loadingStyle = button.dataset.loadingStyle || "text";
+  button.disabled = false;
+  button.removeAttribute("aria-busy");
+  button.classList.remove("loading");
+  if (loadingStyle === "icon") {
+    button.classList.remove("loading-icon");
+    return;
+  }
   const originalLabel = button.dataset.originalLabel ?? "";
   button.textContent = originalLabel;
-  button.disabled = false;
-  button.classList.remove("loading");
   delete button.dataset.originalLabel;
 }
 
@@ -103,19 +119,16 @@ async function fetchJson(url, options = {}) {
 
 function formatMeasurement(entity) {
   if (!entity) return "";
-  const value = entity.state;
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
   const attributes = entity.attributes || {};
   const unit =
+    entity.unit_of_measurement ??
     entity.unit ??
     attributes.unit_of_measurement ??
     attributes.unit ??
     attributes.measurement ??
-    attributes.native_unit_of_measurement;
-  const valueText = typeof value === "number" ? String(value) : `${value}`;
-  return unit ? `${valueText} ${unit}` : valueText;
+    attributes.native_unit_of_measurement ??
+    "";
+  return unit ?? "";
 }
 
 function renderSelectedDomains() {
@@ -212,44 +225,233 @@ function renderEntities() {
   const deviceLookup = new Map();
   state.devices.forEach((device) => {
     if (!device) return;
-    const key = device.id ?? device.device_id;
+    const key = device.device_id ?? device.id;
     if (!key) return;
     deviceLookup.set(key, device);
   });
 
-  if (entityBody) {
-    entityBody.innerHTML = "";
-    if (!state.entities.length) {
-      const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="6" data-label="Message">No entities ingested yet.</td>';
-      entityBody.appendChild(row);
-    } else {
-      state.entities.forEach((entity) => {
-        const row = document.createElement("tr");
-        const device = deviceLookup.get(entity.device_id ?? "") || null;
-        const deviceLabel =
-          device?.name_by_user ||
-          device?.name ||
-          device?.id ||
-          device?.device_id ||
-          entity.device_id ||
-          "";
-        const integrationLabel =
-          entity.integration_id || device?.integration_id || "";
-        const areaLabel = entity.area_id || device?.area_id || device?.area || "";
-        const measurementLabel = formatMeasurement(entity);
-        row.innerHTML = `
-          <td data-label="Device">${deviceLabel}</td>
-          <td data-label="Entity ID">${entity.entity_id}</td>
-          <td data-label="Integration">${integrationLabel}</td>
-          <td data-label="Name">${entity.name || entity.original_name || ""}</td>
-          <td data-label="Measurement">${measurementLabel}</td>
-          <td data-label="Area">${areaLabel}</td>
-        `;
-        entityBody.appendChild(row);
-      });
+  const createBlacklistButton = ({ action, id, label, disabled = false }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button";
+    button.dataset.action = action;
+    button.dataset.loadingStyle = "icon";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.textContent = "+";
+    if (id) {
+      button.dataset.id = id;
     }
+    if (disabled) {
+      button.disabled = true;
+    }
+    return button;
+  };
+
+  if (!entityBody) {
+    if (entityCount) {
+      entityCount.textContent = `${state.entities.length} entities`;
+    }
+    return;
   }
+
+  entityBody.innerHTML = "";
+
+  if (!state.entities.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.dataset.label = "Message";
+    cell.textContent = "No entities ingested yet.";
+    row.appendChild(cell);
+    entityBody.appendChild(row);
+    if (entityCount) {
+      entityCount.textContent = "0 entities";
+    }
+    return;
+  }
+
+  const deviceOrder = [];
+  const groupedEntities = new Map();
+  state.entities.forEach((entity) => {
+    const deviceId = entity.device_id || UNKNOWN_DEVICE_KEY;
+    if (!groupedEntities.has(deviceId)) {
+      groupedEntities.set(deviceId, []);
+      deviceOrder.push(deviceId);
+    }
+    groupedEntities.get(deviceId)?.push(entity);
+  });
+
+  const validDeviceIds = new Set(deviceOrder);
+  Array.from(state.expandedDevices).forEach((deviceId) => {
+    if (!validDeviceIds.has(deviceId)) {
+      state.expandedDevices.delete(deviceId);
+    }
+  });
+
+  deviceOrder.forEach((deviceId) => {
+    const entities = groupedEntities.get(deviceId) ?? [];
+    const device = deviceLookup.get(deviceId) || null;
+    const firstEntity = entities[0] || null;
+    const integrationLabel =
+      device?.integration_id || firstEntity?.integration_id || "";
+    const areaLabel =
+      device?.area ||
+      device?.area_id ||
+      firstEntity?.area ||
+      firstEntity?.area_id ||
+      "";
+    const deviceDisplayName =
+      device?.name_by_user ||
+      device?.name ||
+      (deviceId === UNKNOWN_DEVICE_KEY ? "Unassigned entities" : deviceId) ||
+      "";
+    const deviceMetaLabel =
+      deviceId && deviceId !== UNKNOWN_DEVICE_KEY
+        ? deviceId
+        : device?.device_id ||
+          (deviceId === UNKNOWN_DEVICE_KEY ? "No device ID" : "");
+    const deviceInfo =
+      device?.model && device?.manufacturer
+        ? `${device.manufacturer} ${device.model}`.trim()
+        : device?.model || device?.manufacturer || "";
+    const isExpanded = state.expandedDevices.has(deviceId);
+
+    const deviceRow = document.createElement("tr");
+    deviceRow.classList.add("device-row");
+    deviceRow.dataset.deviceId = deviceId;
+
+    const blacklistCell = document.createElement("td");
+    blacklistCell.dataset.label = "Blacklist";
+    const deviceButton = createBlacklistButton({
+      action: "blacklist-device",
+      id: deviceId !== UNKNOWN_DEVICE_KEY ? deviceId : undefined,
+      label:
+        deviceId !== UNKNOWN_DEVICE_KEY
+          ? `Add device ${deviceDisplayName} to blacklist`
+          : "Device ID unavailable",
+      disabled: deviceId === UNKNOWN_DEVICE_KEY,
+    });
+    blacklistCell.appendChild(deviceButton);
+    deviceRow.appendChild(blacklistCell);
+
+    const deviceCell = document.createElement("td");
+    deviceCell.dataset.label = "Device";
+    deviceCell.classList.add("device-cell");
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "toggle-entities";
+    toggleButton.dataset.action = "toggle-device";
+    toggleButton.dataset.id = deviceId;
+    toggleButton.setAttribute("aria-expanded", String(isExpanded));
+    const toggleIcon = document.createElement("span");
+    toggleIcon.className = "toggle-icon";
+    toggleIcon.textContent = isExpanded ? "▾" : "▸";
+    const toggleLabel = document.createElement("span");
+    toggleLabel.className = "toggle-label";
+    toggleLabel.textContent = deviceDisplayName;
+    const toggleCount = document.createElement("span");
+    toggleCount.className = "toggle-count";
+    toggleCount.textContent = `(${entities.length})`;
+    toggleButton.append(toggleIcon, toggleLabel, toggleCount);
+    deviceCell.appendChild(toggleButton);
+    if (deviceMetaLabel) {
+      const meta = document.createElement("div");
+      meta.className = "device-id-tag";
+      meta.textContent = deviceMetaLabel;
+      deviceCell.appendChild(meta);
+    }
+    deviceRow.appendChild(deviceCell);
+
+    const deviceEntityCell = document.createElement("td");
+    deviceEntityCell.dataset.label = "Entity ID";
+    deviceEntityCell.textContent = "";
+    deviceRow.appendChild(deviceEntityCell);
+
+    const deviceIntegrationCell = document.createElement("td");
+    deviceIntegrationCell.dataset.label = "Integration";
+    deviceIntegrationCell.textContent = integrationLabel;
+    deviceRow.appendChild(deviceIntegrationCell);
+
+    const deviceNameCell = document.createElement("td");
+    deviceNameCell.dataset.label = "Name";
+    deviceNameCell.textContent = deviceInfo;
+    deviceRow.appendChild(deviceNameCell);
+
+    const deviceMeasurementCell = document.createElement("td");
+    deviceMeasurementCell.dataset.label = "Unit";
+    deviceMeasurementCell.textContent = "";
+    deviceRow.appendChild(deviceMeasurementCell);
+
+    const deviceAreaCell = document.createElement("td");
+    deviceAreaCell.dataset.label = "Area";
+    deviceAreaCell.textContent = areaLabel;
+    deviceRow.appendChild(deviceAreaCell);
+
+    entityBody.appendChild(deviceRow);
+
+    if (!isExpanded) {
+      return;
+    }
+
+    entities.forEach((entity) => {
+      const entityRow = document.createElement("tr");
+      entityRow.classList.add("entity-row");
+      entityRow.dataset.parentDevice = deviceId;
+
+      const entityBlacklistCell = document.createElement("td");
+      entityBlacklistCell.dataset.label = "Blacklist";
+      const entityButton = createBlacklistButton({
+        action: "blacklist-entity",
+        id: entity.entity_id,
+        label: `Add entity ${entity.entity_id} to blacklist`,
+      });
+      entityBlacklistCell.appendChild(entityButton);
+      entityRow.appendChild(entityBlacklistCell);
+
+      const entityDeviceCell = document.createElement("td");
+      entityDeviceCell.dataset.label = "Device";
+      entityDeviceCell.classList.add("entity-device-cell");
+      entityRow.appendChild(entityDeviceCell);
+
+      const entityIdCell = document.createElement("td");
+      entityIdCell.dataset.label = "Entity ID";
+      entityIdCell.textContent = entity.entity_id || "";
+      entityRow.appendChild(entityIdCell);
+
+      const entityIntegrationCell = document.createElement("td");
+      entityIntegrationCell.dataset.label = "Integration";
+      entityIntegrationCell.textContent =
+        entity.integration_id || integrationLabel || "";
+      entityRow.appendChild(entityIntegrationCell);
+
+      const entityNameCell = document.createElement("td");
+      entityNameCell.dataset.label = "Name";
+      const attributes = entity.attributes || {};
+      entityNameCell.textContent =
+        entity.name ||
+        entity.original_name ||
+        entity.friendly_name ||
+        attributes.friendly_name ||
+        entity.object_id ||
+        "";
+      entityRow.appendChild(entityNameCell);
+
+      const entityMeasurementCell = document.createElement("td");
+      entityMeasurementCell.dataset.label = "Unit";
+      entityMeasurementCell.textContent = formatMeasurement(entity);
+      entityRow.appendChild(entityMeasurementCell);
+
+      const entityAreaCell = document.createElement("td");
+      entityAreaCell.dataset.label = "Area";
+      entityAreaCell.textContent =
+        entity.area || entity.area_id || attributes.area || areaLabel || "";
+      entityRow.appendChild(entityAreaCell);
+
+      entityBody.appendChild(entityRow);
+    });
+  });
+
   if (entityCount) {
     entityCount.textContent = `${state.entities.length} entities`;
   }
@@ -543,6 +745,40 @@ function setupEventHandlers() {
       if (id) {
         void withButtonLoading(target, () => removeWhitelistEntry(id), "Removing…");
       }
+    }
+  });
+
+  document.querySelector("#entities-table tbody")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest("button");
+    if (!(button instanceof HTMLButtonElement)) return;
+    const action = button.dataset.action;
+    if (action === "toggle-device") {
+      const deviceId = button.dataset.id;
+      if (!deviceId) {
+        return;
+      }
+      if (state.expandedDevices.has(deviceId)) {
+        state.expandedDevices.delete(deviceId);
+      } else {
+        state.expandedDevices.add(deviceId);
+      }
+      renderEntities();
+    } else if (action === "blacklist-device") {
+      const deviceId = button.dataset.id;
+      if (!deviceId) {
+        showStatus("Device ID unavailable for blacklist.", "error", 4000);
+        return;
+      }
+      void withButtonLoading(button, () => addBlacklistEntry("device", deviceId), "Adding…");
+    } else if (action === "blacklist-entity") {
+      const entityId = button.dataset.id;
+      if (!entityId) {
+        showStatus("Entity ID unavailable for blacklist.", "error", 4000);
+        return;
+      }
+      void withButtonLoading(button, () => addBlacklistEntry("entity", entityId), "Adding…");
     }
   });
 
