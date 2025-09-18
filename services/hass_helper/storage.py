@@ -64,7 +64,7 @@ class DataRepository:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
         self.integrations_store = JSONStorage(
-            data_dir / "integrations.json", {"selected": []}
+            data_dir / "integrations.json", {"selected_domains": []}
         )
         self.entities_store = JSONStorage(
             data_dir / "entities.json", {"entities": [], "devices": []}
@@ -77,36 +77,59 @@ class DataRepository:
         )
 
     # Integrations --------------------------------------------------------
-    def get_selected_integrations(self) -> List[Dict[str, Any]]:
+    def _extract_domain_entries(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_entries = data.get("selected_domains")
+        if raw_entries is None:
+            raw_entries = data.get("selected", [])
+
+        entries: List[Dict[str, Any]] = []
+        for item in raw_entries or []:
+            domain: str | None
+            title: str | None = None
+            if isinstance(item, str):
+                domain = item
+            elif isinstance(item, dict):
+                domain = item.get("domain")
+                title = item.get("title")
+            else:
+                continue
+            if not domain:
+                continue
+            if not any(entry["domain"] == domain for entry in entries):
+                entries.append({"domain": domain, "title": title})
+        entries.sort(key=lambda entry: entry.get("domain", ""))
+        return entries
+
+    def get_selected_domains(self) -> List[Dict[str, Any]]:
         data = self.integrations_store.read()
-        return list(data.get("selected", []))
+        entries = self._extract_domain_entries(data)
+        if data.get("selected_domains") != entries:
+            self.integrations_store.write({"selected_domains": entries})
+        return entries
 
-    def add_integration(self, integration: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def add_domain(self, domain: str, *, title: str | None = None) -> List[Dict[str, Any]]:
         def updater(data: Dict[str, Any]) -> Dict[str, Any]:
-            selected: List[Dict[str, Any]] = data.setdefault("selected", [])
-            if not any(entry.get("entry_id") == integration.get("entry_id") for entry in selected):
-                selected.append(
-                    {
-                        "entry_id": integration.get("entry_id"),
-                        "domain": integration.get("domain"),
-                        "title": integration.get("title"),
-                    }
-                )
+            entries = self._extract_domain_entries(data)
+            if not any(entry["domain"] == domain for entry in entries):
+                entries.append({"domain": domain, "title": title})
+                entries.sort(key=lambda entry: entry.get("domain", ""))
+            data.clear()
+            data["selected_domains"] = entries
             return data
 
         updated = self.integrations_store.update(updater)
-        return list(updated.get("selected", []))
+        return list(updated.get("selected_domains", []))
 
-    def remove_integration(self, integration_id: str) -> List[Dict[str, Any]]:
+    def remove_domain(self, domain: str) -> List[Dict[str, Any]]:
         def updater(data: Dict[str, Any]) -> Dict[str, Any]:
-            selected: List[Dict[str, Any]] = data.setdefault("selected", [])
-            data["selected"] = [
-                entry for entry in selected if entry.get("entry_id") != integration_id
-            ]
+            entries = self._extract_domain_entries(data)
+            filtered = [entry for entry in entries if entry["domain"] != domain]
+            data.clear()
+            data["selected_domains"] = filtered
             return data
 
         updated = self.integrations_store.update(updater)
-        return list(updated.get("selected", []))
+        return list(updated.get("selected_domains", []))
 
     # Entities ------------------------------------------------------------
     def save_entities(self, entities: List[Dict[str, Any]], devices: List[Dict[str, Any]]) -> None:

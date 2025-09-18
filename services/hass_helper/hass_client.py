@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +32,7 @@ class HomeAssistantClient:
         self._settings = settings
         self._client: Optional[httpx.AsyncClient] = None
         self._lock = asyncio.Lock()
+        self._logger = logging.getLogger("hass_helper.http")
 
     @property
     def is_configured(self) -> bool:
@@ -62,15 +65,56 @@ class HomeAssistantClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         client = await self._get_client()
+        start = time.perf_counter()
         try:
             response = await client.request(method, path, **kwargs)
+            duration_ms = (time.perf_counter() - start) * 1000
+            self._logger.debug(
+                "home_assistant_http_call",
+                extra={
+                    "method": method,
+                    "path": path,
+                    "url": str(response.request.url),
+                    "status_code": response.status_code,
+                    "duration_ms": round(duration_ms, 3),
+                },
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            response = exc.response
+            request = response.request if response is not None else None
+            self._logger.debug(
+                "home_assistant_http_call",
+                extra={
+                    "method": method,
+                    "path": path,
+                    "url": str(request.url) if request else path,
+                    "status_code": response.status_code if response else None,
+                    "reason": response.reason_phrase if response else None,
+                    "duration_ms": round(duration_ms, 3),
+                    "error": True,
+                },
+            )
             raise HomeAssistantError(
                 f"Home Assistant request failed: {exc.response.status_code} {exc.response.reason_phrase}",
                 status_code=exc.response.status_code,
             ) from exc
         except httpx.HTTPError as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            request = getattr(exc, "request", None)
+            url = str(request.url) if request else path
+            self._logger.debug(
+                "home_assistant_http_call",
+                extra={
+                    "method": method,
+                    "path": path,
+                    "url": url,
+                    "duration_ms": round(duration_ms, 3),
+                    "error": True,
+                    "exception": exc.__class__.__name__,
+                },
+            )
             raise HomeAssistantError("Error communicating with Home Assistant") from exc
         if response.content:
             return response.json()

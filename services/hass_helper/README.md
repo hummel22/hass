@@ -1,9 +1,9 @@
 # HASS Helper Service
 
 This service provides a small FastAPI application that connects to a Home Assistant instance,
-collects entity and device metadata filtered by configured integrations, and stores the results
-locally as JSON files. A lightweight web UI is bundled to manage integrations, blacklists, and
-whitelists, and to trigger ingestion runs.
+collects entity and device metadata filtered by configured domains, and stores the results locally
+as JSON files. A lightweight web UI is bundled to manage domains, blacklists, and whitelists, and
+to trigger ingestion runs.
 
 ## Configuration
 
@@ -25,7 +25,7 @@ cp services/hass_helper/.env.example services/hass_helper/.env
 
 The service reads and persists JSON data inside `services/hass_helper/data/`:
 
-- `integrations.json` – Selected integration entries used during ingest.
+- `integrations.json` – Selected Home Assistant domains used during ingest.
 - `entities.json` – Cached entities and devices from the most recent ingest run.
 - `blacklist.json` – Entity and device IDs excluded during ingest.
 - `whitelist.json` – Entity IDs that override blacklist filtering.
@@ -61,3 +61,16 @@ docker compose up --build
 ```
 
 Once the container is running, browse to `http://localhost:8000/` to use the UI.
+
+### Log viewing with Dozzle
+
+Structured JSON logs are emitted to stdout for every Home Assistant HTTP call and key ingest
+operations. A companion Compose file is provided to run [Dozzle](https://dozzle.dev/) for viewing
+these logs alongside the application:
+
+```bash
+cd services/hass_helper
+docker compose -f docker-compose.yml -f docker-compose.infra.yaml up
+```
+
+Dozzle is exposed on `http://localhost:9999/` and is pre-filtered to the `hass-helper` container.

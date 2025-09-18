@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -12,12 +13,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .hass_client import HomeAssistantClient, HomeAssistantError, HomeAssistantSettings
+from .logging_config import setup_logging
 from .models import (
     BlacklistEntryRequest,
     BlacklistResponse,
+    DomainEntry,
+    DomainSelectionRequest,
     EntitiesResponse,
-    IntegrationEntry,
-    IntegrationSelectionRequest,
     WhitelistEntryRequest,
     WhitelistResponse,
 )
@@ -34,6 +36,9 @@ for env_path in (
     Path.cwd() / ".env",
 ):
     load_dotenv(dotenv_path=env_path, override=False)
+
+setup_logging()
+logger = logging.getLogger("hass_helper.app")
 
 settings = HomeAssistantSettings(
     base_url=os.getenv("HASS_BASE_URL", "http://homeassistant.local:8123"),
@@ -75,52 +80,53 @@ async def index() -> HTMLResponse:
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
-@app.get("/api/integrations/available", response_model=List[IntegrationEntry])
-async def available_integrations() -> List[IntegrationEntry]:
+@app.get("/api/integrations/available", response_model=List[DomainEntry])
+async def available_integrations() -> List[DomainEntry]:
     ensure_hass_configured()
     try:
         integrations = await hass_client.fetch_integrations()
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
-    return [
-        IntegrationEntry(
-            entry_id=entry.get("entry_id", ""),
-            domain=entry.get("domain"),
-            title=entry.get("title"),
-        )
-        for entry in integrations
-        if entry.get("entry_id")
-    ]
-
-
-@app.get("/api/integrations/selected", response_model=List[IntegrationEntry])
-async def selected_integrations() -> List[IntegrationEntry]:
-    return [IntegrationEntry(**entry) for entry in repository.get_selected_integrations()]
-
-
-@app.post("/api/integrations/selected", response_model=List[IntegrationEntry])
-async def add_integration(request: IntegrationSelectionRequest) -> List[IntegrationEntry]:
-    ensure_hass_configured()
-    try:
-        integrations = await hass_client.fetch_integrations()
-    except HomeAssistantError as exc:
-        raise translate_error(exc) from exc
-
-    target = next(
-        (entry for entry in integrations if entry.get("entry_id") == request.integration_id),
-        None,
+    domains: Dict[str, DomainEntry] = {}
+    for entry in integrations:
+        domain = entry.get("domain")
+        if not domain:
+            continue
+        if domain not in domains:
+            domains[domain] = DomainEntry(domain=domain, title=entry.get("title"))
+    return sorted(
+        domains.values(), key=lambda item: (item.title or item.domain or "").lower()
     )
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration not found")
-
-    repository.add_integration(target)
-    return [IntegrationEntry(**entry) for entry in repository.get_selected_integrations()]
 
 
-@app.delete("/api/integrations/selected/{integration_id}", response_model=List[IntegrationEntry])
-async def delete_integration(integration_id: str) -> List[IntegrationEntry]:
-    repository.remove_integration(integration_id)
-    return [IntegrationEntry(**entry) for entry in repository.get_selected_integrations()]
+@app.get("/api/integrations/selected", response_model=List[DomainEntry])
+async def selected_integrations() -> List[DomainEntry]:
+    return [DomainEntry(**entry) for entry in repository.get_selected_domains()]
+
+
+@app.post("/api/integrations/selected", response_model=List[DomainEntry])
+async def add_domain(request: DomainSelectionRequest) -> List[DomainEntry]:
+    ensure_hass_configured()
+    try:
+        integrations = await hass_client.fetch_integrations()
+    except HomeAssistantError as exc:
+        raise translate_error(exc) from exc
+
+    matching = [entry for entry in integrations if entry.get("domain") == request.domain]
+    if not matching:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+
+    title = matching[0].get("title")
+    logger.info("Domain added to selection", extra={"domain": request.domain})
+    repository.add_domain(request.domain, title=title)
+    return [DomainEntry(**entry) for entry in repository.get_selected_domains()]
+
+
+@app.delete("/api/integrations/selected/{domain}", response_model=List[DomainEntry])
+async def delete_domain(domain: str) -> List[DomainEntry]:
+    repository.remove_domain(domain)
+    logger.info("Domain removed from selection", extra={"domain": domain})
+    return [DomainEntry(**entry) for entry in repository.get_selected_domains()]
 
 
 @app.get("/api/blacklist", response_model=BlacklistResponse)
@@ -166,17 +172,18 @@ async def remove_whitelist_entry(entity_id: str) -> WhitelistResponse:
 
 
 async def _ingest_entities() -> EntitiesResponse:
-    selected = repository.get_selected_integrations()
-    integration_ids = {entry.get("entry_id") for entry in selected if entry.get("entry_id")}
-    if not integration_ids:
+    selected = repository.get_selected_domains()
+    selected_domains = {entry.get("domain") for entry in selected if entry.get("domain")}
+    if not selected_domains:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No integrations have been selected for ingestion.",
+            detail="No domains have been selected for ingestion.",
         )
 
     ensure_hass_configured()
 
     try:
+        integrations = await hass_client.fetch_integrations()
         entity_registry, device_registry, states = await asyncio.gather(
             hass_client.fetch_entity_registry(),
             hass_client.fetch_device_registry(),
@@ -184,6 +191,22 @@ async def _ingest_entities() -> EntitiesResponse:
         )
     except HomeAssistantError as exc:
         raise translate_error(exc) from exc
+
+    integration_ids = {
+        entry.get("entry_id")
+        for entry in integrations
+        if entry.get("domain") in selected_domains and entry.get("entry_id")
+    }
+    if not integration_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No integration entries found for the selected domains.",
+        )
+
+    logger.info(
+        "Starting entity ingest",
+        extra={"domains": sorted(selected_domains), "integration_ids": sorted(integration_ids)},
+    )
 
     state_map: Dict[str, Dict[str, Any]] = {}
     for state in states:
@@ -259,6 +282,10 @@ async def _ingest_entities() -> EntitiesResponse:
         )
 
     repository.save_entities(entities, devices)
+    logger.info(
+        "Entity ingest completed",
+        extra={"entity_count": len(entities), "device_count": len(devices)},
+    )
     return EntitiesResponse(entities=entities, devices=devices)
 
 

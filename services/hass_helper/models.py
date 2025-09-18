@@ -6,14 +6,13 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class IntegrationEntry(BaseModel):
-    entry_id: str = Field(..., description="Unique identifier of the integration entry")
-    domain: Optional[str] = Field(None, description="Integration domain")
+class DomainEntry(BaseModel):
+    domain: str = Field(..., description="Home Assistant domain identifier")
     title: Optional[str] = Field(None, description="Human readable name")
 
 
-class IntegrationSelectionRequest(BaseModel):
-    integration_id: str = Field(..., description="Identifier of the integration entry")
+class DomainSelectionRequest(BaseModel):
+    domain: str = Field(..., description="Domain to include during ingest")
 
 
 class EntitiesIngestResponse(BaseModel):

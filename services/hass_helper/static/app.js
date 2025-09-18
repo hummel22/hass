@@ -2,8 +2,8 @@ const statusEl = document.getElementById("status");
 let statusTimer;
 
 const state = {
-  selectedIntegrations: [],
-  availableIntegrations: [],
+  selectedDomains: [],
+  availableDomains: [],
   blacklist: { entities: [], devices: [] },
   whitelist: [],
   entities: [],
@@ -54,24 +54,23 @@ async function fetchJson(url, options = {}) {
   return response.text();
 }
 
-function renderSelectedIntegrations() {
-  const tbody = document.querySelector("#integrations-table tbody");
+function renderSelectedDomains() {
+  const tbody = document.querySelector("#domains-table tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
-  if (!state.selectedIntegrations.length) {
+  if (!state.selectedDomains.length) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="4" data-label="Message">No integrations selected.</td>';
+    row.innerHTML = '<td colspan="3" data-label="Message">No domains selected.</td>';
     tbody.appendChild(row);
     return;
   }
-  state.selectedIntegrations.forEach((entry) => {
+  state.selectedDomains.forEach((entry) => {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td data-label="Title">${entry.title || "Unknown"}</td>
-      <td data-label="Domain">${entry.domain || ""}</td>
-      <td data-label="Entry ID">${entry.entry_id}</td>
+      <td data-label="Domain">${entry.domain}</td>
+      <td data-label="Display name">${entry.title || entry.domain}</td>
       <td class="actions">
-        <button class="danger" data-action="remove-integration" data-id="${entry.entry_id}">Remove</button>
+        <button class="danger" data-action="remove-domain" data-id="${entry.domain}">Remove</button>
       </td>
     `;
     tbody.appendChild(row);
@@ -199,13 +198,13 @@ function renderEntities() {
   }
 }
 
-async function loadSelectedIntegrations() {
+async function loadSelectedDomains() {
   try {
     const data = await fetchJson("/api/integrations/selected");
-    state.selectedIntegrations = data || [];
-    renderSelectedIntegrations();
+    state.selectedDomains = data || [];
+    renderSelectedDomains();
   } catch (error) {
-    showStatus(`Failed to load selected integrations: ${error.message}`, "error", 7000);
+    showStatus(`Failed to load selected domains: ${error.message}`, "error", 7000);
   }
 }
 
@@ -256,58 +255,62 @@ async function ingestEntities() {
   }
 }
 
-async function fetchAvailableIntegrations() {
+async function fetchAvailableDomains() {
   try {
     const data = await fetchJson("/api/integrations/available");
-    state.availableIntegrations = data || [];
-    const select = document.getElementById("integration-select");
+    state.availableDomains = (data || []).sort((a, b) => {
+      const labelA = (a.title || a.domain || "").toLowerCase();
+      const labelB = (b.title || b.domain || "").toLowerCase();
+      return labelA.localeCompare(labelB);
+    });
+    const select = document.getElementById("domain-select");
     if (select) {
       select.innerHTML = "";
-      if (!state.availableIntegrations.length) {
+      if (!state.availableDomains.length) {
         const option = document.createElement("option");
         option.value = "";
-        option.textContent = "No integrations found";
+        option.textContent = "No domains found";
         select.appendChild(option);
         select.disabled = true;
       } else {
-        state.availableIntegrations.forEach((integration) => {
+        state.availableDomains.forEach((integration) => {
           const option = document.createElement("option");
-          option.value = integration.entry_id;
-          option.textContent = `${integration.title || integration.domain || integration.entry_id}`;
+          option.value = integration.domain;
+          option.textContent = `${integration.title || integration.domain}`;
           select.appendChild(option);
         });
         select.disabled = false;
       }
     }
   } catch (error) {
-    showStatus(`Failed to load integrations from Home Assistant: ${error.message}`, "error", 7000);
+    showStatus(`Failed to load domains from Home Assistant: ${error.message}`, "error", 7000);
     throw error;
   }
 }
 
-async function addIntegration(entryId) {
+async function addDomain(domain) {
   try {
     await fetchJson("/api/integrations/selected", {
       method: "POST",
-      body: JSON.stringify({ integration_id: entryId }),
+      body: JSON.stringify({ domain }),
     });
-    showStatus("Integration added.");
-    await loadSelectedIntegrations();
+    showStatus("Domain added.");
+    await loadSelectedDomains();
   } catch (error) {
-    showStatus(`Unable to add integration: ${error.message}`, "error", 7000);
+    showStatus(`Unable to add domain: ${error.message}`, "error", 7000);
     throw error;
   }
 }
 
-async function removeIntegration(entryId) {
+async function removeDomain(domain) {
   try {
-    await fetchJson(`/api/integrations/selected/${encodeURIComponent(entryId)}`, {
+    await fetchJson(`/api/integrations/selected/${encodeURIComponent(domain)}`, {
       method: "DELETE",
     });
-    showStatus("Integration removed.");
-    await loadSelectedIntegrations();
+    showStatus("Domain removed.");
+    await loadSelectedDomains();
   } catch (error) {
-    showStatus(`Unable to remove integration: ${error.message}`, "error", 7000);
+    showStatus(`Unable to remove domain: ${error.message}`, "error", 7000);
   }
 }
 
@@ -360,38 +363,38 @@ async function removeWhitelistEntry(id) {
 }
 
 function setupEventHandlers() {
-  document.getElementById("add-integration")?.addEventListener("click", async () => {
-    const modal = document.getElementById("integration-modal");
+  document.getElementById("add-domain")?.addEventListener("click", async () => {
+    const modal = document.getElementById("domain-modal");
     try {
-      await fetchAvailableIntegrations();
+      await fetchAvailableDomains();
       if (modal) {
         modal.classList.add("active");
         modal.setAttribute("aria-hidden", "false");
       }
     } catch (error) {
-      // Error already handled in fetchAvailableIntegrations
+      // Error already handled in fetchAvailableDomains
     }
   });
 
-  document.getElementById("cancel-integration")?.addEventListener("click", () => {
-    const modal = document.getElementById("integration-modal");
+  document.getElementById("cancel-domain")?.addEventListener("click", () => {
+    const modal = document.getElementById("domain-modal");
     if (modal) {
       modal.classList.remove("active");
       modal.setAttribute("aria-hidden", "true");
     }
   });
 
-  document.getElementById("confirm-integration")?.addEventListener("click", async () => {
-    const select = document.getElementById("integration-select");
+  document.getElementById("confirm-domain")?.addEventListener("click", async () => {
+    const select = document.getElementById("domain-select");
     if (!(select instanceof HTMLSelectElement)) return;
-    const entryId = select.value;
-    if (!entryId) {
-      showStatus("Select an integration before adding.", "error", 4000);
+    const domain = select.value;
+    if (!domain) {
+      showStatus("Select a domain before adding.", "error", 4000);
       return;
     }
     try {
-      await addIntegration(entryId);
-      const modal = document.getElementById("integration-modal");
+      await addDomain(domain);
+      const modal = document.getElementById("domain-modal");
       if (modal) {
         modal.classList.remove("active");
         modal.setAttribute("aria-hidden", "true");
@@ -401,17 +404,17 @@ function setupEventHandlers() {
     }
   });
 
-  document.getElementById("refresh-integrations")?.addEventListener("click", async () => {
-    await loadSelectedIntegrations();
-    showStatus("Integrations refreshed.");
+  document.getElementById("refresh-domains")?.addEventListener("click", async () => {
+    await loadSelectedDomains();
+    showStatus("Domains refreshed.");
   });
 
-  document.querySelector("#integrations-table tbody")?.addEventListener("click", (event) => {
+  document.querySelector("#domains-table tbody")?.addEventListener("click", (event) => {
     const target = event.target;
-    if (target instanceof HTMLButtonElement && target.dataset.action === "remove-integration") {
-      const entryId = target.dataset.id;
-      if (entryId) {
-        removeIntegration(entryId);
+    if (target instanceof HTMLButtonElement && target.dataset.action === "remove-domain") {
+      const domain = target.dataset.id;
+      if (domain) {
+        removeDomain(domain);
       }
     }
   });
@@ -480,7 +483,7 @@ function setupEventHandlers() {
 async function init() {
   setupEventHandlers();
   await Promise.all([
-    loadSelectedIntegrations(),
+    loadSelectedDomains(),
     loadBlacklist(),
     loadWhitelist(),
     loadEntities(),
