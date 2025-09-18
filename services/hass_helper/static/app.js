@@ -260,7 +260,7 @@ function renderEntities() {
   if (!state.entities.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 7;
+    cell.colSpan = 6;
     cell.dataset.label = "Message";
     cell.textContent = "No entities ingested yet.";
     row.appendChild(cell);
@@ -311,10 +311,6 @@ function renderEntities() {
         ? deviceId
         : device?.device_id ||
           (deviceId === UNKNOWN_DEVICE_KEY ? "No device ID" : "");
-    const deviceInfo =
-      device?.model && device?.manufacturer
-        ? `${device.manufacturer} ${device.model}`.trim()
-        : device?.model || device?.manufacturer || "";
     const isExpanded = state.expandedDevices.has(deviceId);
 
     const deviceRow = document.createElement("tr");
@@ -361,10 +357,17 @@ function renderEntities() {
       meta.textContent = deviceMetaLabel;
       deviceCell.appendChild(meta);
     }
+    const deviceInfo =
+      device?.model && device?.manufacturer
+        ? `${device.manufacturer} ${device.model}`.trim()
+        : device?.model || device?.manufacturer || "";
+    if (deviceInfo) {
+      deviceCell.title = deviceInfo;
+    }
     deviceRow.appendChild(deviceCell);
 
     const deviceEntityCell = document.createElement("td");
-    deviceEntityCell.dataset.label = "Entity ID";
+    deviceEntityCell.dataset.label = "Entity Name";
     deviceEntityCell.textContent = "";
     deviceRow.appendChild(deviceEntityCell);
 
@@ -372,11 +375,6 @@ function renderEntities() {
     deviceIntegrationCell.dataset.label = "Integration";
     deviceIntegrationCell.textContent = integrationLabel;
     deviceRow.appendChild(deviceIntegrationCell);
-
-    const deviceNameCell = document.createElement("td");
-    deviceNameCell.dataset.label = "Name";
-    deviceNameCell.textContent = deviceInfo;
-    deviceRow.appendChild(deviceNameCell);
 
     const deviceMeasurementCell = document.createElement("td");
     deviceMeasurementCell.dataset.label = "Unit";
@@ -414,28 +412,28 @@ function renderEntities() {
       entityDeviceCell.classList.add("entity-device-cell");
       entityRow.appendChild(entityDeviceCell);
 
-      const entityIdCell = document.createElement("td");
-      entityIdCell.dataset.label = "Entity ID";
-      entityIdCell.textContent = entity.entity_id || "";
-      entityRow.appendChild(entityIdCell);
+      const attributes = entity.attributes || {};
+      const entityNameCell = document.createElement("td");
+      entityNameCell.dataset.label = "Entity Name";
+      const entityDisplayName =
+        entity.name ||
+        entity.original_name ||
+        entity.friendly_name ||
+        attributes.friendly_name ||
+        entity.object_id ||
+        entity.entity_id ||
+        "";
+      entityNameCell.textContent = entityDisplayName;
+      if (entity.entity_id && entity.entity_id !== entityDisplayName) {
+        entityNameCell.title = entity.entity_id;
+      }
+      entityRow.appendChild(entityNameCell);
 
       const entityIntegrationCell = document.createElement("td");
       entityIntegrationCell.dataset.label = "Integration";
       entityIntegrationCell.textContent =
         entity.integration_id || integrationLabel || "";
       entityRow.appendChild(entityIntegrationCell);
-
-      const entityNameCell = document.createElement("td");
-      entityNameCell.dataset.label = "Name";
-      const attributes = entity.attributes || {};
-      entityNameCell.textContent =
-        entity.name ||
-        entity.original_name ||
-        entity.friendly_name ||
-        attributes.friendly_name ||
-        entity.object_id ||
-        "";
-      entityRow.appendChild(entityNameCell);
 
       const entityMeasurementCell = document.createElement("td");
       entityMeasurementCell.dataset.label = "Unit";
