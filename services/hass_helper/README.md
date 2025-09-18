@@ -62,6 +62,30 @@ docker compose up --build
 
 Once the container is running, browse to `http://localhost:8000/` to use the UI.
 
+## Enable the Home Assistant API
+
+The helper relies on Home Assistant's REST API. Ensure the `api` integration is enabled and the
+HTTP server is reachable from the network where `hass-helper` runs. Copy the
+`configuration.example.yaml` file into your Home Assistant configuration directory and merge the
+settings into your existing `configuration.yaml`:
+
+```bash
+cp services/hass_helper/configuration.example.yaml /path/to/home-assistant/configuration.example.yaml
+# review the file and merge the sections into your existing configuration.yaml
+```
+
+At minimum you should:
+
+1. Enable the `api:` integration so the REST endpoints are exposed.
+2. Set `http.server_host: 0.0.0.0` (or another appropriate interface) so Home Assistant accepts
+   connections from your `hass-helper` instance.
+3. Configure `http.trusted_proxies` and `http.cors_allowed_origins` so requests from
+   `hass-helper` (and the UI running on port `8000`) are permitted.
+
+After updating `configuration.yaml`, restart Home Assistant to apply the changes. Generate a
+long-lived access token from your Home Assistant user profile and place it in the `.env` file so
+`hass-helper` can authenticate.
+
 ### Log viewing with Dozzle
 
 Structured JSON logs are emitted to stdout for every Home Assistant HTTP call and key ingest
