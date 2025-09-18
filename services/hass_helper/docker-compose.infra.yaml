@@ -6,8 +6,7 @@ services:
     container_name: hass-helper-dozzle
     restart: unless-stopped
     environment:
-      DOZZLE_ENABLE_AUTH: "false"
-      DOZZLE_FILTER: hass-helper
+      DOZZLE_FILTER: label=com.docker.compose.service=hass-helper
     ports:
       - "9999:8080"
     volumes:
