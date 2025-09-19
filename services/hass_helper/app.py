@@ -254,7 +254,7 @@ def _build_filtered_snapshot(
                 not entity_integration or entity_integration not in allowed_domains
             ):
                 continue
-            device_ref = entity.get("device_id") or device_id
+            device_ref = entity.get("device") or entity.get("device_id") or device_id
             if not repository.is_entity_allowed(
                 entity_id,
                 device_ref,
@@ -263,47 +263,49 @@ def _build_filtered_snapshot(
             ):
                 continue
 
-            attributes = entity.get("attributes")
-            if isinstance(attributes, dict):
-                attributes = dict(attributes)
-            else:
-                attributes = {}
             unit_value = (
-                entity.get("unit")
-                or entity.get("unit_of_measurement")
-                or attributes.get("unit_of_measurement")
+                entity.get("unit_of_measurement")
+                or entity.get("unit")
+                or entity.get("native_unit_of_measurement")
             )
-            if unit_value is not None:
-                attributes.setdefault("unit_of_measurement", unit_value)
-            for attr_key in ("device_class", "state_class", "icon", "friendly_name"):
-                attr_val = entity.get(attr_key) or attributes.get(attr_key)
-                if attr_val is not None:
-                    attributes.setdefault(attr_key, attr_val)
-            if entity.get("last_changed") is not None:
-                attributes.setdefault("last_changed", entity.get("last_changed"))
 
             record = {
-                "entity_id": entity_id,
-                "name": entity.get("name")
-                or entity.get("original_name")
-                or entity.get("friendly_name")
-                or attributes.get("friendly_name"),
-                "original_name": entity.get("original_name")
-                or entity.get("name")
-                or entity.get("friendly_name")
-                or attributes.get("friendly_name"),
-                "device_id": device_ref,
-                "area_id": entity.get("area_id")
-                or entity.get("area")
-                or device.get("area_id")
-                or device.get("area"),
-                "unique_id": entity.get("unique_id")
-                or entity.get("object_id"),
-                "integration_id": entity_integration,
-                "state": entity.get("state"),
-                "attributes": attributes,
-                "disabled_by": entity.get("disabled_by"),
+                key: value
+                for key, value in entity.items()
+                if value is not None and key != "attributes"
             }
+            record["entity_id"] = entity_id
+            if device_ref:
+                record.setdefault("device", device_ref)
+            if entity_integration:
+                record.setdefault("integration_id", entity_integration)
+            if unit_value is not None and not record.get("unit_of_measurement"):
+                record["unit_of_measurement"] = unit_value
+
+            area_value = (
+                record.get("area")
+                or device.get("area")
+                or device.get("area_id")
+            )
+            if area_value:
+                record["area"] = area_value
+
+            if not record.get("name"):
+                for candidate in (
+                    record.get("friendly_name"),
+                    record.get("object_id"),
+                    entity_id,
+                ):
+                    if candidate:
+                        record["name"] = candidate
+                        break
+
+            record.pop("device_id", None)
+            record.pop("area_id", None)
+            record.pop("original_name", None)
+            record.pop("unique_id", None)
+            record.pop("state", None)
+            record.pop("attributes", None)
             entity_records.append(record)
             filtered_entities.append(record)
             seen_entities.add(entity_id)
@@ -476,10 +478,10 @@ async def _ingest_entities() -> EntitiesResponse:
         for key in sorted(device_map.keys(), key=lambda item: str(item).lower())
     ]
 
-    repository.save_entities(raw_devices)
+    sanitized_devices = repository.save_entities(raw_devices)
 
     filtered = _build_filtered_snapshot(
-        raw_devices,
+        sanitized_devices,
         allowed_domains=set(selected_domains),
     )
 

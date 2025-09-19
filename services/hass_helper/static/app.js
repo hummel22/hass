@@ -119,14 +119,11 @@ async function fetchJson(url, options = {}) {
 
 function formatMeasurement(entity) {
   if (!entity) return "";
-  const attributes = entity.attributes || {};
   const unit =
     entity.unit_of_measurement ??
+    entity.native_unit_of_measurement ??
     entity.unit ??
-    attributes.unit_of_measurement ??
-    attributes.unit ??
-    attributes.measurement ??
-    attributes.native_unit_of_measurement ??
+    entity.measurement ??
     "";
   return unit ?? "";
 }
@@ -225,7 +222,7 @@ function renderEntities() {
   const deviceLookup = new Map();
   state.devices.forEach((device) => {
     if (!device) return;
-    const key = device.device_id ?? device.id;
+    const key = device.id ?? device.device_id;
     if (!key) return;
     deviceLookup.set(key, device);
   });
@@ -274,7 +271,7 @@ function renderEntities() {
   const deviceOrder = [];
   const groupedEntities = new Map();
   state.entities.forEach((entity) => {
-    const deviceId = entity.device_id || UNKNOWN_DEVICE_KEY;
+    const deviceId = entity.device || UNKNOWN_DEVICE_KEY;
     if (!groupedEntities.has(deviceId)) {
       groupedEntities.set(deviceId, []);
       deviceOrder.push(deviceId);
@@ -299,7 +296,6 @@ function renderEntities() {
       device?.area ||
       device?.area_id ||
       firstEntity?.area ||
-      firstEntity?.area_id ||
       "";
     const deviceDisplayName =
       device?.name_by_user ||
@@ -309,7 +305,7 @@ function renderEntities() {
     const deviceMetaLabel =
       deviceId && deviceId !== UNKNOWN_DEVICE_KEY
         ? deviceId
-        : device?.device_id ||
+        : device?.id ||
           (deviceId === UNKNOWN_DEVICE_KEY ? "No device ID" : "");
     const isExpanded = state.expandedDevices.has(deviceId);
 
@@ -412,14 +408,11 @@ function renderEntities() {
       entityDeviceCell.classList.add("entity-device-cell");
       entityRow.appendChild(entityDeviceCell);
 
-      const attributes = entity.attributes || {};
       const entityNameCell = document.createElement("td");
       entityNameCell.dataset.label = "Entity Name";
       const entityDisplayName =
         entity.name ||
-        entity.original_name ||
         entity.friendly_name ||
-        attributes.friendly_name ||
         entity.object_id ||
         entity.entity_id ||
         "";
@@ -443,7 +436,7 @@ function renderEntities() {
       const entityAreaCell = document.createElement("td");
       entityAreaCell.dataset.label = "Area";
       entityAreaCell.textContent =
-        entity.area || entity.area_id || attributes.area || areaLabel || "";
+        entity.area || areaLabel || "";
       entityRow.appendChild(entityAreaCell);
 
       entityBody.appendChild(entityRow);
