@@ -206,6 +206,7 @@ class DataRepository:
             return data
 
         updated = self.blacklist_store.update(updater)
+        self._purge_entities_store(target_type, target_id)
         return {
             "entities": list(updated.get("entities", [])),
             "devices": list(updated.get("devices", [])),
@@ -227,6 +228,71 @@ class DataRepository:
             "entities": list(updated.get("entities", [])),
             "devices": list(updated.get("devices", [])),
         }
+
+    def _purge_entities_store(self, target_type: str, target_id: str) -> None:
+        """Remove blacklisted entries from the persisted entity snapshot."""
+
+        target_type = target_type.lower()
+        if target_type not in {"entity", "device"}:
+            return
+
+        def updater(data: Dict[str, Any]) -> Dict[str, Any]:
+            if not isinstance(data, dict):
+                return {"devices": []}
+
+            devices = data.get("devices")
+            if not isinstance(devices, list):
+                data["devices"] = []
+                return data
+
+            changed = False
+            new_devices: List[Dict[str, Any]] = []
+
+            for device in devices:
+                if not isinstance(device, dict):
+                    continue
+
+                device_id = device.get("id") or device.get("device_id")
+                if target_type == "device" and device_id == target_id:
+                    changed = True
+                    continue
+
+                sanitized_device: Dict[str, Any] = json.loads(json.dumps(device))
+                entities = sanitized_device.get("entities")
+                if not isinstance(entities, list):
+                    entities = []
+
+                sanitized_entities: List[Dict[str, Any]] = []
+                removed_entity = False
+
+                for entity in entities:
+                    if not isinstance(entity, dict):
+                        continue
+
+                    entity_id = entity.get("entity_id")
+                    if target_type == "entity" and entity_id == target_id:
+                        removed_entity = True
+                        changed = True
+                        continue
+
+                    sanitized_entities.append(entity)
+
+                sanitized_device["entities"] = sanitized_entities
+
+                if target_type == "entity" and removed_entity and not sanitized_entities:
+                    # Drop devices that no longer contain entities after the purge.
+                    continue
+
+                new_devices.append(sanitized_device)
+
+            if not changed:
+                return data
+
+            data = json.loads(json.dumps(data))
+            data["devices"] = new_devices
+            return data
+
+        self.entities_store.update(updater)
 
     # Whitelist -----------------------------------------------------------
     def get_whitelist(self) -> Dict[str, List[str]]:

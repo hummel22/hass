@@ -578,7 +578,7 @@ async function addBlacklistEntry(type, id) {
       body: JSON.stringify({ target_type: type, target_id: id }),
     });
     showStatus("Blacklist updated.");
-    await loadBlacklist();
+    await Promise.all([loadBlacklist(), loadEntities()]);
   } catch (error) {
     showStatus(`Failed to update blacklist: ${error.message}`, "error", 7000);
   }
