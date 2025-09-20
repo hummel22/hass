@@ -1,0 +1,50 @@
+{%- set devices = states
+  | map(attribute='entity_id')
+  | map('device_id')
+  | unique
+  | reject('eq', None)
+  | list
+%}
+
+{%- set ns = namespace(devices = []) %}
+
+{%- for device in devices %}
+  {%- set ids = device_attr(device, 'identifiers') | list | first %}
+  {%- if ids and ids | length == 2 and ids[0] == find_integration %}
+    {%- set ents = device_entities(device) %}
+
+    {# Build a list of entity *objects* for this device #}
+    {%- set ent_ns = namespace(items = []) %}
+    {%- for e in ents %}
+      {%- set ent_ns.items = ent_ns.items + [ {
+        'entity_id': e,
+        'domain': (e.split('.')[0] if '.' in e else None),
+        'object_id': (e.split('.')[1] if '.' in e else e),
+        'friendly_name': state_attr(e, 'friendly_name'),
+        'state': states(e),
+        'unit': state_attr(e, 'unit_of_measurement'),
+        'device_class': state_attr(e, 'device_class'),
+        'state_class': state_attr(e, 'state_class'),
+        'icon': state_attr(e, 'icon'),
+        'last_changed': (states[e].last_changed if e in states else None),
+        'area': area_name(e)
+      } ] %}
+    {%- endfor %}
+
+    {# Prefer area from the first entity if available #}
+    {%- set device_area = area_name(ents[0]) if ents|length > 0 else None %}
+
+    {%- set ns.devices = ns.devices + [ {
+      'device_id': device,
+      'name_by_user': device_attr(device, 'name_by_user'),
+      'name': device_attr(device, 'name'),
+      'manufacturer': device_attr(device, 'manufacturer'),
+      'model': device_attr(device, 'model'),
+      'sw_version': device_attr(device, 'sw_version'),
+      'area': device_area,
+      'entities': ent_ns.items
+    } ] %}
+  {%- endif %}
+{%- endfor %}
+
+{{ ns.devices | tojson }}

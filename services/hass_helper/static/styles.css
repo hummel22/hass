@@ -38,38 +38,6 @@ main {
   max-width: 1100px;
 }
 
-.tabs {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.tab-button {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: #f8fafc;
-  padding: 0.5rem 1.5rem;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-}
-
-.tab-button.active,
-.tab-button:hover {
-  background: var(--accent);
-  color: #f8fafc;
-  transform: translateY(-1px);
-}
-
-.tab-content {
-  display: none;
-}
-
-.tab-content.active {
-  display: block;
-}
-
 .panel {
   background: rgba(248, 250, 252, 0.95);
   backdrop-filter: blur(12px);
@@ -123,11 +91,39 @@ button:hover {
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.15);
 }
 
+button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.8);
+  outline-offset: 2px;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+button.loading {
+  position: relative;
+  padding-right: 2.5rem;
+}
+
+button.loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+  transform: translateY(-50%);
 }
 
 table {
@@ -151,6 +147,12 @@ thead th {
   color: #1e293b;
 }
 
+#entities-table th.icon-col,
+#entities-table td:first-child {
+  text-align: center;
+  width: 4.5rem;
+}
+
 tbody td {
   padding: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.25);
@@ -160,6 +162,120 @@ tbody td {
 
 tbody tr:hover {
   background: var(--accent-light);
+}
+
+button.icon-button {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--accent);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+button.icon-button:hover {
+  transform: none;
+  box-shadow: none;
+  background: rgba(37, 99, 235, 0.24);
+}
+
+button.icon-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+button.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(148, 163, 184, 0.3);
+  color: rgba(15, 23, 42, 0.35);
+  box-shadow: none;
+  transform: none;
+}
+
+button.loading-icon {
+  position: relative;
+  color: transparent;
+}
+
+button.loading-icon::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  transform: translate(-50%, -50%);
+  animation: spin 0.8s linear infinite;
+}
+
+#entities-table tbody tr.device-row {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+#entities-table tbody tr.entity-row {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+#entities-table tbody tr.entity-row td {
+  border-top: none;
+}
+
+#entities-table tbody tr.entity-row .entity-device-cell {
+  padding-left: 2.5rem;
+}
+
+button.toggle-entities {
+  background: transparent;
+  color: inherit;
+  padding: 0.25rem 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+button.toggle-entities:hover {
+  background: rgba(37, 99, 235, 0.12);
+  transform: none;
+}
+
+button.toggle-entities:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.65);
+  outline-offset: 2px;
+}
+
+button.toggle-entities:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.toggle-entities .toggle-icon {
+  font-size: 0.9rem;
+}
+
+button.toggle-entities .toggle-count {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.device-id-tag {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  font-size: 0.75rem;
+  color: #475569;
 }
 
 table .actions {
@@ -196,17 +312,69 @@ small.muted {
   color: #64748b;
 }
 
-.status-bar {
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 10px;
-  background: rgba(37, 99, 235, 0.15);
-  color: #1e293b;
+.toast {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.2rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
+  z-index: 1200;
+  min-width: 240px;
+  max-width: min(90vw, 480px);
+  line-height: 1.4;
+  animation: toast-in 0.25s ease-out;
 }
 
-.status-bar.error {
-  background: rgba(185, 28, 28, 0.2);
-  color: #7f1d1d;
+.toast.toast--info {
+  background: rgba(37, 99, 235, 0.92);
+}
+
+.toast.toast--error {
+  background: rgba(185, 28, 28, 0.92);
+}
+
+.toast .toast-message {
+  flex: 1;
+}
+
+.toast .toast-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 50%;
+  transition: background 0.2s ease;
+}
+
+.toast .toast-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+@keyframes spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .modal {
