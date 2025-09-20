@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: hass-helper-dozzle
+    restart: unless-stopped
+    environment:
+      DOZZLE_FILTER: label=com.docker.compose.service=hass-helper
+    ports:
+      - "9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - hass-helper

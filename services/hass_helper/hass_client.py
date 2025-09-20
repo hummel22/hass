@@ -2,10 +2,28 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+
+_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+
+
+def _load_template(name: str) -> str:
+    path = _TEMPLATE_DIR / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:  # pragma: no cover - environment specific failure
+        raise RuntimeError(f"Unable to load template '{name}'") from exc
+
+
+DOMAIN_LIST_TEMPLATE = _load_template("domain_list.j2")
+DOMAIN_ENTITIES_TEMPLATE = _load_template("domain_entities.j2")
 
 
 class HomeAssistantError(RuntimeError):
@@ -30,6 +48,7 @@ class HomeAssistantClient:
         self._settings = settings
         self._client: Optional[httpx.AsyncClient] = None
         self._lock = asyncio.Lock()
+        self._logger = logging.getLogger("hass_helper.http")
 
     @property
     def is_configured(self) -> bool:
@@ -62,54 +81,107 @@ class HomeAssistantClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         client = await self._get_client()
+        start = time.perf_counter()
+        template_expr: Optional[str] = None
+        if path == "/api/template":
+            json_payload = kwargs.get("json")
+            if isinstance(json_payload, dict):
+                template_value = json_payload.get("template")
+                if isinstance(template_value, str):
+                    template_expr = template_value
         try:
             response = await client.request(method, path, **kwargs)
+            duration_ms = (time.perf_counter() - start) * 1000
+            extra = {
+                "method": method,
+                "path": path,
+                "url": str(response.request.url),
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 3),
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            response = exc.response
+            request = response.request if response is not None else None
+            extra = {
+                "method": method,
+                "path": path,
+                "url": str(request.url) if request else path,
+                "status_code": response.status_code if response else None,
+                "reason": response.reason_phrase if response else None,
+                "duration_ms": round(duration_ms, 3),
+                "error": True,
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             raise HomeAssistantError(
                 f"Home Assistant request failed: {exc.response.status_code} {exc.response.reason_phrase}",
                 status_code=exc.response.status_code,
             ) from exc
         except httpx.HTTPError as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            request = getattr(exc, "request", None)
+            url = str(request.url) if request else path
+            extra = {
+                "method": method,
+                "path": path,
+                "url": url,
+                "duration_ms": round(duration_ms, 3),
+                "error": True,
+                "exception": exc.__class__.__name__,
+            }
+            if template_expr is not None:
+                extra["template"] = template_expr
+            self._logger.debug("home_assistant_http_call", extra=extra)
             raise HomeAssistantError("Error communicating with Home Assistant") from exc
         if response.content:
             return response.json()
         return None
 
-    async def fetch_integrations(self) -> List[Dict[str, Any]]:
-        """Return the list of configured integration entries."""
-        data = await self._request("GET", "/api/config/config_entries/entry")
-        if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching integrations")
+    async def render_template(
+        self, template: str, variables: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        payload: Dict[str, Any] = {"template": template}
+        if variables:
+            payload["variables"] = variables
+        data = await self._request("POST", "/api/template", json=payload)
+        if data is None:
+            raise HomeAssistantError("Template response was empty")
+        extra: Dict[str, Any] = {"template": template, "result": data}
+        if variables:
+            extra["variables"] = variables
+        self._logger.debug("home_assistant_template_response", extra=extra)
         return data
 
-    async def fetch_entity_registry(self) -> List[Dict[str, Any]]:
-        try:
-            data = await self._request("GET", "/api/config/entity_registry/list")
-        except HomeAssistantError as exc:
-            if exc.status_code not in {404, 405}:
-                raise
-            data = await self._request("POST", "/api/config/entity_registry/list", json={})
-        if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching entity registry")
-        return data
+    async def fetch_domains(self) -> List[str]:
+        """Return a sorted list of available integrations derived from device identifiers."""
 
-    async def fetch_device_registry(self) -> List[Dict[str, Any]]:
-        try:
-            data = await self._request("GET", "/api/config/device_registry/list")
-        except HomeAssistantError as exc:
-            if exc.status_code not in {404, 405}:
-                raise
-            data = await self._request("POST", "/api/config/device_registry/list", json={})
+        data = await self.render_template(DOMAIN_LIST_TEMPLATE)
         if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching device registry")
-        return data
+            raise HomeAssistantError("Unexpected response while fetching domains")
+        return [domain for domain in data if isinstance(domain, str)]
 
-    async def fetch_states(self) -> List[Dict[str, Any]]:
-        data = await self._request("GET", "/api/states")
+    async def fetch_domain_devices(self, domain: str) -> List[Dict[str, Any]]:
+        """Return device metadata (with nested entities) for a single domain."""
+
+        domain = (domain or "").strip()
+        if not domain:
+            return []
+        data = await self.render_template(
+            DOMAIN_ENTITIES_TEMPLATE, {"find_integration": domain}
+        )
         if not isinstance(data, list):
-            raise HomeAssistantError("Unexpected response while fetching states")
-        return data
+            raise HomeAssistantError("Unexpected response while fetching domain snapshot")
+        devices: List[Dict[str, Any]] = []
+        for item in data:
+            if isinstance(item, dict):
+                devices.append(item)
+        return devices
 
 
 __all__ = [

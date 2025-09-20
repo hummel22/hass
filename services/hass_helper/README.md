@@ -1,9 +1,9 @@
 # HASS Helper Service
 
 This service provides a small FastAPI application that connects to a Home Assistant instance,
-collects entity and device metadata filtered by configured integrations, and stores the results
-locally as JSON files. A lightweight web UI is bundled to manage integrations, blacklists, and
-whitelists, and to trigger ingestion runs.
+collects entity and device metadata filtered by configured domains, and stores the results locally
+as JSON files. A lightweight web UI is bundled to manage domains, blacklists, and whitelists, and
+to trigger ingestion runs.
 
 ## Configuration
 
@@ -25,7 +25,7 @@ cp services/hass_helper/.env.example services/hass_helper/.env
 
 The service reads and persists JSON data inside `services/hass_helper/data/`:
 
-- `integrations.json` – Selected integration entries used during ingest.
+- `integrations.json` – Selected Home Assistant domains used during ingest.
 - `entities.json` – Cached entities and devices from the most recent ingest run.
 - `blacklist.json` – Entity and device IDs excluded during ingest.
 - `whitelist.json` – Entity IDs that override blacklist filtering.
@@ -61,3 +61,40 @@ docker compose up --build
 ```
 
 Once the container is running, browse to `http://localhost:8000/` to use the UI.
+
+## Enable the Home Assistant API
+
+The helper relies on Home Assistant's REST API. Ensure the `api` integration is enabled and the
+HTTP server is reachable from the network where `hass-helper` runs. Copy the
+`configuration.example.yaml` file into your Home Assistant configuration directory and merge the
+settings into your existing `configuration.yaml`:
+
+```bash
+cp services/hass_helper/configuration.example.yaml /path/to/home-assistant/configuration.example.yaml
+# review the file and merge the sections into your existing configuration.yaml
+```
+
+At minimum you should:
+
+1. Enable the `api:` integration so the REST endpoints are exposed.
+2. Set `http.server_host: 0.0.0.0` (or another appropriate interface) so Home Assistant accepts
+   connections from your `hass-helper` instance.
+3. Configure `http.trusted_proxies` and `http.cors_allowed_origins` so requests from
+   `hass-helper` (and the UI running on port `8000`) are permitted.
+
+After updating `configuration.yaml`, restart Home Assistant to apply the changes. Generate a
+long-lived access token from your Home Assistant user profile and place it in the `.env` file so
+`hass-helper` can authenticate.
+
+### Log viewing with Dozzle
+
+Structured JSON logs are emitted to stdout for every Home Assistant HTTP call and key ingest
+operations. A companion Compose file is provided to run [Dozzle](https://dozzle.dev/) for viewing
+these logs alongside the application:
+
+```bash
+cd services/hass_helper
+docker compose -f docker-compose.yml -f docker-compose.infra.yaml up
+```
+
+Dozzle is exposed on `http://localhost:9999/` and is pre-filtered to the `hass-helper` container.

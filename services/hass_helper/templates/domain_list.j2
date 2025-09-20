@@ -1,0 +1,17 @@
+{%- set devices = states | map(attribute='entity_id') | map('device_id') | unique | reject('eq', None) | list %}
+{%- set ns = namespace(integrations = []) %}
+{%- for device in devices %}
+  {%- set identifiers = device_attr(device, 'identifiers') | default([], true) %}
+  {%- set first_identifier = identifiers | list | first %}
+  {%- if first_identifier is iterable and first_identifier is not string and first_identifier | length >= 1 %}
+    {%- set integration = first_identifier[0] %}
+  {%- elif first_identifier %}
+    {%- set integration = first_identifier %}
+  {%- else %}
+    {%- set integration = None %}
+  {%- endif %}
+  {%- if integration and integration not in ns.integrations %}
+    {%- set ns.integrations = ns.integrations + [integration] %}
+  {%- endif %}
+{%- endfor %}
+{{ ns.integrations | sort | to_json }}

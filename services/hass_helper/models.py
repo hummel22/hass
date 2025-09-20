@@ -6,18 +6,16 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class IntegrationEntry(BaseModel):
-    entry_id: str = Field(..., description="Unique identifier of the integration entry")
-    domain: Optional[str] = Field(None, description="Integration domain")
+class DomainEntry(BaseModel):
+    domain: str = Field(..., description="Home Assistant domain identifier")
     title: Optional[str] = Field(None, description="Human readable name")
 
 
-class IntegrationSelectionRequest(BaseModel):
-    integration_id: str = Field(..., description="Identifier of the integration entry")
+class DomainSelectionRequest(BaseModel):
+    domain: str = Field(..., description="Domain to include during ingest")
 
 
 class EntitiesIngestResponse(BaseModel):
-    entities: List[Dict[str, Any]]
     devices: List[Dict[str, Any]]
 
 
@@ -37,14 +35,22 @@ class MessageResponse(BaseModel):
 class EntityRecord(BaseModel):
     entity_id: str
     name: Optional[str] = None
-    original_name: Optional[str] = None
-    device_id: Optional[str] = None
-    area_id: Optional[str] = None
-    unique_id: Optional[str] = None
+    friendly_name: Optional[str] = None
+    object_id: Optional[str] = None
+    device: Optional[str] = None
+    area: Optional[str] = None
     integration_id: Optional[str] = None
-    state: Optional[str] = None
-    attributes: Dict[str, Any] = Field(default_factory=dict)
+    unit_of_measurement: Optional[str] = None
+    native_unit_of_measurement: Optional[str] = None
+    device_class: Optional[str] = None
+    state_class: Optional[str] = None
+    icon: Optional[str] = None
+    last_changed: Optional[str] = None
+    entity_category: Optional[str] = None
     disabled_by: Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 
 class DeviceRecord(BaseModel):
@@ -58,11 +64,16 @@ class DeviceRecord(BaseModel):
     area_id: Optional[str] = None
     via_device_id: Optional[str] = None
     identifiers: List[Any] = Field(default_factory=list)
+    integration_id: Optional[str] = None
+
+
+class DeviceEntitiesRecord(DeviceRecord):
+    entities: List[EntityRecord] = Field(default_factory=list)
 
 
 class EntitiesResponse(BaseModel):
     entities: List[EntityRecord]
-    devices: List[DeviceRecord]
+    devices: List[DeviceEntitiesRecord]
 
 
 class BlacklistResponse(BaseModel):

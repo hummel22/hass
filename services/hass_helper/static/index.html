@@ -12,29 +12,37 @@
       <p class="subtitle">Manage integrations, entity ingest, and curation lists.</p>
     </header>
     <main>
-      <div id="status" class="status-bar" hidden></div>
-      <nav class="tabs">
-        <button class="tab-button active" data-target="entity-tab">Entity</button>
-      </nav>
-      <section id="entity-tab" class="tab-content active">
+      <div
+        id="toast"
+        class="toast"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <span class="toast-message"></span>
+        <button type="button" class="toast-close" aria-label="Dismiss notification">
+          &times;
+        </button>
+      </div>
+      <section id="entity-tab">
         <article class="panel">
           <div class="panel-header">
-            <h2>Integrations</h2>
+            <h2>Domains</h2>
             <div class="panel-actions">
-              <button id="refresh-integrations" class="secondary">Refresh</button>
-              <button id="add-integration" class="primary">Add integration</button>
+              <button id="refresh-domains" class="secondary">Refresh</button>
+              <button id="add-domain" class="primary">Add domain</button>
             </div>
           </div>
           <p>
-            The integrations listed below are used when ingesting entities and devices.
-            Add additional integrations to include their entities in the export.
+            The domains listed below determine which integrations are queried when ingesting
+            entities and devices. Add additional domains to include their entities in the export.
           </p>
-          <table id="integrations-table">
+          <table id="domains-table">
             <thead>
               <tr>
-                <th>Title</th>
                 <th>Domain</th>
-                <th>Entry ID</th>
+                <th>Display name</th>
                 <th class="actions">Actions</th>
               </tr>
             </thead>
@@ -137,26 +145,12 @@
           <table id="entities-table">
             <thead>
               <tr>
-                <th>Entity ID</th>
-                <th>Name</th>
-                <th>State</th>
-                <th>Device ID</th>
-                <th>Area</th>
-                <th>Integration</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <h3>Devices</h3>
-          <small class="muted" id="device-count"></small>
-          <table id="devices-table">
-            <thead>
-              <tr>
-                <th>Device ID</th>
-                <th>Name</th>
-                <th>Manufacturer</th>
-                <th>Model</th>
-                <th>Area</th>
+                <th class="icon-col" scope="col">Blacklist</th>
+                <th scope="col">Device</th>
+                <th scope="col">Entity Name</th>
+                <th scope="col">Integration</th>
+                <th scope="col">Unit</th>
+                <th scope="col">Area</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -165,15 +159,15 @@
       </section>
     </main>
 
-    <div class="modal" id="integration-modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal" id="domain-modal" role="dialog" aria-modal="true" aria-hidden="true">
       <div class="modal-content">
-        <h3>Select an integration</h3>
-        <p>Select a Home Assistant integration to add to the ingest list.</p>
-        <label for="integration-select" class="muted">Available integrations</label>
-        <select id="integration-select"></select>
+        <h3>Select a domain</h3>
+        <p>Select a Home Assistant domain to add to the ingest list.</p>
+        <label for="domain-select" class="muted">Available domains</label>
+        <select id="domain-select"></select>
         <div class="modal-actions">
-          <button id="cancel-integration" class="secondary">Cancel</button>
-          <button id="confirm-integration" class="primary">Add</button>
+          <button id="cancel-domain" class="secondary">Cancel</button>
+          <button id="confirm-domain" class="primary">Add</button>
         </div>
       </div>
     </div>

@@ -1,33 +1,96 @@
-const statusEl = document.getElementById("status");
+const toastEl = document.getElementById("toast");
+const toastMessageEl = toastEl?.querySelector(".toast-message") ?? null;
+const toastCloseEl = toastEl?.querySelector(".toast-close") ?? null;
 let statusTimer;
 
 const state = {
-  selectedIntegrations: [],
-  availableIntegrations: [],
+  selectedDomains: [],
+  availableDomains: [],
   blacklist: { entities: [], devices: [] },
   whitelist: [],
   entities: [],
   devices: [],
+  expandedDevices: new Set(),
 };
 
+const UNKNOWN_DEVICE_KEY = "__no_device__";
+
+function setButtonLoading(button, loadingText = "Working…") {
+  if (!(button instanceof HTMLButtonElement)) return;
+  const loadingStyle = button.dataset.loadingStyle || "text";
+  button.setAttribute("aria-busy", "true");
+  if (loadingStyle === "icon") {
+    button.disabled = true;
+    button.classList.add("loading-icon");
+    return;
+  }
+  if (!button.dataset.originalLabel) {
+    button.dataset.originalLabel = button.textContent ?? "";
+  }
+  button.textContent = loadingText;
+  button.disabled = true;
+  button.classList.add("loading");
+}
+
+function clearButtonLoading(button) {
+  if (!(button instanceof HTMLButtonElement)) return;
+  const loadingStyle = button.dataset.loadingStyle || "text";
+  button.disabled = false;
+  button.removeAttribute("aria-busy");
+  button.classList.remove("loading");
+  if (loadingStyle === "icon") {
+    button.classList.remove("loading-icon");
+    return;
+  }
+  const originalLabel = button.dataset.originalLabel ?? "";
+  button.textContent = originalLabel;
+  delete button.dataset.originalLabel;
+}
+
+async function withButtonLoading(button, action, loadingText = "Working…") {
+  const target = button instanceof HTMLButtonElement ? button : null;
+  if (target) {
+    setButtonLoading(target, loadingText);
+  }
+  try {
+    return await action();
+  } finally {
+    if (target) {
+      clearButtonLoading(target);
+    }
+  }
+}
+
 function showStatus(message, type = "info", timeout = 5000) {
-  if (!statusEl) return;
+  if (!toastEl || !toastMessageEl) return;
   clearTimeout(statusTimer);
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", type === "error");
-  statusEl.hidden = false;
+  toastEl.setAttribute("role", type === "error" ? "alert" : "status");
+  toastEl.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+  toastMessageEl.textContent = message;
+  toastEl.classList.toggle("toast--error", type === "error");
+  toastEl.classList.toggle("toast--info", type !== "error");
+  toastEl.hidden = false;
+  if (type === "error") {
+    timeout = 0;
+  }
   if (timeout > 0) {
     statusTimer = setTimeout(() => {
-      statusEl.hidden = true;
+      hideStatus();
     }, timeout);
   }
 }
 
 function hideStatus() {
-  if (!statusEl) return;
+  if (!toastEl || !toastMessageEl) return;
   clearTimeout(statusTimer);
-  statusEl.hidden = true;
+  toastEl.hidden = true;
+  toastMessageEl.textContent = "";
+  toastEl.classList.remove("toast--error", "toast--info");
+  toastEl.setAttribute("role", "status");
+  toastEl.setAttribute("aria-live", "polite");
 }
+
+toastCloseEl?.addEventListener("click", () => hideStatus());
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -54,24 +117,34 @@ async function fetchJson(url, options = {}) {
   return response.text();
 }
 
-function renderSelectedIntegrations() {
-  const tbody = document.querySelector("#integrations-table tbody");
+function formatMeasurement(entity) {
+  if (!entity) return "";
+  const unit =
+    entity.unit_of_measurement ??
+    entity.native_unit_of_measurement ??
+    entity.unit ??
+    entity.measurement ??
+    "";
+  return unit ?? "";
+}
+
+function renderSelectedDomains() {
+  const tbody = document.querySelector("#domains-table tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
-  if (!state.selectedIntegrations.length) {
+  if (!state.selectedDomains.length) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="4" data-label="Message">No integrations selected.</td>';
+    row.innerHTML = '<td colspan="3" data-label="Message">No domains selected.</td>';
     tbody.appendChild(row);
     return;
   }
-  state.selectedIntegrations.forEach((entry) => {
+  state.selectedDomains.forEach((entry) => {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td data-label="Title">${entry.title || "Unknown"}</td>
-      <td data-label="Domain">${entry.domain || ""}</td>
-      <td data-label="Entry ID">${entry.entry_id}</td>
+      <td data-label="Domain">${entry.domain}</td>
+      <td data-label="Display name">${entry.title || entry.domain}</td>
       <td class="actions">
-        <button class="danger" data-action="remove-integration" data-id="${entry.entry_id}">Remove</button>
+        <button class="danger" data-action="remove-domain" data-id="${entry.domain}">Remove</button>
       </td>
     `;
     tbody.appendChild(row);
@@ -146,66 +219,242 @@ function renderWhitelist() {
 function renderEntities() {
   const entityBody = document.querySelector("#entities-table tbody");
   const entityCount = document.getElementById("entity-count");
-  const deviceBody = document.querySelector("#devices-table tbody");
-  const deviceCount = document.getElementById("device-count");
+  const deviceLookup = new Map();
+  state.devices.forEach((device) => {
+    if (!device) return;
+    const key = device.id ?? device.device_id;
+    if (!key) return;
+    deviceLookup.set(key, device);
+  });
 
-  if (entityBody) {
-    entityBody.innerHTML = "";
-    if (!state.entities.length) {
-      const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="6" data-label="Message">No entities ingested yet.</td>';
-      entityBody.appendChild(row);
-    } else {
-      state.entities.forEach((entity) => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td data-label="Entity ID">${entity.entity_id}</td>
-          <td data-label="Name">${entity.name || entity.original_name || ""}</td>
-          <td data-label="State">${entity.state ?? ""}</td>
-          <td data-label="Device ID">${entity.device_id ?? ""}</td>
-          <td data-label="Area">${entity.area_id ?? ""}</td>
-          <td data-label="Integration">${entity.integration_id ?? ""}</td>
-        `;
-        entityBody.appendChild(row);
-      });
+  const createBlacklistButton = ({ action, id, label, disabled = false }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button";
+    button.dataset.action = action;
+    button.dataset.loadingStyle = "icon";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.textContent = "+";
+    if (id) {
+      button.dataset.id = id;
     }
+    if (disabled) {
+      button.disabled = true;
+    }
+    return button;
+  };
+
+  if (!entityBody) {
+    if (entityCount) {
+      entityCount.textContent = `${state.entities.length} entities`;
+    }
+    return;
   }
+
+  entityBody.innerHTML = "";
+
+  if (!state.entities.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.dataset.label = "Message";
+    cell.textContent = "No entities ingested yet.";
+    row.appendChild(cell);
+    entityBody.appendChild(row);
+    if (entityCount) {
+      entityCount.textContent = "0 entities";
+    }
+    return;
+  }
+
+  const deviceOrder = [];
+  const groupedEntities = new Map();
+  state.entities.forEach((entity) => {
+    const deviceId = entity.device || UNKNOWN_DEVICE_KEY;
+    if (!groupedEntities.has(deviceId)) {
+      groupedEntities.set(deviceId, []);
+      deviceOrder.push(deviceId);
+    }
+    groupedEntities.get(deviceId)?.push(entity);
+  });
+
+  const validDeviceIds = new Set(deviceOrder);
+  Array.from(state.expandedDevices).forEach((deviceId) => {
+    if (!validDeviceIds.has(deviceId)) {
+      state.expandedDevices.delete(deviceId);
+    }
+  });
+
+  deviceOrder.forEach((deviceId) => {
+    const entities = groupedEntities.get(deviceId) ?? [];
+    const device = deviceLookup.get(deviceId) || null;
+    const firstEntity = entities[0] || null;
+    const integrationLabel =
+      device?.integration_id || firstEntity?.integration_id || "";
+    const areaLabel =
+      device?.area ||
+      device?.area_id ||
+      firstEntity?.area ||
+      "";
+    const deviceDisplayName =
+      device?.name_by_user ||
+      device?.name ||
+      (deviceId === UNKNOWN_DEVICE_KEY ? "Unassigned entities" : deviceId) ||
+      "";
+    const deviceMetaLabel =
+      deviceId && deviceId !== UNKNOWN_DEVICE_KEY
+        ? deviceId
+        : device?.id ||
+          (deviceId === UNKNOWN_DEVICE_KEY ? "No device ID" : "");
+    const isExpanded = state.expandedDevices.has(deviceId);
+
+    const deviceRow = document.createElement("tr");
+    deviceRow.classList.add("device-row");
+    deviceRow.dataset.deviceId = deviceId;
+
+    const blacklistCell = document.createElement("td");
+    blacklistCell.dataset.label = "Blacklist";
+    const deviceButton = createBlacklistButton({
+      action: "blacklist-device",
+      id: deviceId !== UNKNOWN_DEVICE_KEY ? deviceId : undefined,
+      label:
+        deviceId !== UNKNOWN_DEVICE_KEY
+          ? `Add device ${deviceDisplayName} to blacklist`
+          : "Device ID unavailable",
+      disabled: deviceId === UNKNOWN_DEVICE_KEY,
+    });
+    blacklistCell.appendChild(deviceButton);
+    deviceRow.appendChild(blacklistCell);
+
+    const deviceCell = document.createElement("td");
+    deviceCell.dataset.label = "Device";
+    deviceCell.classList.add("device-cell");
+    const toggleButton = document.createElement("button");
+    toggleButton.type = "button";
+    toggleButton.className = "toggle-entities";
+    toggleButton.dataset.action = "toggle-device";
+    toggleButton.dataset.id = deviceId;
+    toggleButton.setAttribute("aria-expanded", String(isExpanded));
+    const toggleIcon = document.createElement("span");
+    toggleIcon.className = "toggle-icon";
+    toggleIcon.textContent = isExpanded ? "▾" : "▸";
+    const toggleLabel = document.createElement("span");
+    toggleLabel.className = "toggle-label";
+    toggleLabel.textContent = deviceDisplayName;
+    const toggleCount = document.createElement("span");
+    toggleCount.className = "toggle-count";
+    toggleCount.textContent = `(${entities.length})`;
+    toggleButton.append(toggleIcon, toggleLabel, toggleCount);
+    deviceCell.appendChild(toggleButton);
+    if (deviceMetaLabel) {
+      const meta = document.createElement("div");
+      meta.className = "device-id-tag";
+      meta.textContent = deviceMetaLabel;
+      deviceCell.appendChild(meta);
+    }
+    const deviceInfo =
+      device?.model && device?.manufacturer
+        ? `${device.manufacturer} ${device.model}`.trim()
+        : device?.model || device?.manufacturer || "";
+    if (deviceInfo) {
+      deviceCell.title = deviceInfo;
+    }
+    deviceRow.appendChild(deviceCell);
+
+    const deviceEntityCell = document.createElement("td");
+    deviceEntityCell.dataset.label = "Entity Name";
+    deviceEntityCell.textContent = "";
+    deviceRow.appendChild(deviceEntityCell);
+
+    const deviceIntegrationCell = document.createElement("td");
+    deviceIntegrationCell.dataset.label = "Integration";
+    deviceIntegrationCell.textContent = integrationLabel;
+    deviceRow.appendChild(deviceIntegrationCell);
+
+    const deviceMeasurementCell = document.createElement("td");
+    deviceMeasurementCell.dataset.label = "Unit";
+    deviceMeasurementCell.textContent = "";
+    deviceRow.appendChild(deviceMeasurementCell);
+
+    const deviceAreaCell = document.createElement("td");
+    deviceAreaCell.dataset.label = "Area";
+    deviceAreaCell.textContent = areaLabel;
+    deviceRow.appendChild(deviceAreaCell);
+
+    entityBody.appendChild(deviceRow);
+
+    if (!isExpanded) {
+      return;
+    }
+
+    entities.forEach((entity) => {
+      const entityRow = document.createElement("tr");
+      entityRow.classList.add("entity-row");
+      entityRow.dataset.parentDevice = deviceId;
+
+      const entityBlacklistCell = document.createElement("td");
+      entityBlacklistCell.dataset.label = "Blacklist";
+      const entityButton = createBlacklistButton({
+        action: "blacklist-entity",
+        id: entity.entity_id,
+        label: `Add entity ${entity.entity_id} to blacklist`,
+      });
+      entityBlacklistCell.appendChild(entityButton);
+      entityRow.appendChild(entityBlacklistCell);
+
+      const entityDeviceCell = document.createElement("td");
+      entityDeviceCell.dataset.label = "Device";
+      entityDeviceCell.classList.add("entity-device-cell");
+      entityRow.appendChild(entityDeviceCell);
+
+      const entityNameCell = document.createElement("td");
+      entityNameCell.dataset.label = "Entity Name";
+      const entityDisplayName =
+        entity.name ||
+        entity.friendly_name ||
+        entity.object_id ||
+        entity.entity_id ||
+        "";
+      entityNameCell.textContent = entityDisplayName;
+      if (entity.entity_id && entity.entity_id !== entityDisplayName) {
+        entityNameCell.title = entity.entity_id;
+      }
+      entityRow.appendChild(entityNameCell);
+
+      const entityIntegrationCell = document.createElement("td");
+      entityIntegrationCell.dataset.label = "Integration";
+      entityIntegrationCell.textContent =
+        entity.integration_id || integrationLabel || "";
+      entityRow.appendChild(entityIntegrationCell);
+
+      const entityMeasurementCell = document.createElement("td");
+      entityMeasurementCell.dataset.label = "Unit";
+      entityMeasurementCell.textContent = formatMeasurement(entity);
+      entityRow.appendChild(entityMeasurementCell);
+
+      const entityAreaCell = document.createElement("td");
+      entityAreaCell.dataset.label = "Area";
+      entityAreaCell.textContent =
+        entity.area || areaLabel || "";
+      entityRow.appendChild(entityAreaCell);
+
+      entityBody.appendChild(entityRow);
+    });
+  });
+
   if (entityCount) {
     entityCount.textContent = `${state.entities.length} entities`;
   }
-
-  if (deviceBody) {
-    deviceBody.innerHTML = "";
-    if (!state.devices.length) {
-      const row = document.createElement("tr");
-      row.innerHTML = '<td colspan="5" data-label="Message">No devices ingested yet.</td>';
-      deviceBody.appendChild(row);
-    } else {
-      state.devices.forEach((device) => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td data-label="Device ID">${device.id}</td>
-          <td data-label="Name">${device.name || device.name_by_user || ""}</td>
-          <td data-label="Manufacturer">${device.manufacturer || ""}</td>
-          <td data-label="Model">${device.model || ""}</td>
-          <td data-label="Area">${device.area_id || ""}</td>
-        `;
-        deviceBody.appendChild(row);
-      });
-    }
-  }
-  if (deviceCount) {
-    deviceCount.textContent = `${state.devices.length} devices`;
-  }
 }
 
-async function loadSelectedIntegrations() {
+async function loadSelectedDomains() {
   try {
     const data = await fetchJson("/api/integrations/selected");
-    state.selectedIntegrations = data || [];
-    renderSelectedIntegrations();
+    state.selectedDomains = data || [];
+    renderSelectedDomains();
   } catch (error) {
-    showStatus(`Failed to load selected integrations: ${error.message}`, "error", 7000);
+    showStatus(`Failed to load selected domains: ${error.message}`, "error", 7000);
   }
 }
 
@@ -256,58 +505,62 @@ async function ingestEntities() {
   }
 }
 
-async function fetchAvailableIntegrations() {
+async function fetchAvailableDomains() {
   try {
     const data = await fetchJson("/api/integrations/available");
-    state.availableIntegrations = data || [];
-    const select = document.getElementById("integration-select");
+    state.availableDomains = (data || []).sort((a, b) => {
+      const labelA = (a.title || a.domain || "").toLowerCase();
+      const labelB = (b.title || b.domain || "").toLowerCase();
+      return labelA.localeCompare(labelB);
+    });
+    const select = document.getElementById("domain-select");
     if (select) {
       select.innerHTML = "";
-      if (!state.availableIntegrations.length) {
+      if (!state.availableDomains.length) {
         const option = document.createElement("option");
         option.value = "";
-        option.textContent = "No integrations found";
+        option.textContent = "No domains found";
         select.appendChild(option);
         select.disabled = true;
       } else {
-        state.availableIntegrations.forEach((integration) => {
+        state.availableDomains.forEach((integration) => {
           const option = document.createElement("option");
-          option.value = integration.entry_id;
-          option.textContent = `${integration.title || integration.domain || integration.entry_id}`;
+          option.value = integration.domain;
+          option.textContent = `${integration.title || integration.domain}`;
           select.appendChild(option);
         });
         select.disabled = false;
       }
     }
   } catch (error) {
-    showStatus(`Failed to load integrations from Home Assistant: ${error.message}`, "error", 7000);
+    showStatus(`Failed to load domains from Home Assistant: ${error.message}`, "error", 7000);
     throw error;
   }
 }
 
-async function addIntegration(entryId) {
+async function addDomain(domain) {
   try {
     await fetchJson("/api/integrations/selected", {
       method: "POST",
-      body: JSON.stringify({ integration_id: entryId }),
+      body: JSON.stringify({ domain }),
     });
-    showStatus("Integration added.");
-    await loadSelectedIntegrations();
+    showStatus("Domain added.");
+    await loadSelectedDomains();
   } catch (error) {
-    showStatus(`Unable to add integration: ${error.message}`, "error", 7000);
+    showStatus(`Unable to add domain: ${error.message}`, "error", 7000);
     throw error;
   }
 }
 
-async function removeIntegration(entryId) {
+async function removeDomain(domain) {
   try {
-    await fetchJson(`/api/integrations/selected/${encodeURIComponent(entryId)}`, {
+    await fetchJson(`/api/integrations/selected/${encodeURIComponent(domain)}`, {
       method: "DELETE",
     });
-    showStatus("Integration removed.");
-    await loadSelectedIntegrations();
+    showStatus("Domain removed.");
+    await loadSelectedDomains();
   } catch (error) {
-    showStatus(`Unable to remove integration: ${error.message}`, "error", 7000);
+    showStatus(`Unable to remove domain: ${error.message}`, "error", 7000);
   }
 }
 
@@ -318,7 +571,7 @@ async function addBlacklistEntry(type, id) {
       body: JSON.stringify({ target_type: type, target_id: id }),
     });
     showStatus("Blacklist updated.");
-    await loadBlacklist();
+    await Promise.all([loadBlacklist(), loadEntities()]);
   } catch (error) {
     showStatus(`Failed to update blacklist: ${error.message}`, "error", 7000);
   }
@@ -360,38 +613,40 @@ async function removeWhitelistEntry(id) {
 }
 
 function setupEventHandlers() {
-  document.getElementById("add-integration")?.addEventListener("click", async () => {
-    const modal = document.getElementById("integration-modal");
+  document.getElementById("add-domain")?.addEventListener("click", async (event) => {
+    const modal = document.getElementById("domain-modal");
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
     try {
-      await fetchAvailableIntegrations();
+      await withButtonLoading(button, () => fetchAvailableDomains(), "Loading…");
       if (modal) {
         modal.classList.add("active");
         modal.setAttribute("aria-hidden", "false");
       }
     } catch (error) {
-      // Error already handled in fetchAvailableIntegrations
+      // Error already handled in fetchAvailableDomains
     }
   });
 
-  document.getElementById("cancel-integration")?.addEventListener("click", () => {
-    const modal = document.getElementById("integration-modal");
+  document.getElementById("cancel-domain")?.addEventListener("click", () => {
+    const modal = document.getElementById("domain-modal");
     if (modal) {
       modal.classList.remove("active");
       modal.setAttribute("aria-hidden", "true");
     }
   });
 
-  document.getElementById("confirm-integration")?.addEventListener("click", async () => {
-    const select = document.getElementById("integration-select");
+  document.getElementById("confirm-domain")?.addEventListener("click", async (event) => {
+    const select = document.getElementById("domain-select");
     if (!(select instanceof HTMLSelectElement)) return;
-    const entryId = select.value;
-    if (!entryId) {
-      showStatus("Select an integration before adding.", "error", 4000);
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    const domain = select.value;
+    if (!domain) {
+      showStatus("Select a domain before adding.", "error", 4000);
       return;
     }
     try {
-      await addIntegration(entryId);
-      const modal = document.getElementById("integration-modal");
+      await withButtonLoading(button, () => addDomain(domain), "Adding…");
+      const modal = document.getElementById("domain-modal");
       if (modal) {
         modal.classList.remove("active");
         modal.setAttribute("aria-hidden", "true");
@@ -401,22 +656,25 @@ function setupEventHandlers() {
     }
   });
 
-  document.getElementById("refresh-integrations")?.addEventListener("click", async () => {
-    await loadSelectedIntegrations();
-    showStatus("Integrations refreshed.");
+  document.getElementById("refresh-domains")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    await withButtonLoading(button, async () => {
+      await loadSelectedDomains();
+      showStatus("Domains refreshed.");
+    }, "Refreshing…");
   });
 
-  document.querySelector("#integrations-table tbody")?.addEventListener("click", (event) => {
+  document.querySelector("#domains-table tbody")?.addEventListener("click", (event) => {
     const target = event.target;
-    if (target instanceof HTMLButtonElement && target.dataset.action === "remove-integration") {
-      const entryId = target.dataset.id;
-      if (entryId) {
-        removeIntegration(entryId);
+    if (target instanceof HTMLButtonElement && target.dataset.action === "remove-domain") {
+      const domain = target.dataset.id;
+      if (domain) {
+        void withButtonLoading(target, () => removeDomain(domain), "Removing…");
       }
     }
   });
 
-  document.getElementById("blacklist-form")?.addEventListener("submit", (event) => {
+  document.getElementById("blacklist-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -427,10 +685,14 @@ function setupEventHandlers() {
       showStatus("Provide both target type and ID.", "error", 4000);
       return;
     }
-    addBlacklistEntry(type.toString(), id).then(() => form.reset());
+    const submitButton = form.querySelector("button[type='submit']");
+    await withButtonLoading(submitButton, async () => {
+      await addBlacklistEntry(type.toString(), id);
+      form.reset();
+    }, "Saving…");
   });
 
-  document.getElementById("whitelist-form")?.addEventListener("submit", (event) => {
+  document.getElementById("whitelist-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -440,7 +702,11 @@ function setupEventHandlers() {
       showStatus("Provide an entity ID.", "error", 4000);
       return;
     }
-    addWhitelistEntry(id).then(() => form.reset());
+    const submitButton = form.querySelector("button[type='submit']");
+    await withButtonLoading(submitButton, async () => {
+      await addWhitelistEntry(id);
+      form.reset();
+    }, "Saving…");
   });
 
   document.querySelector("#blacklist-entities tbody")?.addEventListener("click", (event) => {
@@ -448,7 +714,7 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-blacklist") {
       const id = target.dataset.id;
       if (id) {
-        removeBlacklistEntry("entity", id);
+        void withButtonLoading(target, () => removeBlacklistEntry("entity", id), "Removing…");
       }
     }
   });
@@ -458,7 +724,7 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-blacklist") {
       const id = target.dataset.id;
       if (id) {
-        removeBlacklistEntry("device", id);
+        void withButtonLoading(target, () => removeBlacklistEntry("device", id), "Removing…");
       }
     }
   });
@@ -468,19 +734,59 @@ function setupEventHandlers() {
     if (target instanceof HTMLButtonElement && target.dataset.action === "remove-whitelist") {
       const id = target.dataset.id;
       if (id) {
-        removeWhitelistEntry(id);
+        void withButtonLoading(target, () => removeWhitelistEntry(id), "Removing…");
       }
     }
   });
 
-  document.getElementById("load-entities")?.addEventListener("click", () => loadEntities(true));
-  document.getElementById("ingest-entities")?.addEventListener("click", () => ingestEntities());
+  document.querySelector("#entities-table tbody")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest("button");
+    if (!(button instanceof HTMLButtonElement)) return;
+    const action = button.dataset.action;
+    if (action === "toggle-device") {
+      const deviceId = button.dataset.id;
+      if (!deviceId) {
+        return;
+      }
+      if (state.expandedDevices.has(deviceId)) {
+        state.expandedDevices.delete(deviceId);
+      } else {
+        state.expandedDevices.add(deviceId);
+      }
+      renderEntities();
+    } else if (action === "blacklist-device") {
+      const deviceId = button.dataset.id;
+      if (!deviceId) {
+        showStatus("Device ID unavailable for blacklist.", "error", 4000);
+        return;
+      }
+      void withButtonLoading(button, () => addBlacklistEntry("device", deviceId), "Adding…");
+    } else if (action === "blacklist-entity") {
+      const entityId = button.dataset.id;
+      if (!entityId) {
+        showStatus("Entity ID unavailable for blacklist.", "error", 4000);
+        return;
+      }
+      void withButtonLoading(button, () => addBlacklistEntry("entity", entityId), "Adding…");
+    }
+  });
+
+  document.getElementById("load-entities")?.addEventListener("click", (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    void withButtonLoading(button, () => loadEntities(true), "Loading…");
+  });
+  document.getElementById("ingest-entities")?.addEventListener("click", (event) => {
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    void withButtonLoading(button, () => ingestEntities(), "Refreshing…");
+  });
 }
 
 async function init() {
   setupEventHandlers();
   await Promise.all([
-    loadSelectedIntegrations(),
+    loadSelectedDomains(),
     loadBlacklist(),
     loadWhitelist(),
     loadEntities(),
