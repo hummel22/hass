@@ -3,12 +3,9 @@
 # Import this file into Home Assistant (Settings → Automations & Scenes → Import blueprint)
 # to create an automation that listens for webhook calls from the CreditWatch backend.
 # Set the ``Webhook ID`` blueprint input to the identifier configured in the backend.
-# Update the ``default_target`` dictionary with the notification services that correspond
-# to your devices. The backend will send a ``target`` slug that maps to one of these keys.
-#
-# Example: if your mobile device is exposed as ``notify.mobile_app_janes_iphone`` and you
-# want it to be the default target, configure the backend with ``default_target: primary``
-# and set ``primary: notify.mobile_app_janes_iphone`` below.
+# Provide the notify services in the blueprint inputs. Configure the CreditWatch backend
+# with a ``default_target`` slug (``default`` is used when no slug is provided) and optional
+# overrides that map to the entries you configure below.
 blueprint:
   name: CreditWatch notification webhook
   description: Handle CreditWatch reminder notifications via a webhook
@@ -21,6 +18,24 @@ blueprint:
       selector:
         text:
       default: creditwatch
+    notify_services:
+      name: Default notify services
+      description: |
+        YAML list of Home Assistant notify services that should receive notifications when
+        no target override is provided by the backend.
+      selector:
+        object:
+      default:
+        - notify.mobile_app_example_device
+    target_overrides:
+      name: Target overrides
+      description: |
+        (Optional) YAML mapping of target slugs to lists of notify services. Use this when
+        the backend is configured with additional target slugs and you want each slug to
+        deliver to a different set of notify services.
+      selector:
+        object:
+      default: {}
 
 trigger:
   - platform: webhook
@@ -32,20 +47,32 @@ trigger:
 variables:
   payload: "{{ trigger.json | default({}) }}"
   target_slug: "{{ payload.target | default('default') }}"
-  default_target: notify.mobile_app_example_device
-  target_map:
-    default: "{{ default_target }}"
-    # primary: notify.mobile_app_primary_phone
-    # tablet: notify.mobile_app_kitchen_tablet
-  notify_service: "{{ target_map.get(target_slug, default_target) }}"
+  default_notify_services: !input notify_services
+  target_overrides: !input target_overrides
+  notify_services: >-
+    {% set overrides = target_overrides if target_overrides is mapping else {} %}
+    {% set services = overrides.get(target_slug, default_notify_services) %}
+    {% if services in (none, '') %}
+      {% set services = default_notify_services %}
+    {% endif %}
+    {% if services is string %}
+      {{ [services] }}
+    {% elif services is mapping %}
+      {{ services.values() | list }}
+    {% else %}
+      {{ services | list }}
+    {% endif %}
 
 condition: []
 
 action:
-  - service: "{{ notify_service }}"
-    data:
-      title: "{{ payload.title | default('CreditWatch notification') }}"
-      message: "{{ payload.message | default('') }}"
-      data: "{{ payload.data | default({}) }}"
+  - repeat:
+      for_each: "{{ notify_services }}"
+      sequence:
+        - service: "{{ repeat.item }}"
+          data:
+            title: "{{ payload.title | default('CreditWatch notification') }}"
+            message: "{{ payload.message | default('') }}"
+            data: "{{ payload.data | default({}) }}"
 
 mode: single
