@@ -1,42 +1,8 @@
-# Example Home Assistant configuration enabling the REST API for hass-helper.
-# Copy the relevant sections into your Home Assistant configuration.yaml and adjust
-# hostnames, trusted networks, and CORS origins to match your environment.
-homeassistant:
-  name: Home Assistant
-  internal_url: http://homeassistant.local:8123
-  external_url: https://example.duckdns.org
-
 http:
-  # Listen on every interface so hass-helper can reach the API from Docker or other hosts.
   server_host: 0.0.0.0
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 127.0.0.1
-    - ::1
-    # Add the Docker subnet used by hass-helper or other reverse proxies.
-    - 172.18.0.0/16
   cors_allowed_origins:
-    - http://localhost:8000
-    - http://127.0.0.1:8000
-    # Add additional origins for any other management UIs that need access.
-    - http://hass-helper.local:8000
-  cors_allowed_methods:
-    - GET
-    - POST
-    - PUT
-    - DELETE
-    - OPTIONS
-  cors_allowed_headers:
-    - Authorization
-    - Content-Type
-    - x-ha-access
+    - "*"
+
 
 # Enables the Home Assistant REST API endpoints consumed by hass-helper.
 api:
-
-# Optional: raise HTTP component logging for easier troubleshooting.
-logger:
-  default: info
-  logs:
-    homeassistant.components.http: debug
-    homeassistant.components.api: debug
