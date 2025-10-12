@@ -5,7 +5,7 @@ from typing import List
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from .hass_client import HomeAssistantClient
@@ -92,12 +92,17 @@ def update_input_helper(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@app.delete("/inputs/{slug}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_store)) -> None:
+@app.delete(
+    "/inputs/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_store)) -> Response:
     try:
         store.delete_helper(slug)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/inputs/{slug}/set", response_model=InputHelper)
