@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HASS Input Helper</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
+  </head>
+  <body>
+    <header class="navbar">
+      <div class="navbar__brand">
+        <span class="navbar__title">Home Assistant Input Helper</span>
+        <span class="navbar__subtitle">MQTT bridge and catalog</span>
+      </div>
+      <nav class="navbar__links">
+        <a href="#mqtt-card">MQTT</a>
+        <a href="#entities-card">Entities</a>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <section class="card" id="mqtt-card">
+        <div class="card__header">
+          <h2>MQTT Broker</h2>
+          <p class="card__subtitle">
+            Connect to the Mosquitto add-on exposed by your Home Assistant instance.
+          </p>
+        </div>
+        <form id="mqtt-form" class="form-grid">
+          <label class="form-field">
+            <span>Host</span>
+            <input type="text" name="host" required placeholder="homeassistant.local" />
+          </label>
+          <label class="form-field">
+            <span>Port</span>
+            <input type="number" name="port" min="1" max="65535" value="1883" />
+          </label>
+          <label class="form-field">
+            <span>Username</span>
+            <input type="text" name="username" autocomplete="username" />
+          </label>
+          <label class="form-field">
+            <span>Password</span>
+            <input type="password" name="password" autocomplete="current-password" />
+          </label>
+          <label class="form-field">
+            <span>Client ID</span>
+            <input type="text" name="client_id" placeholder="auto-generated if empty" />
+          </label>
+          <label class="form-field">
+            <span>Topic prefix</span>
+            <input type="text" name="topic_prefix" value="homeassistant/input_helper" />
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="use_tls" />
+            <span>Use TLS</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">Save configuration</button>
+            <button type="button" class="btn" id="test-mqtt">Test connection</button>
+          </div>
+          <p class="form-helper">
+            The Mosquitto add-on defaults to host <code>homeassistant.local</code> and port
+            <code>1883</code>. Provide your credentials from the Home Assistant MQTT integration.
+          </p>
+        </form>
+      </section>
+
+      <section class="card" id="entities-card">
+        <div class="card__header">
+          <h2>Entities</h2>
+          <button class="btn" type="button" id="refresh-helpers">Refresh</button>
+        </div>
+        <div id="entity-list" class="entity-list"></div>
+
+        <div class="divider"></div>
+
+        <h3>Create new entity</h3>
+        <form id="create-helper-form" class="form-grid">
+          <label class="form-field">
+            <span>Name</span>
+            <input type="text" name="name" required />
+          </label>
+          <label class="form-field">
+            <span>Entity ID</span>
+            <input type="text" name="entity_id" placeholder="input_text.your_helper" required />
+          </label>
+          <label class="form-field">
+            <span>Helper type</span>
+            <select name="helper_type" required>
+              <option value="input_text">Input text</option>
+              <option value="input_number">Input number</option>
+              <option value="input_boolean">Input boolean</option>
+              <option value="input_select">Input select</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>Default value</span>
+            <input type="text" name="default_value" />
+          </label>
+          <label class="form-field">
+            <span>Description</span>
+            <textarea name="description" rows="2"></textarea>
+          </label>
+          <label class="form-field">
+            <span>Options (comma separated)</span>
+            <input type="text" name="options" placeholder="Only for input_select" />
+          </label>
+          <label class="form-field">
+            <span>Device class</span>
+            <input type="text" name="device_class" placeholder="temperature, humidity, etc." />
+          </label>
+          <label class="form-field">
+            <span>Unit of measurement</span>
+            <input type="text" name="unit_of_measurement" placeholder="°C, %, etc." />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">Create entity</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card hidden" id="entity-detail-card">
+        <div class="card__header">
+          <div>
+            <h2 id="detail-title">Entity details</h2>
+            <p class="card__subtitle" id="detail-entity-id"></p>
+          </div>
+          <button class="btn danger" type="button" id="delete-helper">Delete</button>
+        </div>
+
+        <form id="update-helper-form" class="form-grid">
+          <label class="form-field">
+            <span>Name</span>
+            <input type="text" name="name" required />
+          </label>
+          <label class="form-field">
+            <span>Entity ID</span>
+            <input type="text" name="entity_id" required />
+          </label>
+          <label class="form-field">
+            <span>Helper type</span>
+            <input type="text" name="helper_type" readonly />
+          </label>
+          <label class="form-field">
+            <span>Description</span>
+            <textarea name="description" rows="2"></textarea>
+          </label>
+          <label class="form-field">
+            <span>Default value</span>
+            <input type="text" name="default_value" />
+          </label>
+          <label class="form-field">
+            <span>Options (comma separated)</span>
+            <input type="text" name="options" />
+          </label>
+          <label class="form-field">
+            <span>Device class</span>
+            <input type="text" name="device_class" />
+          </label>
+          <label class="form-field">
+            <span>Unit of measurement</span>
+            <input type="text" name="unit_of_measurement" />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">Save changes</button>
+          </div>
+        </form>
+
+        <div class="helper-status">
+          <p><strong>Last value:</strong> <span id="detail-last-value">—</span></p>
+          <p><strong>Updated:</strong> <span id="detail-updated">—</span></p>
+        </div>
+
+        <div class="divider"></div>
+
+        <section class="history">
+          <h3>Recent values</h3>
+          <canvas id="history-chart" height="220"></canvas>
+          <ul id="history-list" class="history-list hidden"></ul>
+        </section>
+
+        <div class="divider"></div>
+
+        <section>
+          <h3>Send new value</h3>
+          <form id="value-form" class="value-form"></form>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+  </body>
+</html>

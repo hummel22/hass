@@ -83,6 +83,8 @@ class InputHelperBase(BaseModel):
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
+    device_class: Optional[str] = Field(default=None, max_length=120)
+    unit_of_measurement: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("entity_id")
     @classmethod
@@ -125,6 +127,8 @@ class InputHelperUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
+    device_class: Optional[str] = Field(default=None, max_length=120)
+    unit_of_measurement: Optional[str] = Field(default=None, max_length=64)
 
     model_config = {"extra": "forbid"}
 
@@ -140,11 +144,33 @@ class InputHelper(BaseModel):
     last_value: Optional[InputValue] = None
     created_at: datetime
     updated_at: datetime
+    device_class: Optional[str] = None
+    unit_of_measurement: Optional[str] = None
 
     model_config = {
         "from_attributes": True,
         "populate_by_name": True,
     }
+
+
+class HistoryPoint(BaseModel):
+    timestamp: datetime
+    value: InputValue
+
+
+class MQTTConfig(BaseModel):
+    host: str = Field(..., min_length=1)
+    port: int = Field(default=1883, ge=1, le=65535)
+    username: Optional[str] = Field(default=None, max_length=255)
+    password: Optional[str] = Field(default=None, max_length=255)
+    client_id: Optional[str] = Field(default=None, max_length=128)
+    topic_prefix: str = Field(default="homeassistant/input_helper", min_length=1)
+    use_tls: bool = False
+
+
+class MQTTTestResponse(BaseModel):
+    success: bool
+    message: str
 
 
 @dataclass
@@ -165,6 +191,8 @@ class InputHelperRecord:
             last_value=payload.default_value,
             created_at=now,
             updated_at=now,
+            device_class=payload.device_class,
+            unit_of_measurement=payload.unit_of_measurement,
         )
         return cls(helper=helper)
 
@@ -197,6 +225,10 @@ class InputHelperRecord:
                 data["default_value"] = None
             else:
                 data["default_value"] = coerce_helper_value(helper_type, default_value, options)
+        if "device_class" in update_data:
+            data["device_class"] = payload.device_class
+        if "unit_of_measurement" in update_data:
+            data["unit_of_measurement"] = payload.unit_of_measurement
         if helper_type == HelperType.INPUT_SELECT:
             data["options"] = options
         data["last_value"] = data.get("last_value")
@@ -229,6 +261,9 @@ __all__ = [
     "InputHelperRecord",
     "InputHelperUpdate",
     "InputValue",
+    "HistoryPoint",
+    "MQTTConfig",
+    "MQTTTestResponse",
     "SetValueRequest",
     "coerce_helper_value",
     "slugify",
