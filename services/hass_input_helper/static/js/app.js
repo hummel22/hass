@@ -74,25 +74,18 @@
     return normalized;
   }
 
-  function sanitizeEntityTopicSegment(entityId) {
-    if (!entityId) return '';
-    const text = entityId.toString().trim();
-    if (!text) return '';
-    return text.toLowerCase().replace(/[^a-z0-9_.]+/g, '_').replace(/_+/g, '_');
-  }
-
-  function buildStateTopic(nodeId, deviceId, entityId) {
+  function buildStateTopic(nodeId, deviceId, entityName) {
     const node = slugifyIdentifier(nodeId) || 'hassems';
     const device = slugifyIdentifier(deviceId);
-    const entity = sanitizeEntityTopicSegment(entityId);
+    const entity = slugifyIdentifier(entityName);
     if (!device || !entity) return '';
     return `${node}/${device}/${entity}/state`;
   }
 
-  function buildAvailabilityTopic(nodeId, deviceId, entityId) {
+  function buildAvailabilityTopic(nodeId, deviceId, entityName) {
     const node = slugifyIdentifier(nodeId) || 'hassems';
     const device = slugifyIdentifier(deviceId);
-    const entity = sanitizeEntityTopicSegment(entityId);
+    const entity = slugifyIdentifier(entityName);
     if (!device || !entity) return '';
     return `${node}/${device}/${entity}/availability`;
   }
@@ -472,16 +465,15 @@
       createNodeInput.value = 'hassems';
     }
     const nodeSegment = createNodeInput?.value ?? 'hassems';
-    const entityIdValue = createEntityInput?.value ?? '';
 
     if (createStateTopicInput && createAutoFlags.stateTopic) {
-      createStateTopicInput.value = buildStateTopic(nodeSegment, deviceId, entityIdValue);
+      createStateTopicInput.value = buildStateTopic(nodeSegment, deviceId, nameValue);
     }
     if (createAvailabilityInput && createAutoFlags.availabilityTopic) {
       createAvailabilityInput.value = buildAvailabilityTopic(
         nodeSegment,
         deviceId,
-        entityIdValue,
+        nameValue,
       );
     }
   }
@@ -917,10 +909,10 @@
     const objectId = slugifyIdentifier(payload.object_id || uniqueId);
     const nodeId = slugifyIdentifier(payload.node_id) || 'hassems';
     const stateTopic =
-      payload.state_topic || buildStateTopic(nodeId, deviceId, entityIdValue);
+      payload.state_topic || buildStateTopic(nodeId, deviceId, payload.name);
     const availabilityTopic =
       payload.availability_topic ||
-      buildAvailabilityTopic(nodeId, deviceId, entityIdValue);
+      buildAvailabilityTopic(nodeId, deviceId, payload.name);
 
     const identifiers = Array.isArray(payload.device_identifiers)
       ? payload.device_identifiers.filter(Boolean)

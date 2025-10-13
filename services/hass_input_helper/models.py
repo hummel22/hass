@@ -301,9 +301,13 @@ class InputHelperCreate(InputHelperBase):
         else:
             node_segment = "hassems"
 
-        if device_id and entity_id_value:
-            entity_segment = entity_id_value.lower()
-            base_topic = f"{node_segment}/{device_id}/{entity_segment}"
+        topic_segment: Optional[str] = name_slug
+        if not topic_segment and entity_id_value:
+            entity_suffix = entity_id_value.split(".", 1)[-1]
+            topic_segment = slugify_identifier(entity_suffix)
+
+        if device_id and topic_segment:
+            base_topic = f"{node_segment}/{device_id}/{topic_segment}"
             if not str(data.get("state_topic") or "").strip():
                 data["state_topic"] = f"{base_topic}/state"
             if not str(data.get("availability_topic") or "").strip():

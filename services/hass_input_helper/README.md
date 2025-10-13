@@ -76,12 +76,12 @@ Every helper publish triggers three MQTT messages:
 1. **Discovery** – Retained payload on
    `homeassistant/<component>/[node_id/]<object_id>/config` using the metadata you configure in the UI.
 2. **Availability** – Retained payload on the helper-specific availability topic (defaults to
-   `online`/`offline`) which resolves to `{node_id}/{device_id}/{entity_id}/availability` by default.
+   `online`/`offline`) which resolves to `{node_id}/{device_id}/{entity_name}/availability` by default.
 3. **State** – JSON payload on the helper's state topic containing both the `value` and
-   `measured_at` timestamp. The default pattern is `{node_id}/{device_id}/{entity_id}/state`.
+   `measured_at` timestamp. The default pattern is `{node_id}/{device_id}/{entity_name}/state`.
 
 When advanced fields are left blank HASSEMS derives `device_id` from the device name, sets
-`device_identifiers` to `{node_id}:{unique_id}`, and lowercases the entity ID for use in topic
+`device_identifiers` to `{node_id}:{unique_id}`, and lowercases the entity name for use in topic
 segments so the MQTT paths remain deterministic.
 
 Discovery payloads include a `value_template` so Home Assistant extracts the numeric/textual `value`
