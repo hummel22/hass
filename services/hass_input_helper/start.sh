@@ -14,6 +14,23 @@ source "$VENV_PATH/bin/activate"
 pip install --upgrade pip >/dev/null
 pip install -r "$SCRIPT_DIR/requirements.txt"
 
+FRONTEND_DIR="$SCRIPT_DIR/frontend"
+if [ -d "$FRONTEND_DIR" ]; then
+  mkdir -p "$SCRIPT_DIR/static"
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to build the frontend assets." >&2
+    exit 1
+  fi
+  pushd "$FRONTEND_DIR" >/dev/null
+  if [ -f package-lock.json ]; then
+    npm ci
+  else
+    npm install
+  fi
+  npm run build
+  popd >/dev/null
+fi
+
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
