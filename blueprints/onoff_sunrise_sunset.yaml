@@ -1,0 +1,63 @@
+blueprint:
+  name: Turn on at sunset (offset) and off at sunrise (offset)
+  description: >
+    Turns selected entities ON at sunset with an optional offset, and OFF at
+    sunrise with an optional offset. Offsets accept +/-HH:MM:SS (e.g., "-00:10:00"
+    = 10 minutes before; "00:05:00" = 5 minutes after).
+  domain: automation
+  input:
+    target_entities:
+      name: Entities to control
+      description: One or more lights/switches to toggle.
+      selector:
+        entity:
+          multiple: true
+          domain:
+            - light
+            - switch
+    sunset_offset:
+      name: Sunset offset
+      description: Use ±HH:MM:SS (e.g., 00:05:00 for 5 min after, -00:10:00 for 10 min before)
+      default: "00:00:00"
+      selector:
+        text:
+          multiline: false
+          placeholder: "e.g., -00:10:00"
+    sunrise_offset:
+      name: Sunrise offset
+      description: Use ±HH:MM:SS (e.g., 00:02:00 for 2 min after, -00:05:00 for 5 min before)
+      default: "00:00:00"
+      selector:
+        text:
+          multiline: false
+          placeholder: "e.g., 00:02:00"
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - id: sunset
+    platform: sun
+    event: sunset
+    offset: !input sunset_offset
+  - id: sunrise
+    platform: sun
+    event: sunrise
+    offset: !input sunrise_offset
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: sunset
+        sequence:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: !input target_entities
+      - conditions:
+          - condition: trigger
+            id: sunrise
+        sequence:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: !input target_entities
