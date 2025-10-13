@@ -144,15 +144,39 @@
           <div class="form-grid form-grid--base">
             <label class="form-field">
               <span class="label-text">
-                Name
+                Device name
+                <button
+                  type="button"
+                  class="help-icon"
+                  data-tooltip="Name shown for the parent device grouping in Home Assistant's Devices tab."
+                  aria-label="Device name help"
+                >?</button>
+              </span>
+              <input type="text" name="device_name" required placeholder="Child Metrics" />
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Entity name
                 <button
                   type="button"
                   class="help-icon"
                   data-tooltip="Friendly label shown in Home Assistant once the entity is discovered."
-                  aria-label="Name help"
+                  aria-label="Entity name help"
                 >?</button>
               </span>
               <input type="text" name="name" required />
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Description
+                <button
+                  type="button"
+                  class="help-icon"
+                  data-tooltip="Internal notes about the entity's purpose. Stored for reference only."
+                  aria-label="Description help"
+                >?</button>
+              </span>
+              <textarea name="description" rows="2"></textarea>
             </label>
             <label class="form-field">
               <span class="label-text">
@@ -170,42 +194,6 @@
                 <option value="input_boolean">Input boolean</option>
                 <option value="input_select">Input select</option>
               </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity ID
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Automatically generated from the name and type. Update if you already created a matching helper in Home Assistant."
-                  aria-label="Entity ID help"
-                >?</button>
-              </span>
-              <input type="text" name="entity_id" placeholder="input_number.child_height" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Icon
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Optional Material Design Icons reference (mdi:ruler). Leave blank to let Home Assistant choose."
-                  aria-label="Icon help"
-                >?</button>
-              </span>
-              <input type="text" name="icon" placeholder="mdi:ruler" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Description
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Internal notes about the entity's purpose. Stored for reference only."
-                  aria-label="Description help"
-                >?</button>
-              </span>
-              <textarea name="description" rows="2"></textarea>
             </label>
             <label class="form-field">
               <span class="label-text">
@@ -233,15 +221,27 @@
             </label>
             <label class="form-field">
               <span class="label-text">
-                State class
+                Icon
                 <button
                   type="button"
                   class="help-icon"
-                  data-tooltip="Controls Home Assistant statistics handling. Choose measurement for most sensors."
-                  aria-label="State class help"
+                  data-tooltip="Select an icon from the Material Design Icons set to represent the entity in Home Assistant."
+                  aria-label="Icon help"
                 >?</button>
               </span>
-              <select name="state_class"></select>
+              <select name="icon"></select>
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Entity ID
+                <button
+                  type="button"
+                  class="help-icon"
+                  data-tooltip="Automatically generated from the device and entity names. Update if you already created a matching helper in Home Assistant."
+                  aria-label="Entity ID help"
+                >?</button>
+              </span>
+              <input type="text" name="entity_id" placeholder="input_number.child_metrics_height" required />
             </label>
             <label class="form-checkbox">
               <input type="checkbox" name="force_update" checked />
@@ -254,18 +254,6 @@
                   aria-label="Force update help"
                 >?</button>
               </span>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device name
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Name shown for the parent device grouping in Home Assistant's Devices tab."
-                  aria-label="Device name help"
-                >?</button>
-              </span>
-              <input type="text" name="device_name" required placeholder="Child Metrics" />
             </label>
           </div>
           <details class="form-advanced">
@@ -309,15 +297,27 @@
               </label>
               <label class="form-field">
                 <span class="label-text">
+                  State class
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Controls Home Assistant statistics handling. Choose measurement for most sensors."
+                    aria-label="State class help"
+                  >?</button>
+                </span>
+                <select name="state_class"></select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
                   Unique ID
                   <button
                     type="button"
                     class="help-icon"
-                    data-tooltip="Auto-generated from the name. Edit to override the identifier Home Assistant tracks."
+                    data-tooltip="Auto-generated from the device and entity names. Edit to override the identifier Home Assistant tracks."
                     aria-label="Unique ID help"
                   >?</button>
                 </span>
-                <input type="text" name="unique_id" required placeholder="child_height_in" />
+                <input type="text" name="unique_id" required placeholder="child_metrics_child_height" />
               </label>
               <label class="form-field">
                 <span class="label-text">
@@ -329,7 +329,19 @@
                     aria-label="Object ID help"
                   >?</button>
                 </span>
-                <input type="text" name="object_id" required placeholder="child_height_in" />
+                <input type="text" name="object_id" required placeholder="child_metrics_child_height" />
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Device ID
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Slug used to group entities from the same device. Generated from the device name by default."
+                    aria-label="Device ID help"
+                  >?</button>
+                </span>
+                <input type="text" name="device_id" placeholder="child_metrics" />
               </label>
               <label class="form-field">
                 <span class="label-text">
@@ -349,11 +361,16 @@
                   <button
                     type="button"
                     class="help-icon"
-                    data-tooltip="MQTT topic where HASSEMS publishes value updates. Generated from the node and object IDs."
+                  data-tooltip="MQTT topic where HASSEMS publishes value updates. Generated from the node ID, device ID, and entity ID."
                     aria-label="State topic help"
                   >?</button>
                 </span>
-                <input type="text" name="state_topic" required placeholder="hassems/height/state" />
+                <input
+                  type="text"
+                  name="state_topic"
+                  required
+                  placeholder="hassems/child_metrics/input_number.child_metrics_height/state"
+                />
               </label>
               <label class="form-field">
                 <span class="label-text">
@@ -365,7 +382,12 @@
                     aria-label="Availability topic help"
                   >?</button>
                 </span>
-                <input type="text" name="availability_topic" required placeholder="hassems/height/availability" />
+                <input
+                  type="text"
+                  name="availability_topic"
+                  required
+                  placeholder="hassems/child_metrics/input_number.child_metrics_height/availability"
+                />
               </label>
               <label class="form-field">
                 <span class="label-text">
@@ -409,17 +431,17 @@
                   <button
                     type="button"
                     class="help-icon"
-                    data-tooltip="Comma-separated identifiers that uniquely describe the device in Home Assistant's registry."
+                    data-tooltip="Comma-separated identifiers that uniquely describe the device in Home Assistant's registry. Defaults to node_id:unique_id."
                     aria-label="Device identifiers help"
                   >?</button>
                 </span>
-                <input type="text" name="device_identifiers" placeholder="hassems:child_height" />
+                <input type="text" name="device_identifiers" placeholder="hassems:child_metrics_child_height" />
               </label>
             </div>
           </details>
           <div class="form-actions">
-            <button type="button" class="btn" id="preview-discovery">Preview discovery</button>
             <button type="submit" class="btn primary">Create entity</button>
+            <button type="button" class="btn" id="preview-discovery">Preview discovery</button>
           </div>
         </form>
       </section>
@@ -437,31 +459,17 @@
           <div class="form-grid form-grid--base">
             <label class="form-field">
               <span class="label-text">
-                Name
-                <button type="button" class="help-icon" data-tooltip="Update the friendly name shown in Home Assistant." aria-label="Name help">?</button>
+                Device name
+                <button type="button" class="help-icon" data-tooltip="Parent device name in Home Assistant." aria-label="Device name help">?</button>
+              </span>
+              <input type="text" name="device_name" required />
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Entity name
+                <button type="button" class="help-icon" data-tooltip="Update the friendly name shown in Home Assistant." aria-label="Entity name help">?</button>
               </span>
               <input type="text" name="name" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Type
-                <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited." aria-label="Type help">?</button>
-              </span>
-              <input type="text" name="type" readonly />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity ID
-                <button type="button" class="help-icon" data-tooltip="Home Assistant helper entity ID (domain.object_id)." aria-label="Entity ID help">?</button>
-              </span>
-              <input type="text" name="entity_id" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Icon
-                <button type="button" class="help-icon" data-tooltip="Material Design Icon reference used in the UI." aria-label="Icon help">?</button>
-              </span>
-              <input type="text" name="icon" />
             </label>
             <label class="form-field">
               <span class="label-text">
@@ -469,6 +477,13 @@
                 <button type="button" class="help-icon" data-tooltip="Reference notes about the entity." aria-label="Description help">?</button>
               </span>
               <textarea name="description" rows="2"></textarea>
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Type
+                <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited." aria-label="Type help">?</button>
+              </span>
+              <input type="text" name="type" readonly />
             </label>
             <label class="form-field">
               <span class="label-text">
@@ -486,10 +501,17 @@
             </label>
             <label class="form-field">
               <span class="label-text">
-                State class
-                <button type="button" class="help-icon" data-tooltip="Home Assistant statistics behaviour." aria-label="State class help">?</button>
+                Icon
+                <button type="button" class="help-icon" data-tooltip="Material Design Icon reference used in the UI." aria-label="Icon help">?</button>
               </span>
-              <select name="state_class"></select>
+              <select name="icon"></select>
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Entity ID
+                <button type="button" class="help-icon" data-tooltip="Home Assistant helper entity ID (domain.object_id)." aria-label="Entity ID help">?</button>
+              </span>
+              <input type="text" name="entity_id" required />
             </label>
             <label class="form-checkbox">
               <input type="checkbox" name="force_update" />
@@ -497,13 +519,6 @@
                 Force update
                 <button type="button" class="help-icon" data-tooltip="Publish updates even if the value is unchanged." aria-label="Force update help">?</button>
               </span>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device name
-                <button type="button" class="help-icon" data-tooltip="Parent device name in Home Assistant." aria-label="Device name help">?</button>
-              </span>
-              <input type="text" name="device_name" required />
             </label>
           </div>
           <details class="form-advanced">
@@ -532,6 +547,13 @@
               </label>
               <label class="form-field">
                 <span class="label-text">
+                  State class
+                  <button type="button" class="help-icon" data-tooltip="Home Assistant statistics behaviour." aria-label="State class help">?</button>
+                </span>
+                <select name="state_class"></select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
                   Unique ID
                   <button type="button" class="help-icon" data-tooltip="Stable identifier used by Home Assistant." aria-label="Unique ID help">?</button>
                 </span>
@@ -543,6 +565,13 @@
                   <button type="button" class="help-icon" data-tooltip="Discovery topic object identifier." aria-label="Object ID help">?</button>
                 </span>
                 <input type="text" name="object_id" required />
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Device ID
+                  <button type="button" class="help-icon" data-tooltip="Slug used to group entities from the same device." aria-label="Device ID help">?</button>
+                </span>
+                <input type="text" name="device_id" />
               </label>
               <label class="form-field">
                 <span class="label-text">
@@ -589,7 +618,7 @@
               <label class="form-field full-width">
                 <span class="label-text">
                   Device identifiers
-                  <button type="button" class="help-icon" data-tooltip="Comma-separated identifiers for the parent device." aria-label="Device identifiers help">?</button>
+                  <button type="button" class="help-icon" data-tooltip="Comma-separated identifiers for the parent device. Defaults to node_id:unique_id when left blank." aria-label="Device identifiers help">?</button>
                 </span>
                 <input type="text" name="device_identifiers" />
               </label>

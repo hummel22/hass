@@ -134,6 +134,7 @@ class InputHelperBase(BaseModel):
     state_class: Optional[str] = Field(default=None, max_length=64)
     force_update: bool = True
     device_name: str = Field(..., min_length=1, max_length=120)
+    device_id: str = Field(..., min_length=1, max_length=120)
     device_manufacturer: Optional[str] = Field(default="HASSEMS", max_length=120)
     device_model: Optional[str] = Field(default=None, max_length=120)
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
@@ -158,6 +159,14 @@ class InputHelperBase(BaseModel):
         cleaned = clean_topic_segment(v)
         if not cleaned:
             raise ValueError("Provide a valid identifier (letters, numbers, underscores, hyphens).")
+        return cleaned
+
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v: str) -> str:
+        cleaned = clean_topic_segment(v)
+        if not cleaned:
+            raise ValueError("Provide a valid device ID (letters, numbers, underscores, hyphens).")
         return cleaned
 
     @field_validator("node_id")
@@ -234,11 +243,25 @@ class InputHelperCreate(InputHelperBase):
         raw_name = str(data.get("name") or "").strip()
         raw_device_name = str(data.get("device_name") or "").strip()
 
+        device_input = data.get("device_id")
+        if device_input:
+            device_id = slugify_identifier(str(device_input))
+        elif raw_device_name:
+            device_id = slugify_identifier(raw_device_name)
+        else:
+            device_id = None
+        if device_id:
+            data["device_id"] = device_id
+
+        name_slug = slugify_identifier(raw_name) if raw_name else None
+
         unique_input = data.get("unique_id")
         if unique_input:
             unique_id = slugify_identifier(str(unique_input))
-        elif raw_name:
-            unique_id = slugify_identifier(raw_name)
+        elif device_id and name_slug:
+            unique_id = slugify_identifier(f"{device_id}_{name_slug}")
+        elif name_slug:
+            unique_id = name_slug
         else:
             unique_id = None
         if unique_id:
@@ -261,7 +284,6 @@ class InputHelperCreate(InputHelperBase):
             helper_domain = str(helper_type).strip() if helper_type else ""
 
         if helper_domain:
-            name_slug = slugify_identifier(raw_name)
             device_slug = slugify_identifier(raw_device_name)
             slug_parts = [part for part in (device_slug, name_slug) if part]
             if slug_parts:
@@ -270,6 +292,26 @@ class InputHelperCreate(InputHelperBase):
                 existing = str(data.get("entity_id") or "").strip()
                 if not existing:
                     data["entity_id"] = entity_id
+
+        entity_id_value = str(data.get("entity_id") or "").strip()
+        node_id_input = data.get("node_id")
+        node_segment = slugify_identifier(str(node_id_input)) if node_id_input else None
+        if node_segment:
+            data["node_id"] = node_segment
+        else:
+            node_segment = "hassems"
+
+        if device_id and entity_id_value:
+            entity_segment = entity_id_value.lower()
+            base_topic = f"{node_segment}/{device_id}/{entity_segment}"
+            if not str(data.get("state_topic") or "").strip():
+                data["state_topic"] = f"{base_topic}/state"
+            if not str(data.get("availability_topic") or "").strip():
+                data["availability_topic"] = f"{base_topic}/availability"
+
+        identifiers = data.get("device_identifiers")
+        if not identifiers and device_id and unique_id:
+            data["device_identifiers"] = [f"{node_segment}:{unique_id}"]
 
         return data
 
@@ -292,6 +334,7 @@ class InputHelperUpdate(BaseModel):
     state_class: Optional[str] = Field(default=None, max_length=64)
     force_update: Optional[bool] = None
     device_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    device_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
     device_manufacturer: Optional[str] = Field(default=None, max_length=120)
     device_model: Optional[str] = Field(default=None, max_length=120)
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
@@ -315,6 +358,16 @@ class InputHelperUpdate(BaseModel):
         if v is None:
             return None
         return clean_topic_segment(v)
+
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = clean_topic_segment(v)
+        if not cleaned:
+            raise ValueError("Provide a valid device ID (letters, numbers, underscores, hyphens).")
+        return cleaned
 
     @field_validator("unique_id", "object_id")
     @classmethod
@@ -390,6 +443,7 @@ class InputHelper(BaseModel):
     state_class: Optional[str] = None
     force_update: bool
     device_name: str
+    device_id: str
     device_manufacturer: Optional[str] = None
     device_model: Optional[str] = None
     device_sw_version: Optional[str] = None
@@ -431,9 +485,10 @@ class InputHelperRecord:
         now = datetime.now(timezone.utc)
         node_id = payload.node_id or "hassems"
         object_id = payload.object_id or slugify_identifier(payload.unique_id)
+        device_id = payload.device_id or slugify_identifier(payload.device_name)
         identifiers = payload.device_identifiers or []
         if not identifiers:
-            base_identifier = f"{node_id or 'hassems'}:{object_id}"
+            base_identifier = f"{node_id or 'hassems'}:{payload.unique_id}"
             identifiers = [base_identifier]
         helper = InputHelper(
             slug=slugify(payload.unique_id),
@@ -459,6 +514,7 @@ class InputHelperRecord:
             state_class=payload.state_class,
             force_update=payload.force_update,
             device_name=payload.device_name,
+            device_id=device_id,
             device_manufacturer=payload.device_manufacturer,
             device_model=payload.device_model,
             device_sw_version=payload.device_sw_version,
@@ -519,6 +575,8 @@ class InputHelperRecord:
             data["force_update"] = bool(payload.force_update)
         if "device_name" in update_data and payload.device_name:
             data["device_name"] = payload.device_name
+        if "device_id" in update_data and payload.device_id:
+            data["device_id"] = slugify_identifier(payload.device_id)
         if "device_manufacturer" in update_data:
             data["device_manufacturer"] = payload.device_manufacturer
         if "device_model" in update_data:

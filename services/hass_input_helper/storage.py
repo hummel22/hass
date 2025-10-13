@@ -16,6 +16,7 @@ from .models import (
     InputHelperUpdate,
     InputValue,
     MQTTConfig,
+    slugify_identifier,
 )
 
 
@@ -116,6 +117,7 @@ class InputHelperStore:
                     state_class TEXT,
                     force_update INTEGER NOT NULL DEFAULT 1,
                     device_name TEXT NOT NULL,
+                    device_id TEXT,
                     device_manufacturer TEXT,
                     device_model TEXT,
                     device_sw_version TEXT,
@@ -161,6 +163,7 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "state_class", "TEXT")
             self._ensure_column(conn, "helpers", "force_update", "INTEGER NOT NULL DEFAULT 1")
             self._ensure_column(conn, "helpers", "device_name", "TEXT")
+            self._ensure_column(conn, "helpers", "device_id", "TEXT")
             self._ensure_column(conn, "helpers", "device_manufacturer", "TEXT")
             self._ensure_column(conn, "helpers", "device_model", "TEXT")
             self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
@@ -205,9 +208,9 @@ class InputHelperStore:
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
-                        force_update, device_name, device_manufacturer, device_model,
+                        force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
@@ -233,6 +236,7 @@ class InputHelperStore:
                     helper.state_class,
                     int(helper.force_update),
                     helper.device_name,
+                    helper.device_id,
                     helper.device_manufacturer,
                     helper.device_model,
                     helper.device_sw_version,
@@ -270,6 +274,7 @@ class InputHelperStore:
             state_class=row.get("state_class"),
             force_update=bool(row.get("force_update", 1)),
             device_name=row.get("device_name", row["name"]),
+            device_id=row.get("device_id", slugify_identifier(row.get("device_name", ""))),
             device_manufacturer=row.get("device_manufacturer"),
             device_model=row.get("device_model"),
             device_sw_version=row.get("device_sw_version"),
@@ -308,9 +313,9 @@ class InputHelperStore:
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
-                        force_update, device_name, device_manufacturer, device_model,
+                        force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
@@ -336,6 +341,7 @@ class InputHelperStore:
                         helper.state_class,
                         int(helper.force_update),
                         helper.device_name,
+                        helper.device_id,
                         helper.device_manufacturer,
                         helper.device_model,
                         helper.device_sw_version,
@@ -375,6 +381,7 @@ class InputHelperStore:
                            state_class = ?,
                            force_update = ?,
                            device_name = ?,
+                           device_id = ?,
                            device_manufacturer = ?,
                            device_model = ?,
                            device_sw_version = ?,
@@ -402,6 +409,7 @@ class InputHelperStore:
                         helper.state_class,
                         int(helper.force_update),
                         helper.device_name,
+                        helper.device_id,
                         helper.device_manufacturer,
                         helper.device_model,
                         helper.device_sw_version,

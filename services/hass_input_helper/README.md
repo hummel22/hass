@@ -15,8 +15,8 @@ JSON.
       `<discovery_prefix>/<component>/[<node_id>/]<object_id>/config` pattern Home Assistant expects.
 - [x] Surface measured timestamps alongside helper history and allow backdating through date & time
       pickers.
-- [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, and discovery
-      components plus inline tooltips describing each setting.
+- [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, icons, and
+      discovery components plus inline tooltips describing each setting.
 
 ## Configuration
 
@@ -43,9 +43,11 @@ you can:
 - Configure the Mosquitto broker credentials that are stored in SQLite (discovery prefix is locked to
   `homeassistant` for compatibility with the integration).
 - Review broker connectivity logs via the **Test connection** button.
-- Create helpers with a streamlined base form (name, type, icon, device metadata) and an advanced
-  section that auto-generates unique IDs, object IDs, and MQTT topics from the name and node ID (default
-  `hassems`) while still exposing component, device registry, and discovery overrides when needed.
+- Create helpers with a streamlined base form (device name, entity name, description, type, device
+  class, unit, icon, entity ID, and force-update toggle). The advanced section auto-generates the
+  device ID, unique ID (`{device_id}_{entity_name}`), object ID, and MQTT topics using the default node
+  ID `hassems`, while still exposing component, state class, device registry metadata, and other
+  discovery overrides when needed.
 - Edit existing helpers, regenerate discovery payloads, and inspect state/availability topics.
 - Review helper history with inline charts and publish new readings that include `measured_at`
   timestamps selected via date/time pickers.
@@ -74,9 +76,13 @@ Every helper publish triggers three MQTT messages:
 1. **Discovery** – Retained payload on
    `homeassistant/<component>/[node_id/]<object_id>/config` using the metadata you configure in the UI.
 2. **Availability** – Retained payload on the helper-specific availability topic (defaults to
-   `online`/`offline`).
+   `online`/`offline`) which resolves to `{node_id}/{device_id}/{entity_id}/availability` by default.
 3. **State** – JSON payload on the helper's state topic containing both the `value` and
-   `measured_at` timestamp.
+   `measured_at` timestamp. The default pattern is `{node_id}/{device_id}/{entity_id}/state`.
+
+When advanced fields are left blank HASSEMS derives `device_id` from the device name, sets
+`device_identifiers` to `{node_id}:{unique_id}`, and lowercases the entity ID for use in topic
+segments so the MQTT paths remain deterministic.
 
 Discovery payloads include a `value_template` so Home Assistant extracts the numeric/textual `value`
 from the JSON body. The same publish updates the entity's `measured_at` attribute via

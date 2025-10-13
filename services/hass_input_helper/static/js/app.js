@@ -39,6 +39,7 @@
   const createNameInput = createForm?.elements.namedItem('name');
   const createEntityInput = createForm?.elements.namedItem('entity_id');
   const createDeviceNameInput = createForm?.elements.namedItem('device_name');
+  const createDeviceIdInput = createForm?.elements.namedItem('device_id');
   const createUniqueInput = createForm?.elements.namedItem('unique_id');
   const createObjectInput = createForm?.elements.namedItem('object_id');
   const createNodeInput = createForm?.elements.namedItem('node_id');
@@ -47,6 +48,7 @@
 
   const createAutoFlags = {
     entityId: true,
+    deviceId: true,
     uniqueId: true,
     objectId: true,
     stateTopic: true,
@@ -72,18 +74,27 @@
     return normalized;
   }
 
-  function buildStateTopic(nodeId, objectId) {
-    const node = slugifyIdentifier(nodeId) || 'hassems';
-    const object = slugifyIdentifier(objectId);
-    if (!object) return '';
-    return `${node}/${object}/state`;
+  function sanitizeEntityTopicSegment(entityId) {
+    if (!entityId) return '';
+    const text = entityId.toString().trim();
+    if (!text) return '';
+    return text.toLowerCase().replace(/[^a-z0-9_.]+/g, '_').replace(/_+/g, '_');
   }
 
-  function buildAvailabilityTopic(nodeId, objectId) {
+  function buildStateTopic(nodeId, deviceId, entityId) {
     const node = slugifyIdentifier(nodeId) || 'hassems';
-    const object = slugifyIdentifier(objectId);
-    if (!object) return '';
-    return `${node}/${object}/availability`;
+    const device = slugifyIdentifier(deviceId);
+    const entity = sanitizeEntityTopicSegment(entityId);
+    if (!device || !entity) return '';
+    return `${node}/${device}/${entity}/state`;
+  }
+
+  function buildAvailabilityTopic(nodeId, deviceId, entityId) {
+    const node = slugifyIdentifier(nodeId) || 'hassems';
+    const device = slugifyIdentifier(deviceId);
+    const entity = sanitizeEntityTopicSegment(entityId);
+    if (!device || !entity) return '';
+    return `${node}/${device}/${entity}/availability`;
   }
 
   const DEVICE_CLASS_OPTIONS = [
@@ -246,6 +257,29 @@
     { value: 'total_increasing', label: 'Total increasing' },
   ];
 
+  const ICON_OPTIONS = [
+    { value: '', label: 'Auto (based on device class)' },
+    { value: 'mdi:account', label: 'Person (mdi:account)' },
+    { value: 'mdi:calendar', label: 'Calendar (mdi:calendar)' },
+    { value: 'mdi:chart-line', label: 'Chart line (mdi:chart-line)' },
+    { value: 'mdi:clipboard-pulse', label: 'Clipboard pulse (mdi:clipboard-pulse)' },
+    { value: 'mdi:counter', label: 'Counter (mdi:counter)' },
+    { value: 'mdi:gauge', label: 'Gauge (mdi:gauge)' },
+    { value: 'mdi:human-height', label: 'Human height (mdi:human-height)' },
+    { value: 'mdi:information-outline', label: 'Info outline (mdi:information-outline)' },
+    { value: 'mdi:scale', label: 'Scale (mdi:scale)' },
+    { value: 'mdi:ruler', label: 'Ruler (mdi:ruler)' },
+    { value: 'mdi:thermometer', label: 'Thermometer (mdi:thermometer)' },
+    { value: 'mdi:water-percent', label: 'Water percent (mdi:water-percent)' },
+    { value: 'mdi:weight-kilogram', label: 'Weight kilogram (mdi:weight-kilogram)' },
+    { value: 'mdi:speedometer', label: 'Speedometer (mdi:speedometer)' },
+    { value: 'mdi:flash', label: 'Flash (mdi:flash)' },
+    { value: 'mdi:lightbulb-on', label: 'Lightbulb (mdi:lightbulb-on)' },
+    { value: 'mdi:timeline-clock', label: 'Timeline clock (mdi:timeline-clock)' },
+    { value: 'mdi:heart-pulse', label: 'Heart pulse (mdi:heart-pulse)' },
+    { value: 'mdi:alpha-h-box', label: 'H box (mdi:alpha-h-box)' },
+  ];
+
   async function init() {
     mqttForm.addEventListener('submit', handleMqttSubmit);
     testMqttBtn.addEventListener('click', handleMqttTest);
@@ -328,6 +362,15 @@
         syncCreateAutofill();
       });
     }
+    if (createDeviceIdInput) {
+      createDeviceIdInput.addEventListener('input', () => {
+        createAutoFlags.deviceId = false;
+      });
+      createDeviceIdInput.addEventListener('blur', () => {
+        createDeviceIdInput.value = slugifyIdentifier(createDeviceIdInput.value);
+        syncCreateAutofill();
+      });
+    }
 
     populateSelectControls();
     await loadMqttConfig();
@@ -339,11 +382,13 @@
     const unitSelects = document.querySelectorAll('select[name="unit_of_measurement"]');
     const componentSelects = document.querySelectorAll('select[name="component"]');
     const stateClassSelects = document.querySelectorAll('select[name="state_class"]');
+    const iconSelects = document.querySelectorAll('select[name="icon"]');
 
     deviceSelects.forEach((select) => populateSelect(select, DEVICE_CLASS_OPTIONS));
     unitSelects.forEach((select) => populateSelect(select, UNIT_OPTIONS));
     componentSelects.forEach((select) => populateSelect(select, COMPONENT_OPTIONS));
     stateClassSelects.forEach((select) => populateSelect(select, STATE_CLASS_OPTIONS));
+    iconSelects.forEach((select) => populateSelect(select, ICON_OPTIONS));
     setCreateDefaults();
   }
 
@@ -359,6 +404,7 @@
 
   function resetCreateAutofillFlags() {
     createAutoFlags.entityId = true;
+    createAutoFlags.deviceId = true;
     createAutoFlags.uniqueId = true;
     createAutoFlags.objectId = true;
     createAutoFlags.stateTopic = true;
@@ -373,15 +419,29 @@
     const deviceNameValue = createDeviceNameInput?.value ?? '';
     const deviceSlug = slugifyIdentifier(deviceNameValue);
 
+    if (createDeviceIdInput) {
+      if (createAutoFlags.deviceId) {
+        createDeviceIdInput.value = deviceSlug;
+      } else {
+        createDeviceIdInput.value = slugifyIdentifier(createDeviceIdInput.value);
+      }
+    }
+
+    const deviceId = createDeviceIdInput?.value?.trim() || deviceSlug;
+
     if (createUniqueInput) {
       if (createAutoFlags.uniqueId) {
-        createUniqueInput.value = nameSlug;
+        if (deviceId && nameSlug) {
+          createUniqueInput.value = `${deviceId}_${nameSlug}`;
+        } else {
+          createUniqueInput.value = nameSlug;
+        }
       } else {
         createUniqueInput.value = slugifyIdentifier(createUniqueInput.value);
       }
     }
 
-    const uniqueValue = createUniqueInput?.value?.trim() || nameSlug;
+    const uniqueValue = slugifyIdentifier(createUniqueInput?.value || '') || nameSlug;
 
     if (createObjectInput) {
       if (createAutoFlags.objectId) {
@@ -412,12 +472,17 @@
       createNodeInput.value = 'hassems';
     }
     const nodeSegment = createNodeInput?.value ?? 'hassems';
+    const entityIdValue = createEntityInput?.value ?? '';
 
     if (createStateTopicInput && createAutoFlags.stateTopic) {
-      createStateTopicInput.value = buildStateTopic(nodeSegment, objectSlug);
+      createStateTopicInput.value = buildStateTopic(nodeSegment, deviceId, entityIdValue);
     }
     if (createAvailabilityInput && createAutoFlags.availabilityTopic) {
-      createAvailabilityInput.value = buildAvailabilityTopic(nodeSegment, objectSlug);
+      createAvailabilityInput.value = buildAvailabilityTopic(
+        nodeSegment,
+        deviceId,
+        entityIdValue,
+      );
     }
   }
 
@@ -669,14 +734,15 @@
     setSelectValue(updateForm.elements.component, helper.component ?? 'sensor');
     setSelectValue(updateForm.elements.device_class, helper.device_class ?? '');
     setSelectValue(updateForm.elements.unit_of_measurement, helper.unit_of_measurement ?? '');
+    setSelectValue(updateForm.elements.icon, helper.icon ?? '');
     const defaultStateClass = helper.type === 'input_number' ? 'measurement' : '';
     setSelectValue(updateForm.elements.state_class, helper.state_class ?? defaultStateClass);
     updateForm.elements.unique_id.value = helper.unique_id ?? '';
     updateForm.elements.object_id.value = helper.object_id ?? '';
+    updateForm.elements.device_id.value = helper.device_id ?? slugifyIdentifier(helper.device_name ?? '');
     updateForm.elements.node_id.value = helper.node_id ?? 'hassems';
     updateForm.elements.state_topic.value = helper.state_topic ?? '';
     updateForm.elements.availability_topic.value = helper.availability_topic ?? '';
-    updateForm.elements.icon.value = helper.icon ?? '';
     updateForm.elements.force_update.checked = Boolean(helper.force_update);
     updateForm.elements.device_name.value = helper.device_name ?? '';
     updateForm.elements.device_manufacturer.value = helper.device_manufacturer ?? '';
@@ -774,6 +840,7 @@
       availability_topic: formData.get('availability_topic')?.trim(),
       force_update: formData.get('force_update') === 'on',
       device_name: formData.get('device_name')?.trim(),
+      device_id: slugifyIdentifier(formData.get('device_id')?.trim()) || null,
     };
 
     const description = formData.get('description')?.trim();
@@ -831,22 +898,35 @@
     }
 
     const nameSlug = slugifyIdentifier(payload.name);
-    const uniqueId = slugifyIdentifier(payload.unique_id || nameSlug);
+    const deviceNameSlug = slugifyIdentifier(payload.device_name);
+    const deviceId = slugifyIdentifier(payload.device_id || deviceNameSlug);
+    if (!deviceId) {
+      throw new Error('Unable to determine a device ID. Adjust the advanced device ID field.');
+    }
+
+    const entityIdValue = payload.entity_id || '';
+    if (!entityIdValue) {
+      throw new Error('Provide an entity ID before previewing the discovery payload.');
+    }
+    const uniqueCandidate = payload.unique_id || `${deviceId}_${nameSlug}`;
+    const uniqueId = slugifyIdentifier(uniqueCandidate);
     if (!uniqueId) {
       throw new Error('Unable to determine a unique ID. Adjust the advanced unique ID field.');
     }
 
     const objectId = slugifyIdentifier(payload.object_id || uniqueId);
     const nodeId = slugifyIdentifier(payload.node_id) || 'hassems';
-    const stateTopic = payload.state_topic || buildStateTopic(nodeId, objectId);
+    const stateTopic =
+      payload.state_topic || buildStateTopic(nodeId, deviceId, entityIdValue);
     const availabilityTopic =
-      payload.availability_topic || buildAvailabilityTopic(nodeId, objectId);
+      payload.availability_topic ||
+      buildAvailabilityTopic(nodeId, deviceId, entityIdValue);
 
     const identifiers = Array.isArray(payload.device_identifiers)
       ? payload.device_identifiers.filter(Boolean)
       : [];
     if (!identifiers.length) {
-      const base = `${nodeId || 'hassems'}:${objectId}`;
+      const base = `${nodeId || 'hassems'}:${uniqueId}`;
       identifiers.push(base);
     }
 
@@ -855,6 +935,7 @@
       unique_id: uniqueId,
       object_id: objectId,
       node_id: nodeId,
+      device_id: deviceId,
       state_topic: stateTopic,
       availability_topic: availabilityTopic,
       device_identifiers: identifiers,
@@ -992,6 +1073,7 @@
       state_class: formData.get('state_class')?.trim() || null,
       force_update: formData.get('force_update') === 'on',
       device_name: formData.get('device_name')?.trim(),
+      device_id: slugifyIdentifier(formData.get('device_id')?.trim()) || null,
       device_manufacturer: formData.get('device_manufacturer')?.trim() || null,
       device_model: formData.get('device_model')?.trim() || null,
       device_sw_version: formData.get('device_sw_version')?.trim() || null,

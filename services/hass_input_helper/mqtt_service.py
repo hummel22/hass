@@ -221,7 +221,8 @@ def publish_discovery_config(
 
     state_topic = _state_topic(config, helper)
     availability_topic = _availability_topic(config, helper)
-    device_identifiers = helper.device_identifiers or [helper.unique_id]
+    default_identifier = f"{helper.node_id or 'hassems'}:{helper.unique_id}"
+    device_identifiers = helper.device_identifiers or [default_identifier]
     device: dict[str, Any] = {
         "identifiers": device_identifiers,
         "name": helper.device_name,
