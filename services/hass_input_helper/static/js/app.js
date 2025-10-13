@@ -24,6 +24,12 @@
   const detailAvailabilityTopic = document.getElementById('detail-availability-topic');
   const deleteBtn = document.getElementById('delete-helper');
   const createForm = document.getElementById('create-helper-form');
+  const discoveryPreviewBtn = document.getElementById('preview-discovery');
+  const discoveryDialog = document.getElementById('discovery-preview');
+  const discoveryTopicEl = document.getElementById('discovery-preview-topic');
+  const discoveryPayloadEl = document.getElementById('discovery-preview-payload');
+  const discoveryCloseBtn = document.getElementById('close-discovery-preview');
+  const discoveryDismissBtn = document.getElementById('dismiss-discovery-preview');
   const updateForm = document.getElementById('update-helper-form');
   const valueForm = document.getElementById('value-form');
   const historyCanvas = document.getElementById('history-chart');
@@ -247,6 +253,13 @@
     createForm.addEventListener('submit', handleCreateHelper);
     updateForm.addEventListener('submit', handleUpdateHelper);
     deleteBtn.addEventListener('click', handleDeleteHelper);
+    discoveryPreviewBtn?.addEventListener('click', handleDiscoveryPreview);
+
+    discoveryCloseBtn?.addEventListener('click', closeDiscoveryPreview);
+    discoveryDismissBtn?.addEventListener('click', closeDiscoveryPreview);
+    if (discoveryDialog) {
+      discoveryDialog.addEventListener('cancel', closeDiscoveryPreview);
+    }
 
     if (createTypeSelect) {
       createTypeSelect.addEventListener('change', (event) => {
@@ -731,6 +744,22 @@
     }
   }
 
+  function handleDiscoveryPreview(event) {
+    event.preventDefault();
+    if (!createForm) return;
+
+    const formData = new FormData(createForm);
+
+    try {
+      const helperDraft = buildHelperDraft(formData);
+      const topic = computeDiscoveryTopic(helperDraft);
+      const payload = buildDiscoveryPreviewPayload(helperDraft);
+      showDiscoveryPreview(topic, payload);
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  }
+
   function buildCreatePayload(formData) {
     const helperType = formData.get('type');
     const payload = {
@@ -787,6 +816,134 @@
     if (identifiers.length) payload.device_identifiers = identifiers;
 
     return removeUndefined(payload);
+  }
+
+  function buildHelperDraft(formData) {
+    const payload = buildCreatePayload(formData);
+    if (!payload.name) {
+      throw new Error('Provide a name before previewing the discovery payload.');
+    }
+    if (!payload.device_name) {
+      throw new Error('Provide a device name before previewing the discovery payload.');
+    }
+    if (!payload.type) {
+      throw new Error('Select an entity type before previewing the discovery payload.');
+    }
+
+    const nameSlug = slugifyIdentifier(payload.name);
+    const uniqueId = slugifyIdentifier(payload.unique_id || nameSlug);
+    if (!uniqueId) {
+      throw new Error('Unable to determine a unique ID. Adjust the advanced unique ID field.');
+    }
+
+    const objectId = slugifyIdentifier(payload.object_id || uniqueId);
+    const nodeId = slugifyIdentifier(payload.node_id) || 'hassems';
+    const stateTopic = payload.state_topic || buildStateTopic(nodeId, objectId);
+    const availabilityTopic =
+      payload.availability_topic || buildAvailabilityTopic(nodeId, objectId);
+
+    const identifiers = Array.isArray(payload.device_identifiers)
+      ? payload.device_identifiers.filter(Boolean)
+      : [];
+    if (!identifiers.length) {
+      const base = `${nodeId || 'hassems'}:${objectId}`;
+      identifiers.push(base);
+    }
+
+    return {
+      ...payload,
+      unique_id: uniqueId,
+      object_id: objectId,
+      node_id: nodeId,
+      state_topic: stateTopic,
+      availability_topic: availabilityTopic,
+      device_identifiers: identifiers,
+      force_update: payload.force_update !== false,
+      device_manufacturer: payload.device_manufacturer || 'HASSEMS',
+    };
+  }
+
+  function buildDiscoveryPreviewPayload(helper) {
+    const stateTopic = helper.state_topic;
+    const payload = {
+      name: helper.name,
+      unique_id: helper.unique_id,
+      object_id: helper.object_id,
+      state_topic: stateTopic,
+      availability_topic: helper.availability_topic,
+      payload_available: 'online',
+      payload_not_available: 'offline',
+      force_update: helper.force_update !== false,
+      value_template: valueTemplateFor(helper.type),
+      json_attributes_topic: stateTopic,
+      json_attributes_template: "{{ {'measured_at': value_json.measured_at} | tojson }}",
+      device: {
+        identifiers: helper.device_identifiers,
+        name: helper.device_name,
+      },
+    };
+
+    if (helper.device_class) {
+      payload.device_class = helper.device_class;
+    }
+    if (helper.unit_of_measurement) {
+      payload.unit_of_measurement = helper.unit_of_measurement;
+    }
+
+    const stateClass = helper.state_class || (helper.type === 'input_number' ? 'measurement' : undefined);
+    if (stateClass) {
+      payload.state_class = stateClass;
+    }
+
+    if (helper.icon) {
+      payload.icon = helper.icon;
+    }
+
+    if (helper.device_manufacturer) {
+      payload.device.manufacturer = helper.device_manufacturer;
+    }
+    if (helper.device_model) {
+      payload.device.model = helper.device_model;
+    }
+    if (helper.device_sw_version) {
+      payload.device.sw_version = helper.device_sw_version;
+    }
+
+    return removeUndefined(payload);
+  }
+
+  function valueTemplateFor(helperType) {
+    if (helperType === 'input_number') {
+      return '{{ value_json.value | float }}';
+    }
+    if (helperType === 'input_boolean') {
+      return '{{ value_json.value | lower }}';
+    }
+    return '{{ value_json.value }}';
+  }
+
+  function showDiscoveryPreview(topic, payload) {
+    const json = JSON.stringify(payload, null, 2);
+    if (discoveryTopicEl) {
+      discoveryTopicEl.textContent = topic;
+    }
+    if (discoveryPayloadEl) {
+      discoveryPayloadEl.textContent = json;
+    }
+
+    if (discoveryDialog && typeof discoveryDialog.showModal === 'function') {
+      if (!discoveryDialog.open) {
+        discoveryDialog.showModal();
+      }
+    } else {
+      window.alert(`Topic: ${topic}\n\n${json}`);
+    }
+  }
+
+  function closeDiscoveryPreview() {
+    if (discoveryDialog && discoveryDialog.open) {
+      discoveryDialog.close();
+    }
   }
 
   async function handleUpdateHelper(event) {

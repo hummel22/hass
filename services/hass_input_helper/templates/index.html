@@ -418,6 +418,7 @@
             </div>
           </details>
           <div class="form-actions">
+            <button type="button" class="btn" id="preview-discovery">Preview discovery</button>
             <button type="submit" class="btn primary">Create entity</button>
           </div>
         </form>
@@ -627,6 +628,27 @@
         </section>
       </section>
     </main>
+
+    <dialog id="discovery-preview" class="modal">
+      <div class="modal__container">
+        <div class="modal__header">
+          <h3>Discovery payload preview</h3>
+          <button type="button" class="modal__close" id="close-discovery-preview" aria-label="Close discovery preview">
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <p class="modal__topic">
+            <strong>Topic:</strong>
+            <code id="discovery-preview-topic"></code>
+          </p>
+          <pre id="discovery-preview-payload" class="modal__pre"></pre>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn" id="dismiss-discovery-preview">Close</button>
+        </div>
+      </div>
+    </dialog>
 
     <div id="toast" class="toast hidden"></div>
   </body>
