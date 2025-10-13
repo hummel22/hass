@@ -150,6 +150,16 @@ body {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
+.datetime-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.datetime-inputs input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .form-checkbox {
   display: flex;
   align-items: center;

@@ -612,11 +612,23 @@
     const measuredField = document.createElement('label');
     measuredField.className = 'form-field';
     measuredField.innerHTML = '<span>Measured at</span>';
-    const measuredInput = document.createElement('input');
-    measuredInput.type = 'datetime-local';
-    measuredInput.name = 'measured_at';
-    measuredInput.value = toLocalDateTimeValue(new Date());
-    measuredField.appendChild(measuredInput);
+
+    const measuredContainer = document.createElement('div');
+    measuredContainer.className = 'datetime-inputs';
+
+    const measuredDate = document.createElement('input');
+    measuredDate.type = 'date';
+    measuredDate.name = 'measured_date';
+
+    const measuredTime = document.createElement('input');
+    measuredTime.type = 'time';
+    measuredTime.name = 'measured_time';
+    measuredTime.step = 60;
+
+    measuredContainer.append(measuredDate, measuredTime);
+    measuredField.appendChild(measuredContainer);
+
+    setMeasuredInputsToNow(measuredDate, measuredTime);
 
     const submit = document.createElement('button');
     submit.type = 'submit';
@@ -637,13 +649,21 @@
 
     const helper = state.selected;
     const valueInput = valueForm.querySelector('[name="value"]');
-    const measuredInput = valueForm.querySelector('[name="measured_at"]');
+    const measuredDate = valueForm.querySelector('[name="measured_date"]');
+    const measuredTime = valueForm.querySelector('[name="measured_time"]');
     const rawValue = valueInput.value;
 
     try {
       const payload = { value: coerceValue(helper.helper_type, rawValue) };
-      if (measuredInput && measuredInput.value) {
-        const parsed = new Date(measuredInput.value);
+      const customDate = measuredDate?.value;
+      const customTime = measuredTime?.value;
+
+      if (customDate || customTime) {
+        if (!customDate) {
+          throw new Error('Provide a measurement date.');
+        }
+        const timePortion = customTime && customTime.trim() ? customTime : '00:00';
+        const parsed = new Date(`${customDate}T${timePortion}`);
         if (Number.isNaN(parsed.getTime())) {
           throw new Error('Provide a valid measured at timestamp.');
         }
@@ -651,9 +671,7 @@
       } else {
         const now = new Date();
         payload.measured_at = now.toISOString();
-        if (measuredInput) {
-          measuredInput.value = toLocalDateTimeValue(now);
-        }
+        setMeasuredInputsToNow(measuredDate, measuredTime, now);
       }
       const updated = await requestJson(`/inputs/${helper.slug}/set`, {
         method: 'POST',
@@ -667,9 +685,7 @@
       populateDetail(updated);
       renderHelperList();
       await loadHistory(updated.slug);
-      if (measuredInput) {
-        measuredInput.value = toLocalDateTimeValue(new Date());
-      }
+      setMeasuredInputsToNow(measuredDate, measuredTime);
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -808,14 +824,33 @@
     }
   }
 
-  function toLocalDateTimeValue(date) {
+  function setMeasuredInputsToNow(dateInput, timeInput, referenceDate = new Date()) {
+    if (!dateInput && !timeInput) {
+      return;
+    }
+    const localDate = toLocalDateValue(referenceDate);
+    const localTime = toLocalTimeValue(referenceDate);
+    if (dateInput) {
+      dateInput.value = localDate;
+    }
+    if (timeInput) {
+      timeInput.value = localTime;
+    }
+  }
+
+  function toLocalDateValue(date) {
     const pad = (input) => String(input).padStart(2, '0');
     const year = date.getFullYear();
     const month = pad(date.getMonth() + 1);
     const day = pad(date.getDate());
+    return `${year}-${month}-${day}`;
+  }
+
+  function toLocalTimeValue(date) {
+    const pad = (input) => String(input).padStart(2, '0');
     const hours = pad(date.getHours());
     const minutes = pad(date.getMinutes());
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+    return `${hours}:${minutes}`;
   }
 
   async function requestJson(url, options = {}) {

@@ -118,8 +118,9 @@ metadata describing the helper:
 ```
 
 The history chart in the UI and the `/inputs/{slug}/history` endpoint both surface the `measured_at`
-timestamp so you can track when readings were captured. The "Send new value" form lets you override
-the timestamp before publishing—leave it untouched to default to the current time.
+timestamp so you can track when readings were captured. The "Send new value" form now provides date
+and time pickers so you can override the timestamp before publishing—leave them untouched to default
+to the current time.
 
 ## Connecting to the Home Assistant MQTT add-on
 
