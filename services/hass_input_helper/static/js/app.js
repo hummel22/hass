@@ -106,12 +106,33 @@
     }
   }
 
-  async function handleMqttTest() {
+  async function handleMqttTest(event) {
+    event?.preventDefault?.();
+    const snapshot = {
+      host: mqttForm.host.value.trim(),
+      port: Number(mqttForm.port.value || 1883),
+      use_tls: mqttForm.use_tls.checked,
+      username_present: Boolean(mqttForm.username.value.trim()),
+      client_id_present: Boolean(mqttForm.client_id.value.trim()),
+      topic_prefix: mqttForm.topic_prefix.value.trim() || 'homeassistant/input_helper',
+    };
+
+    console.groupCollapsed('MQTT Test');
+    console.info('Starting MQTT connection test with configuration', snapshot);
+
     try {
       await requestJson('/config/mqtt/test', { method: 'POST' });
+      console.info('MQTT connection test succeeded.');
       showToast('MQTT connection successful.', 'success');
     } catch (error) {
+      console.error('MQTT connection test failed', {
+        message: error?.message,
+        stack: error?.stack,
+        config: snapshot,
+      });
       showToast(`MQTT connection failed: ${error.message}`, 'error');
+    } finally {
+      console.groupEnd?.();
     }
   }
 
@@ -582,9 +603,21 @@
 
   async function requestJson(url, options = {}) {
     const defaultHeaders = { 'Content-Type': 'application/json' };
+    const method = options?.method || 'GET';
+    const hasBody = Boolean(options?.body);
+    console.debug('requestJson -> sending request', { url, method, hasBody });
+
     const response = await fetch(url, {
       headers: defaultHeaders,
       ...options,
+    });
+
+    console.debug('requestJson <- received response', {
+      url,
+      method,
+      status: response.status,
+      ok: response.ok,
+      contentType: response.headers.get('content-type'),
     });
 
     if (response.status === 204) {
@@ -595,11 +628,13 @@
     const isJson = contentType.includes('application/json');
 
     if (!response.ok) {
+      console.warn('requestJson !ok response', { url, method, status: response.status });
       let message = response.statusText;
       if (isJson) {
         const data = await response.json();
         message = data?.detail || data?.message || message;
       }
+      console.debug('requestJson error payload', { url, method, message });
       throw new Error(message);
     }
 

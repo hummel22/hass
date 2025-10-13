@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
+import logging
 import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -36,6 +37,8 @@ store = InputHelperStore(DATA_FILE)
 ha_client = HomeAssistantClient.from_env()
 
 app = FastAPI(title="HASS Input Helper Service", version="0.1.0")
+
+logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -96,11 +99,22 @@ async def test_mqtt_config(store: InputHelperStore = Depends(get_store)) -> MQTT
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MQTT configuration not found.")
 
     try:
+        logger.info(
+            "Received MQTT connection test request",
+            extra={
+                "mqtt_host": config.host,
+                "mqtt_port": config.port,
+                "mqtt_use_tls": config.use_tls,
+                "mqtt_username_present": bool(config.username),
+            },
+        )
         await asyncio.to_thread(verify_connection, config)
         return MQTTTestResponse(success=True, message="Successfully connected to the MQTT broker.")
     except MQTTError as exc:
+        logger.warning("MQTT connection test failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error during MQTT connection test")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
