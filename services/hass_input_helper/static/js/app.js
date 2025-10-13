@@ -32,6 +32,7 @@
   const createTypeSelect = createForm?.elements.namedItem('type');
   const createNameInput = createForm?.elements.namedItem('name');
   const createEntityInput = createForm?.elements.namedItem('entity_id');
+  const createDeviceNameInput = createForm?.elements.namedItem('device_name');
   const createUniqueInput = createForm?.elements.namedItem('unique_id');
   const createObjectInput = createForm?.elements.namedItem('object_id');
   const createNodeInput = createForm?.elements.namedItem('node_id');
@@ -309,6 +310,11 @@
         createAutoFlags.availabilityTopic = false;
       });
     }
+    if (createDeviceNameInput) {
+      createDeviceNameInput.addEventListener('input', () => {
+        syncCreateAutofill();
+      });
+    }
 
     populateSelectControls();
     await loadMqttConfig();
@@ -351,6 +357,8 @@
     const nameValue = createNameInput?.value ?? '';
     const typeValue = createTypeSelect?.value ?? '';
     const nameSlug = slugifyIdentifier(nameValue);
+    const deviceNameValue = createDeviceNameInput?.value ?? '';
+    const deviceSlug = slugifyIdentifier(deviceNameValue);
 
     if (createUniqueInput) {
       if (createAutoFlags.uniqueId) {
@@ -376,9 +384,13 @@
     }
 
     if (createEntityInput && createAutoFlags.entityId) {
-      if (typeValue && nameSlug) {
-        createEntityInput.value = `${typeValue}.${nameSlug}`;
-      } else if (!typeValue) {
+      if (typeValue) {
+        const slugParts = [];
+        if (deviceSlug) slugParts.push(deviceSlug);
+        if (nameSlug) slugParts.push(nameSlug);
+        const combinedSlug = slugParts.join('_');
+        createEntityInput.value = combinedSlug ? `${typeValue}.${combinedSlug}` : '';
+      } else {
         createEntityInput.value = '';
       }
     }

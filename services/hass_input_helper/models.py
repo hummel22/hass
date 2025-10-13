@@ -232,6 +232,7 @@ class InputHelperCreate(InputHelperBase):
 
         data = dict(values)
         raw_name = str(data.get("name") or "").strip()
+        raw_device_name = str(data.get("device_name") or "").strip()
 
         unique_input = data.get("unique_id")
         if unique_input:
@@ -259,12 +260,16 @@ class InputHelperCreate(InputHelperBase):
         else:
             helper_domain = str(helper_type).strip() if helper_type else ""
 
-        if raw_name and helper_domain:
-            candidate_slug = slugify_identifier(raw_name)
-            entity_id = f"{helper_domain}.{candidate_slug}"
-            existing = str(data.get("entity_id") or "").strip()
-            if not existing:
-                data["entity_id"] = entity_id
+        if helper_domain:
+            name_slug = slugify_identifier(raw_name)
+            device_slug = slugify_identifier(raw_device_name)
+            slug_parts = [part for part in (device_slug, name_slug) if part]
+            if slug_parts:
+                candidate_slug = "_".join(slug_parts)
+                entity_id = f"{helper_domain}.{candidate_slug}"
+                existing = str(data.get("entity_id") or "").strip()
+                if not existing:
+                    data["entity_id"] = entity_id
 
         return data
 
