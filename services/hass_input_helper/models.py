@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SetValueRequest(BaseModel):
@@ -25,6 +25,7 @@ InputValue = Union[str, float, bool]
 
 
 _slug_pattern = re.compile(r"[^a-z0-9-]+")
+_identifier_pattern = re.compile(r"[^a-z0-9_]+")
 _entity_pattern = re.compile(r"^[a-zA-Z_]+\.[a-zA-Z0-9_]+$")
 _topic_segment_pattern = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -32,7 +33,16 @@ _topic_segment_pattern = re.compile(r"^[A-Za-z0-9_-]+$")
 def slugify(value: str) -> str:
     slug = value.strip().lower().replace(" ", "-")
     slug = _slug_pattern.sub("-", slug)
+    slug = re.sub(r"-+", "-", slug)
     slug = slug.strip("-")
+    return slug or "helper"
+
+
+def slugify_identifier(value: str) -> str:
+    slug = value.strip().lower().replace(" ", "_")
+    slug = _identifier_pattern.sub("_", slug)
+    slug = re.sub(r"_+", "_", slug)
+    slug = slug.strip("_")
     return slug or "helper"
 
 
@@ -108,7 +118,7 @@ def coerce_helper_value(helper_type: HelperType, value: Any, options: Optional[L
 class InputHelperBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     entity_id: str
-    helper_type: HelperType
+    type: HelperType
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -132,7 +142,7 @@ class InputHelperBase(BaseModel):
     @field_validator("entity_id")
     @classmethod
     def ensure_entity_matches_type(cls, v: str, info: Field.ValidationInfo) -> str:  # type: ignore[name-defined]
-        helper_type = info.data.get("helper_type")
+        helper_type = info.data.get("type")
         if helper_type is None:
             return v
         return _validate_entity_id(helper_type, v)
@@ -195,7 +205,7 @@ class InputHelperBase(BaseModel):
     def clean_options(cls, v: Optional[List[str]], info: Field.ValidationInfo) -> Optional[List[str]]:  # type: ignore[name-defined]
         if v is None:
             return None
-        helper_type = info.data.get("helper_type")
+        helper_type = info.data.get("type")
         if helper_type != HelperType.INPUT_SELECT:
             return None
         cleaned = [str(item) for item in v if str(item).strip()]
@@ -206,7 +216,7 @@ class InputHelperBase(BaseModel):
     @field_validator("default_value")
     @classmethod
     def validate_default_value(cls, v: Optional[InputValue], info: Field.ValidationInfo) -> Optional[InputValue]:  # type: ignore[name-defined]
-        helper_type = info.data.get("helper_type")
+        helper_type = info.data.get("type")
         options = info.data.get("options")
         if v is None or helper_type is None:
             return v
@@ -214,7 +224,49 @@ class InputHelperBase(BaseModel):
 
 
 class InputHelperCreate(InputHelperBase):
-    pass
+    @model_validator(mode="before")
+    @classmethod
+    def autofill_identifiers(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+
+        data = dict(values)
+        raw_name = str(data.get("name") or "").strip()
+
+        unique_input = data.get("unique_id")
+        if unique_input:
+            unique_id = slugify_identifier(str(unique_input))
+        elif raw_name:
+            unique_id = slugify_identifier(raw_name)
+        else:
+            unique_id = None
+        if unique_id:
+            data["unique_id"] = unique_id
+
+        object_input = data.get("object_id")
+        if object_input:
+            object_id = slugify_identifier(str(object_input))
+        elif unique_id:
+            object_id = unique_id
+        else:
+            object_id = None
+        if object_id:
+            data["object_id"] = object_id
+
+        helper_type = data.get("type")
+        if isinstance(helper_type, HelperType):
+            helper_domain = helper_type.value
+        else:
+            helper_domain = str(helper_type).strip() if helper_type else ""
+
+        if raw_name and helper_domain:
+            candidate_slug = slugify_identifier(raw_name)
+            entity_id = f"{helper_domain}.{candidate_slug}"
+            existing = str(data.get("entity_id") or "").strip()
+            if not existing:
+                data["entity_id"] = entity_id
+
+        return data
 
 
 class InputHelperUpdate(BaseModel):
@@ -247,7 +299,7 @@ class InputHelperUpdate(BaseModel):
     def validate_entity_id(cls, v: Optional[str], info: Field.ValidationInfo) -> Optional[str]:  # type: ignore[name-defined]
         if v is None:
             return None
-        helper_type = info.data.get("helper_type")
+        helper_type = info.data.get("type")
         if helper_type is None:
             return v
         return _validate_entity_id(helper_type, v)
@@ -313,7 +365,7 @@ class InputHelper(BaseModel):
     slug: str
     name: str
     entity_id: str
-    helper_type: HelperType
+    type: HelperType
     description: Optional[str] = None
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -373,7 +425,7 @@ class InputHelperRecord:
     def create(cls, payload: InputHelperCreate) -> "InputHelperRecord":
         now = datetime.now(timezone.utc)
         node_id = payload.node_id or "hassems"
-        object_id = payload.object_id or slugify(payload.unique_id)
+        object_id = payload.object_id or slugify_identifier(payload.unique_id)
         identifiers = payload.device_identifiers or []
         if not identifiers:
             base_identifier = f"{node_id or 'hassems'}:{object_id}"
@@ -382,7 +434,7 @@ class InputHelperRecord:
             slug=slugify(payload.unique_id),
             name=payload.name,
             entity_id=payload.entity_id,
-            helper_type=payload.helper_type,
+            type=payload.type,
             description=payload.description,
             default_value=payload.default_value,
             options=payload.options,
@@ -411,7 +463,7 @@ class InputHelperRecord:
 
     def update(self, payload: InputHelperUpdate) -> None:
         data = self.helper.model_dump()
-        helper_type = self.helper.helper_type
+        helper_type = self.helper.type
         options = self.helper.options
         update_data = payload.model_dump(exclude_unset=True)
 
@@ -445,9 +497,9 @@ class InputHelperRecord:
         if "component" in update_data and payload.component:
             data["component"] = payload.component
         if "unique_id" in update_data and payload.unique_id:
-            data["unique_id"] = payload.unique_id
+            data["unique_id"] = slugify_identifier(payload.unique_id)
         if "object_id" in update_data and payload.object_id:
-            data["object_id"] = payload.object_id
+            data["object_id"] = slugify_identifier(payload.object_id)
         if "node_id" in update_data:
             data["node_id"] = payload.node_id
         if "state_topic" in update_data and payload.state_topic:

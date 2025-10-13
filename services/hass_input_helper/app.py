@@ -255,7 +255,7 @@ async def set_helper_value(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
 
     try:
-        coerced = coerce_helper_value(record.helper.helper_type, request.value, record.helper.options)
+        coerced = coerce_helper_value(record.helper.type, request.value, record.helper.options)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

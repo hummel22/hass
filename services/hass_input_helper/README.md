@@ -43,8 +43,9 @@ you can:
 - Configure the Mosquitto broker credentials that are stored in SQLite (discovery prefix is locked to
   `homeassistant` for compatibility with the integration).
 - Review broker connectivity logs via the **Test connection** button.
-- Create helpers with full discovery metadata (component, unique ID, object ID, node ID defaulting
-  to `hassems`, topics, icon, device class, unit, state class, and device registry fields).
+- Create helpers with a streamlined base form (name, type, icon, device metadata) and an advanced
+  section that auto-generates unique IDs, object IDs, and MQTT topics from the name and node ID (default
+  `hassems`) while still exposing component, device registry, and discovery overrides when needed.
 - Edit existing helpers, regenerate discovery payloads, and inspect state/availability topics.
 - Review helper history with inline charts and publish new readings that include `measured_at`
   timestamps selected via date/time pickers.

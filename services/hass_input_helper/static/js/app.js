@@ -29,12 +29,55 @@
   const historyCanvas = document.getElementById('history-chart');
   const historyList = document.getElementById('history-list');
 
+  const createTypeSelect = createForm?.elements.namedItem('type');
+  const createNameInput = createForm?.elements.namedItem('name');
+  const createEntityInput = createForm?.elements.namedItem('entity_id');
+  const createUniqueInput = createForm?.elements.namedItem('unique_id');
+  const createObjectInput = createForm?.elements.namedItem('object_id');
+  const createNodeInput = createForm?.elements.namedItem('node_id');
+  const createStateTopicInput = createForm?.elements.namedItem('state_topic');
+  const createAvailabilityInput = createForm?.elements.namedItem('availability_topic');
+
+  const createAutoFlags = {
+    entityId: true,
+    uniqueId: true,
+    objectId: true,
+    stateTopic: true,
+    availabilityTopic: true,
+  };
+
   const helperTypeMap = {
     input_text: 'Input text',
     input_number: 'Input number',
     input_boolean: 'Input boolean',
     input_select: 'Input select',
   };
+
+  function slugifyIdentifier(value) {
+    if (!value) return '';
+    const normalized = value
+      .toString()
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized;
+  }
+
+  function buildStateTopic(nodeId, objectId) {
+    const node = slugifyIdentifier(nodeId) || 'hassems';
+    const object = slugifyIdentifier(objectId);
+    if (!object) return '';
+    return `${node}/${object}/state`;
+  }
+
+  function buildAvailabilityTopic(nodeId, objectId) {
+    const node = slugifyIdentifier(nodeId) || 'hassems';
+    const object = slugifyIdentifier(objectId);
+    if (!object) return '';
+    return `${node}/${object}/availability`;
+  }
 
   const DEVICE_CLASS_OPTIONS = [
     { value: '', label: 'None' },
@@ -203,7 +246,69 @@
     createForm.addEventListener('submit', handleCreateHelper);
     updateForm.addEventListener('submit', handleUpdateHelper);
     deleteBtn.addEventListener('click', handleDeleteHelper);
-    createForm.elements.helper_type.addEventListener('change', handleCreateTypeChange);
+
+    if (createTypeSelect) {
+      createTypeSelect.addEventListener('change', (event) => {
+        handleCreateTypeChange(event);
+        syncCreateAutofill();
+      });
+    }
+    if (createNameInput) {
+      createNameInput.addEventListener('input', () => {
+        syncCreateAutofill();
+      });
+    }
+    if (createEntityInput) {
+      createEntityInput.addEventListener('input', () => {
+        createAutoFlags.entityId = false;
+      });
+    }
+    if (createUniqueInput) {
+      createUniqueInput.addEventListener('input', () => {
+        createAutoFlags.uniqueId = false;
+        if (createAutoFlags.objectId && createObjectInput) {
+          createObjectInput.value = slugifyIdentifier(createUniqueInput.value);
+        }
+      });
+      createUniqueInput.addEventListener('blur', () => {
+        createUniqueInput.value = slugifyIdentifier(createUniqueInput.value);
+        if (createAutoFlags.objectId && createObjectInput) {
+          createObjectInput.value = slugifyIdentifier(createUniqueInput.value);
+        }
+        syncCreateAutofill();
+      });
+    }
+    if (createObjectInput) {
+      createObjectInput.addEventListener('input', () => {
+        createAutoFlags.objectId = false;
+      });
+      createObjectInput.addEventListener('blur', () => {
+        createObjectInput.value = slugifyIdentifier(createObjectInput.value);
+        syncCreateAutofill();
+      });
+    }
+    if (createNodeInput) {
+      createNodeInput.addEventListener('input', () => {
+        if (createAutoFlags.stateTopic || createAutoFlags.availabilityTopic) {
+          syncCreateAutofill();
+        }
+      });
+      createNodeInput.addEventListener('blur', () => {
+        const cleaned = slugifyIdentifier(createNodeInput.value) || 'hassems';
+        createNodeInput.value = cleaned;
+        syncCreateAutofill();
+      });
+    }
+    if (createStateTopicInput) {
+      createStateTopicInput.addEventListener('input', () => {
+        createAutoFlags.stateTopic = false;
+      });
+    }
+    if (createAvailabilityInput) {
+      createAvailabilityInput.addEventListener('input', () => {
+        createAutoFlags.availabilityTopic = false;
+      });
+    }
 
     populateSelectControls();
     await loadMqttConfig();
@@ -233,6 +338,64 @@
     });
   }
 
+  function resetCreateAutofillFlags() {
+    createAutoFlags.entityId = true;
+    createAutoFlags.uniqueId = true;
+    createAutoFlags.objectId = true;
+    createAutoFlags.stateTopic = true;
+    createAutoFlags.availabilityTopic = true;
+  }
+
+  function syncCreateAutofill() {
+    if (!createForm) return;
+    const nameValue = createNameInput?.value ?? '';
+    const typeValue = createTypeSelect?.value ?? '';
+    const nameSlug = slugifyIdentifier(nameValue);
+
+    if (createUniqueInput) {
+      if (createAutoFlags.uniqueId) {
+        createUniqueInput.value = nameSlug;
+      } else {
+        createUniqueInput.value = slugifyIdentifier(createUniqueInput.value);
+      }
+    }
+
+    const uniqueValue = createUniqueInput?.value?.trim() || nameSlug;
+
+    if (createObjectInput) {
+      if (createAutoFlags.objectId) {
+        createObjectInput.value = slugifyIdentifier(uniqueValue) || uniqueValue;
+      } else {
+        createObjectInput.value = slugifyIdentifier(createObjectInput.value);
+      }
+    }
+
+    const objectSlug = slugifyIdentifier(createObjectInput?.value || '');
+    if (createObjectInput) {
+      createObjectInput.value = objectSlug;
+    }
+
+    if (createEntityInput && createAutoFlags.entityId) {
+      if (typeValue && nameSlug) {
+        createEntityInput.value = `${typeValue}.${nameSlug}`;
+      } else if (!typeValue) {
+        createEntityInput.value = '';
+      }
+    }
+
+    if (createNodeInput && !createNodeInput.value) {
+      createNodeInput.value = 'hassems';
+    }
+    const nodeSegment = createNodeInput?.value ?? 'hassems';
+
+    if (createStateTopicInput && createAutoFlags.stateTopic) {
+      createStateTopicInput.value = buildStateTopic(nodeSegment, objectSlug);
+    }
+    if (createAvailabilityInput && createAutoFlags.availabilityTopic) {
+      createAvailabilityInput.value = buildAvailabilityTopic(nodeSegment, objectSlug);
+    }
+  }
+
   function setCreateDefaults() {
     if (!createForm) return;
     if (createForm.elements.component) {
@@ -241,8 +404,8 @@
     if (createForm.elements.state_class) {
       setSelectValue(createForm.elements.state_class, 'measurement');
     }
-    if (createForm.elements.node_id) {
-      createForm.elements.node_id.value = 'hassems';
+    if (createNodeInput) {
+      createNodeInput.value = 'hassems';
     }
     if (createForm.elements.force_update) {
       createForm.elements.force_update.checked = true;
@@ -253,16 +416,23 @@
         createForm.elements.device_manufacturer.value = 'HASSEMS';
       }
     }
+    const advancedSection = createForm.querySelector('.form-advanced');
+    if (advancedSection instanceof HTMLDetailsElement) {
+      advancedSection.open = false;
+    }
+    resetCreateAutofillFlags();
     handleCreateTypeChange();
+    syncCreateAutofill();
   }
 
   function handleCreateTypeChange(event) {
-    if (!createForm.elements.state_class) return;
-    const type = event?.target?.value ?? createForm.elements.helper_type.value;
+    const stateClassSelect = createForm?.elements.namedItem('state_class');
+    if (!stateClassSelect) return;
+    const type = event?.target?.value ?? createTypeSelect?.value ?? '';
     if (type === 'input_number') {
-      setSelectValue(createForm.elements.state_class, 'measurement');
+      setSelectValue(stateClassSelect, 'measurement');
     } else {
-      setSelectValue(createForm.elements.state_class, '');
+      setSelectValue(stateClassSelect, '');
     }
     if (createForm.elements.options) {
       const isSelect = type === 'input_select';
@@ -458,15 +628,23 @@
     detailCard.classList.remove('hidden');
     detailTitle.textContent = helper.name;
     detailEntityId.textContent = `${helper.entity_id} · ${helper.unique_id}`;
+    const advancedSection = updateForm.querySelector('.form-advanced');
+    if (advancedSection instanceof HTMLDetailsElement) {
+      advancedSection.open = false;
+    }
     updateForm.elements.name.value = helper.name;
     updateForm.elements.entity_id.value = helper.entity_id;
-    updateForm.elements.helper_type.value = helperTypeMap[helper.helper_type] || helper.helper_type;
+    const typeDisplay = helperTypeMap[helper.type] || helper.type;
+    const typeInput = updateForm.elements.namedItem('type');
+    if (typeInput) {
+      typeInput.value = typeDisplay;
+    }
     updateForm.elements.description.value = helper.description ?? '';
     updateForm.elements.default_value.value = helper.default_value ?? '';
     setSelectValue(updateForm.elements.component, helper.component ?? 'sensor');
     setSelectValue(updateForm.elements.device_class, helper.device_class ?? '');
     setSelectValue(updateForm.elements.unit_of_measurement, helper.unit_of_measurement ?? '');
-    const defaultStateClass = helper.helper_type === 'input_number' ? 'measurement' : '';
+    const defaultStateClass = helper.type === 'input_number' ? 'measurement' : '';
     setSelectValue(updateForm.elements.state_class, helper.state_class ?? defaultStateClass);
     updateForm.elements.unique_id.value = helper.unique_id ?? '';
     updateForm.elements.object_id.value = helper.object_id ?? '';
@@ -482,7 +660,7 @@
     updateForm.elements.device_identifiers.value = (helper.device_identifiers || []).join(', ');
 
     const optionsField = updateForm.elements.options;
-    if (helper.helper_type === 'input_select') {
+    if (helper.type === 'input_select') {
       optionsField.value = (helper.options || []).join(', ');
       optionsField.disabled = false;
     } else {
@@ -524,7 +702,7 @@
   async function handleCreateHelper(event) {
     event.preventDefault();
     const formData = new FormData(createForm);
-    const helperType = formData.get('helper_type');
+    const helperType = formData.get('type');
 
     try {
       const payload = buildCreatePayload(formData);
@@ -542,15 +720,15 @@
   }
 
   function buildCreatePayload(formData) {
-    const helperType = formData.get('helper_type');
+    const helperType = formData.get('type');
     const payload = {
       name: formData.get('name')?.trim(),
       entity_id: formData.get('entity_id')?.trim(),
-      helper_type: helperType,
+      type: helperType,
       component: formData.get('component')?.trim() || 'sensor',
-      unique_id: formData.get('unique_id')?.trim(),
-      object_id: formData.get('object_id')?.trim(),
-      node_id: formData.get('node_id')?.trim() || null,
+      unique_id: slugifyIdentifier(formData.get('unique_id')?.trim()) || null,
+      object_id: slugifyIdentifier(formData.get('object_id')?.trim()) || null,
+      node_id: slugifyIdentifier(formData.get('node_id')?.trim()) || null,
       state_topic: formData.get('state_topic')?.trim(),
       availability_topic: formData.get('availability_topic')?.trim(),
       force_update: formData.get('force_update') === 'on',
@@ -607,7 +785,7 @@
     }
 
     const formData = new FormData(updateForm);
-    const helperType = state.selected.helper_type;
+    const helperType = state.selected.type;
 
     try {
       const payload = buildUpdatePayload(formData, helperType);
@@ -634,9 +812,9 @@
       description: formData.get('description')?.trim() || null,
       default_value: null,
       component: formData.get('component')?.trim() || null,
-      unique_id: formData.get('unique_id')?.trim(),
-      object_id: formData.get('object_id')?.trim(),
-      node_id: formData.get('node_id')?.trim() || null,
+      unique_id: slugifyIdentifier(formData.get('unique_id')?.trim()) || null,
+      object_id: slugifyIdentifier(formData.get('object_id')?.trim()) || null,
+      node_id: slugifyIdentifier(formData.get('node_id')?.trim()) || null,
       state_topic: formData.get('state_topic')?.trim(),
       availability_topic: formData.get('availability_topic')?.trim(),
       icon: formData.get('icon')?.trim() || null,
@@ -702,7 +880,7 @@
     field.innerHTML = '<span class="label-text">Value</span>';
 
     let input;
-    if (helper.helper_type === 'input_boolean') {
+    if (helper.type === 'input_boolean') {
       input = document.createElement('select');
       input.name = 'value';
       const trueOption = document.createElement('option');
@@ -717,7 +895,7 @@
       } else if (helper.last_value === false) {
         input.value = 'false';
       }
-    } else if (helper.helper_type === 'input_number') {
+    } else if (helper.type === 'input_number') {
       input = document.createElement('input');
       input.type = 'number';
       input.name = 'value';
@@ -727,7 +905,7 @@
       if (typeof helper.last_value === 'number') {
         input.value = helper.last_value;
       }
-    } else if (helper.helper_type === 'input_select') {
+    } else if (helper.type === 'input_select') {
       input = document.createElement('select');
       input.name = 'value';
       (helper.options || []).forEach((option) => {
@@ -795,7 +973,7 @@
     const rawValue = valueInput.value;
 
     try {
-      const payload = { value: coerceValue(helper.helper_type, rawValue) };
+      const payload = { value: coerceValue(helper.type, rawValue) };
       const customDate = measuredDate?.value;
       const customTime = measuredTime?.value;
 
@@ -855,7 +1033,7 @@
     }
 
     const labels = history.map((item) => formatTimestamp(item.measured_at));
-    const numericValues = history.map((item) => normalizeHistoryValue(helper.helper_type, item.value));
+    const numericValues = history.map((item) => normalizeHistoryValue(helper.type, item.value));
     const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
 
     if (allNumeric) {
@@ -863,7 +1041,7 @@
       historyList.classList.add('hidden');
       const dataset = numericValues.map((value) => Number(value));
 
-      const yTicks = helper.helper_type === 'input_boolean'
+      const yTicks = helper.type === 'input_boolean'
         ? {
             callback: (value) => (value === 1 ? 'On' : 'Off'),
             max: 1,
@@ -891,7 +1069,7 @@
           responsive: true,
           scales: {
             y: {
-              beginAtZero: helper.helper_type !== 'input_number' ? true : false,
+              beginAtZero: helper.type !== 'input_number',
               ...yTicks,
             },
           },

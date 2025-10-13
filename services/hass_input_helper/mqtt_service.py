@@ -173,7 +173,7 @@ def publish_value(
             "measured_at": measured_iso,
             "device_class": helper.device_class,
             "unit_of_measurement": helper.unit_of_measurement,
-            "helper_type": helper.helper_type.value,
+            "helper_type": helper.type.value,
         },
         default=str,
     )
@@ -197,15 +197,15 @@ def _discovery_topic(
 
 
 def _value_template(helper: InputHelper) -> str:
-    if helper.helper_type == HelperType.INPUT_NUMBER:
+    if helper.type == HelperType.INPUT_NUMBER:
         return "{{ value_json.value | float }}"
-    if helper.helper_type == HelperType.INPUT_BOOLEAN:
+    if helper.type == HelperType.INPUT_BOOLEAN:
         return "{{ value_json.value | lower }}"
     return "{{ value_json.value }}"
 
 
 def _state_class(helper: InputHelper) -> Optional[str]:
-    if helper.helper_type == HelperType.INPUT_NUMBER:
+    if helper.type == HelperType.INPUT_NUMBER:
         return "measurement"
     return None
 

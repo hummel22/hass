@@ -108,6 +108,10 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.form-grid--base {
+  margin-bottom: 1rem;
+}
+
 .form-field {
   display: flex;
   flex-direction: column;
@@ -200,6 +204,44 @@ body {
   background: var(--surface-muted);
   color: var(--text);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-advanced {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(241, 245, 249, 0.65);
+  padding: 0.25rem 1rem 1rem;
+}
+
+.form-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+}
+
+.form-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-advanced > summary::before {
+  content: '\25BC';
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+  transform: rotate(-90deg);
+}
+
+.form-advanced[open] > summary::before {
+  transform: rotate(0deg);
+}
+
+.form-advanced .form-grid {
+  margin-top: 0.75rem;
 }
 
 .form-field input::placeholder,

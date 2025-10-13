@@ -39,13 +39,13 @@ class HomeAssistantClient:
     async def set_helper_value(self, helper: InputHelper, value: Any) -> Dict[str, Any]:
         """Set the value of a Home Assistant input helper."""
 
-        coerced_value = coerce_helper_value(helper.helper_type, value, helper.options)
-        domain = helper.helper_type
+        coerced_value = coerce_helper_value(helper.type, value, helper.options)
+        domain = helper.type.value
 
-        if helper.helper_type == HelperType.INPUT_BOOLEAN:
+        if helper.type == HelperType.INPUT_BOOLEAN:
             service = "turn_on" if coerced_value else "turn_off"
             payload: Dict[str, Any] = {"entity_id": helper.entity_id}
-        elif helper.helper_type == HelperType.INPUT_SELECT:
+        elif helper.type == HelperType.INPUT_SELECT:
             service = "select_option"
             payload = {"entity_id": helper.entity_id, "option": coerced_value}
         else:  # input_text or input_number
