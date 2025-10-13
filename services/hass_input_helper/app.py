@@ -44,7 +44,7 @@ DATA_FILE = BASE_DIR / "data" / "input_helpers.db"
 store = InputHelperStore(DATA_FILE)
 ha_client = HomeAssistantClient.from_env()
 
-app = FastAPI(title="HASS Input Helper Service", version="0.1.0")
+app = FastAPI(title="Home Assistant Entity Management System", version="0.2.0")
 
 logger = logging.getLogger(__name__)
 

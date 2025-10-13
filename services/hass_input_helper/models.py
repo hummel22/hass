@@ -26,6 +26,7 @@ InputValue = Union[str, float, bool]
 
 _slug_pattern = re.compile(r"[^a-z0-9-]+")
 _entity_pattern = re.compile(r"^[a-zA-Z_]+\.[a-zA-Z0-9_]+$")
+_topic_segment_pattern = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def slugify(value: str) -> str:
@@ -33,6 +34,33 @@ def slugify(value: str) -> str:
     slug = _slug_pattern.sub("-", slug)
     slug = slug.strip("-")
     return slug or "helper"
+
+
+def clean_topic_segment(value: Optional[str], *, allow_empty: bool = False) -> Optional[str]:
+    if value is None:
+        if allow_empty:
+            return None
+        raise ValueError("Provide a valid MQTT topic segment.")
+    cleaned = value.strip()
+    if not cleaned:
+        if allow_empty:
+            return ""
+        raise ValueError("Provide a valid MQTT topic segment.")
+    normalised = cleaned.replace(" ", "_").lower()
+    if not _topic_segment_pattern.match(normalised):
+        raise ValueError(
+            "MQTT topic segments may only contain letters, numbers, underscores, and hyphens."
+        )
+    return normalised
+
+
+def clean_topic_path(value: str) -> str:
+    cleaned = value.strip().strip("/")
+    if not cleaned:
+        raise ValueError("Provide a valid MQTT topic path.")
+    if " " in cleaned:
+        raise ValueError("MQTT topics cannot contain spaces.")
+    return cleaned
 
 
 def _validate_entity_id(helper_type: HelperType, entity_id: str) -> str:
@@ -86,6 +114,20 @@ class InputHelperBase(BaseModel):
     options: Optional[List[str]] = None
     device_class: Optional[str] = Field(default=None, max_length=120)
     unit_of_measurement: Optional[str] = Field(default=None, max_length=64)
+    component: str = Field(default="sensor", min_length=1, max_length=64)
+    unique_id: str = Field(..., min_length=1, max_length=120)
+    object_id: str = Field(..., min_length=1, max_length=120)
+    node_id: Optional[str] = Field(default="hassems", max_length=120)
+    state_topic: str = Field(..., min_length=1, max_length=255)
+    availability_topic: str = Field(..., min_length=1, max_length=255)
+    icon: Optional[str] = Field(default=None, max_length=120)
+    state_class: Optional[str] = Field(default=None, max_length=64)
+    force_update: bool = True
+    device_name: str = Field(..., min_length=1, max_length=120)
+    device_manufacturer: Optional[str] = Field(default="HASSEMS", max_length=120)
+    device_model: Optional[str] = Field(default=None, max_length=120)
+    device_sw_version: Optional[str] = Field(default=None, max_length=64)
+    device_identifiers: List[str] = Field(default_factory=list)
 
     @field_validator("entity_id")
     @classmethod
@@ -94,6 +136,59 @@ class InputHelperBase(BaseModel):
         if helper_type is None:
             return v
         return _validate_entity_id(helper_type, v)
+
+    @field_validator("component")
+    @classmethod
+    def validate_component(cls, v: str) -> str:
+        return clean_topic_segment(v) or "sensor"
+
+    @field_validator("unique_id", "object_id")
+    @classmethod
+    def validate_identifiers(cls, v: str) -> str:
+        cleaned = clean_topic_segment(v)
+        if not cleaned:
+            raise ValueError("Provide a valid identifier (letters, numbers, underscores, hyphens).")
+        return cleaned
+
+    @field_validator("node_id")
+    @classmethod
+    def validate_node_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = clean_topic_segment(v, allow_empty=True)
+        return cleaned or None
+
+    @field_validator("state_topic", "availability_topic")
+    @classmethod
+    def validate_topics(cls, v: str) -> str:
+        return clean_topic_path(v)
+
+    @field_validator("icon", "device_manufacturer", "device_model", "device_sw_version")
+    @classmethod
+    def strip_optional(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @field_validator("state_class")
+    @classmethod
+    def strip_state_class(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @field_validator("device_identifiers")
+    @classmethod
+    def normalize_identifiers(cls, v: List[str]) -> List[str]:
+        cleaned = []
+        for item in v or []:
+            text = str(item).strip()
+            if not text:
+                continue
+            cleaned.append(text)
+        return cleaned
 
     @field_validator("options")
     @classmethod
@@ -130,8 +225,88 @@ class InputHelperUpdate(BaseModel):
     options: Optional[List[str]] = None
     device_class: Optional[str] = Field(default=None, max_length=120)
     unit_of_measurement: Optional[str] = Field(default=None, max_length=64)
+    component: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    unique_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    object_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    node_id: Optional[str] = Field(default=None, max_length=120)
+    state_topic: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    availability_topic: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    icon: Optional[str] = Field(default=None, max_length=120)
+    state_class: Optional[str] = Field(default=None, max_length=64)
+    force_update: Optional[bool] = None
+    device_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    device_manufacturer: Optional[str] = Field(default=None, max_length=120)
+    device_model: Optional[str] = Field(default=None, max_length=120)
+    device_sw_version: Optional[str] = Field(default=None, max_length=64)
+    device_identifiers: Optional[List[str]] = None
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("entity_id")
+    @classmethod
+    def validate_entity_id(cls, v: Optional[str], info: Field.ValidationInfo) -> Optional[str]:  # type: ignore[name-defined]
+        if v is None:
+            return None
+        helper_type = info.data.get("helper_type")
+        if helper_type is None:
+            return v
+        return _validate_entity_id(helper_type, v)
+
+    @field_validator("component")
+    @classmethod
+    def validate_component(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return clean_topic_segment(v)
+
+    @field_validator("unique_id", "object_id")
+    @classmethod
+    def validate_identifiers(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = clean_topic_segment(v)
+        if not cleaned:
+            raise ValueError("Provide a valid identifier (letters, numbers, underscores, hyphens).")
+        return cleaned
+
+    @field_validator("node_id")
+    @classmethod
+    def validate_node_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = clean_topic_segment(v, allow_empty=True)
+        return cleaned or None
+
+    @field_validator("state_topic", "availability_topic")
+    @classmethod
+    def validate_topics(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return clean_topic_path(v)
+
+    @field_validator("icon", "device_manufacturer", "device_model", "device_sw_version")
+    @classmethod
+    def strip_optional(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @field_validator("state_class")
+    @classmethod
+    def strip_state_class(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @field_validator("device_identifiers")
+    @classmethod
+    def normalize_device_identifiers(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        cleaned = [text.strip() for text in v if str(text).strip()]
+        return cleaned
 
 
 class InputHelper(BaseModel):
@@ -148,6 +323,20 @@ class InputHelper(BaseModel):
     updated_at: datetime
     device_class: Optional[str] = None
     unit_of_measurement: Optional[str] = None
+    component: str
+    unique_id: str
+    object_id: str
+    node_id: Optional[str] = None
+    state_topic: str
+    availability_topic: str
+    icon: Optional[str] = None
+    state_class: Optional[str] = None
+    force_update: bool
+    device_name: str
+    device_manufacturer: Optional[str] = None
+    device_model: Optional[str] = None
+    device_sw_version: Optional[str] = None
+    device_identifiers: List[str] = Field(default_factory=list)
 
     model_config = {
         "from_attributes": True,
@@ -167,7 +356,7 @@ class MQTTConfig(BaseModel):
     username: Optional[str] = Field(default=None, max_length=255)
     password: Optional[str] = Field(default=None, max_length=255)
     client_id: Optional[str] = Field(default=None, max_length=128)
-    topic_prefix: str = Field(default="homeassistant/input_helper", min_length=1)
+    discovery_prefix: str = Field(default="homeassistant", min_length=1)
     use_tls: bool = False
 
 
@@ -183,8 +372,14 @@ class InputHelperRecord:
     @classmethod
     def create(cls, payload: InputHelperCreate) -> "InputHelperRecord":
         now = datetime.now(timezone.utc)
+        node_id = payload.node_id or "hassems"
+        object_id = payload.object_id or slugify(payload.unique_id)
+        identifiers = payload.device_identifiers or []
+        if not identifiers:
+            base_identifier = f"{node_id or 'hassems'}:{object_id}"
+            identifiers = [base_identifier]
         helper = InputHelper(
-            slug=slugify(payload.name),
+            slug=slugify(payload.unique_id),
             name=payload.name,
             entity_id=payload.entity_id,
             helper_type=payload.helper_type,
@@ -197,6 +392,20 @@ class InputHelperRecord:
             updated_at=now,
             device_class=payload.device_class,
             unit_of_measurement=payload.unit_of_measurement,
+            component=payload.component,
+            unique_id=payload.unique_id,
+            object_id=object_id,
+            node_id=node_id,
+            state_topic=payload.state_topic,
+            availability_topic=payload.availability_topic,
+            icon=payload.icon,
+            state_class=payload.state_class,
+            force_update=payload.force_update,
+            device_name=payload.device_name,
+            device_manufacturer=payload.device_manufacturer,
+            device_model=payload.device_model,
+            device_sw_version=payload.device_sw_version,
+            device_identifiers=identifiers,
         )
         return cls(helper=helper)
 
@@ -233,6 +442,40 @@ class InputHelperRecord:
             data["device_class"] = payload.device_class
         if "unit_of_measurement" in update_data:
             data["unit_of_measurement"] = payload.unit_of_measurement
+        if "component" in update_data and payload.component:
+            data["component"] = payload.component
+        if "unique_id" in update_data and payload.unique_id:
+            data["unique_id"] = payload.unique_id
+        if "object_id" in update_data and payload.object_id:
+            data["object_id"] = payload.object_id
+        if "node_id" in update_data:
+            data["node_id"] = payload.node_id
+        if "state_topic" in update_data and payload.state_topic:
+            data["state_topic"] = payload.state_topic
+        if "availability_topic" in update_data and payload.availability_topic:
+            data["availability_topic"] = payload.availability_topic
+        if "icon" in update_data:
+            data["icon"] = payload.icon
+        if "state_class" in update_data:
+            data["state_class"] = payload.state_class
+        if "force_update" in update_data and payload.force_update is not None:
+            data["force_update"] = bool(payload.force_update)
+        if "device_name" in update_data and payload.device_name:
+            data["device_name"] = payload.device_name
+        if "device_manufacturer" in update_data:
+            data["device_manufacturer"] = payload.device_manufacturer
+        if "device_model" in update_data:
+            data["device_model"] = payload.device_model
+        if "device_sw_version" in update_data:
+            data["device_sw_version"] = payload.device_sw_version
+        if "device_identifiers" in update_data and payload.device_identifiers is not None:
+            cleaned_identifiers = [
+                ident for ident in payload.device_identifiers if ident.strip()
+            ]
+            if cleaned_identifiers or payload.device_identifiers == []:
+                data["device_identifiers"] = cleaned_identifiers
+            else:
+                data["device_identifiers"] = data.get("device_identifiers", [])
         if helper_type == HelperType.INPUT_SELECT:
             data["options"] = options
         data["last_value"] = data.get("last_value")

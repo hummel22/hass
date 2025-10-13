@@ -46,6 +46,29 @@ def _deserialize_options(value: Optional[str]) -> Optional[List[str]]:
     return [str(item) for item in loaded]
 
 
+def _serialize_identifiers(identifiers: Optional[List[str]]) -> Optional[str]:
+    if not identifiers:
+        return None
+    return json.dumps(identifiers)
+
+
+def _deserialize_identifiers(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(loaded, list):
+        return []
+    cleaned = []
+    for item in loaded:
+        text = str(item).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
 class InputHelperStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -82,7 +105,21 @@ class InputHelperStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     device_class TEXT,
-                    unit_of_measurement TEXT
+                    unit_of_measurement TEXT,
+                    component TEXT NOT NULL DEFAULT 'sensor',
+                    unique_id TEXT NOT NULL,
+                    object_id TEXT NOT NULL,
+                    node_id TEXT,
+                    state_topic TEXT NOT NULL,
+                    availability_topic TEXT NOT NULL,
+                    icon TEXT,
+                    state_class TEXT,
+                    force_update INTEGER NOT NULL DEFAULT 1,
+                    device_name TEXT NOT NULL,
+                    device_manufacturer TEXT,
+                    device_model TEXT,
+                    device_sw_version TEXT,
+                    device_identifiers TEXT
                 )
                 """
             )
@@ -114,6 +151,20 @@ class InputHelperStore:
             )
 
             self._ensure_column(conn, "helpers", "last_measured_at", "TEXT")
+            self._ensure_column(conn, "helpers", "component", "TEXT NOT NULL DEFAULT 'sensor'")
+            self._ensure_column(conn, "helpers", "unique_id", "TEXT")
+            self._ensure_column(conn, "helpers", "object_id", "TEXT")
+            self._ensure_column(conn, "helpers", "node_id", "TEXT")
+            self._ensure_column(conn, "helpers", "state_topic", "TEXT")
+            self._ensure_column(conn, "helpers", "availability_topic", "TEXT")
+            self._ensure_column(conn, "helpers", "icon", "TEXT")
+            self._ensure_column(conn, "helpers", "state_class", "TEXT")
+            self._ensure_column(conn, "helpers", "force_update", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column(conn, "helpers", "device_name", "TEXT")
+            self._ensure_column(conn, "helpers", "device_manufacturer", "TEXT")
+            self._ensure_column(conn, "helpers", "device_model", "TEXT")
+            self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
+            self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
             self._ensure_column(conn, "history", "measured_at", "TEXT")
 
     @staticmethod
@@ -152,25 +203,42 @@ class InputHelperStore:
                     INSERT OR REPLACE INTO helpers (
                         slug, name, entity_id, helper_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
-                        device_class, unit_of_measurement
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        helper.slug,
-                        helper.name,
-                        helper.entity_id,
+                        device_class, unit_of_measurement, component, unique_id, object_id,
+                        node_id, state_topic, availability_topic, icon, state_class,
+                        force_update, device_name, device_manufacturer, device_model,
+                        device_sw_version, device_identifiers
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    helper.slug,
+                    helper.name,
+                    helper.entity_id,
                         helper.helper_type.value,
                         helper.description,
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
                         _serialize_value(helper.last_value),
-                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
-                        helper.created_at.isoformat(),
-                        helper.updated_at.isoformat(),
-                        helper.device_class,
-                        helper.unit_of_measurement,
-                    ),
-                )
+                    helper.last_measured_at.isoformat() if helper.last_measured_at else None,
+                    helper.created_at.isoformat(),
+                    helper.updated_at.isoformat(),
+                    helper.device_class,
+                    helper.unit_of_measurement,
+                    helper.component,
+                    helper.unique_id,
+                    helper.object_id,
+                    helper.node_id,
+                    helper.state_topic,
+                    helper.availability_topic,
+                    helper.icon,
+                    helper.state_class,
+                    int(helper.force_update),
+                    helper.device_name,
+                    helper.device_manufacturer,
+                    helper.device_model,
+                    helper.device_sw_version,
+                    _serialize_identifiers(helper.device_identifiers),
+                ),
+            )
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
         keys = set(row.keys())
@@ -190,6 +258,22 @@ class InputHelperStore:
             updated_at=datetime.fromisoformat(row["updated_at"]),
             device_class=row["device_class"],
             unit_of_measurement=row["unit_of_measurement"],
+            component=row.get("component", "sensor"),
+            unique_id=row.get("unique_id", row["slug"]),
+            object_id=row.get("object_id", row["slug"]),
+            node_id=row.get("node_id"),
+            state_topic=row.get("state_topic", f"{row['slug']}/state"),
+            availability_topic=row.get(
+                "availability_topic", f"{row['slug']}/availability"
+            ),
+            icon=row.get("icon"),
+            state_class=row.get("state_class"),
+            force_update=bool(row.get("force_update", 1)),
+            device_name=row.get("device_name", row["name"]),
+            device_manufacturer=row.get("device_manufacturer"),
+            device_model=row.get("device_model"),
+            device_sw_version=row.get("device_sw_version"),
+            device_identifiers=_deserialize_identifiers(row.get("device_identifiers")),
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -222,8 +306,11 @@ class InputHelperStore:
                     INSERT INTO helpers (
                         slug, name, entity_id, helper_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
-                        device_class, unit_of_measurement
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_class, unit_of_measurement, component, unique_id, object_id,
+                        node_id, state_topic, availability_topic, icon, state_class,
+                        force_update, device_name, device_manufacturer, device_model,
+                        device_sw_version, device_identifiers
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
@@ -239,6 +326,20 @@ class InputHelperStore:
                         helper.updated_at.isoformat(),
                         helper.device_class,
                         helper.unit_of_measurement,
+                        helper.component,
+                        helper.unique_id,
+                        helper.object_id,
+                        helper.node_id,
+                        helper.state_topic,
+                        helper.availability_topic,
+                        helper.icon,
+                        helper.state_class,
+                        int(helper.force_update),
+                        helper.device_name,
+                        helper.device_manufacturer,
+                        helper.device_model,
+                        helper.device_sw_version,
+                        _serialize_identifiers(helper.device_identifiers),
                     ),
                 )
         return helper
@@ -263,7 +364,21 @@ class InputHelperStore:
                            last_measured_at = ?,
                            updated_at = ?,
                            device_class = ?,
-                           unit_of_measurement = ?
+                           unit_of_measurement = ?,
+                           component = ?,
+                           unique_id = ?,
+                           object_id = ?,
+                           node_id = ?,
+                           state_topic = ?,
+                           availability_topic = ?,
+                           icon = ?,
+                           state_class = ?,
+                           force_update = ?,
+                           device_name = ?,
+                           device_manufacturer = ?,
+                           device_model = ?,
+                           device_sw_version = ?,
+                           device_identifiers = ?
                      WHERE slug = ?
                     """,
                     (
@@ -277,6 +392,20 @@ class InputHelperStore:
                         helper.updated_at.isoformat(),
                         helper.device_class,
                         helper.unit_of_measurement,
+                        helper.component,
+                        helper.unique_id,
+                        helper.object_id,
+                        helper.node_id,
+                        helper.state_topic,
+                        helper.availability_topic,
+                        helper.icon,
+                        helper.state_class,
+                        int(helper.force_update),
+                        helper.device_name,
+                        helper.device_manufacturer,
+                        helper.device_model,
+                        helper.device_sw_version,
+                        _serialize_identifiers(helper.device_identifiers),
                         helper.slug,
                     ),
                 )
@@ -359,19 +488,20 @@ class InputHelperStore:
             row = conn.execute("SELECT * FROM mqtt_config WHERE id = 1").fetchone()
         if row is None:
             return None
+        discovery_prefix = (row["topic_prefix"] or "homeassistant").strip("/") or "homeassistant"
         return MQTTConfig(
             host=row["host"],
             port=row["port"],
             username=row["username"],
             password=row["password"],
             client_id=row["client_id"],
-            topic_prefix=row["topic_prefix"],
+            discovery_prefix=discovery_prefix,
             use_tls=bool(row["use_tls"]),
         )
 
     def save_mqtt_config(self, config: MQTTConfig) -> MQTTConfig:
-        topic_prefix = config.topic_prefix.rstrip("/") or "homeassistant/input_helper"
-        stored = config.model_copy(update={"topic_prefix": topic_prefix})
+        discovery_prefix = (config.discovery_prefix or "homeassistant").strip("/") or "homeassistant"
+        stored = config.model_copy(update={"discovery_prefix": discovery_prefix})
         with self._lock:
             with self._connection() as conn:
                 conn.execute(
@@ -394,7 +524,7 @@ class InputHelperStore:
                         stored.username,
                         stored.password,
                         stored.client_id,
-                        stored.topic_prefix,
+                        stored.discovery_prefix,
                         int(stored.use_tls),
                     ),
                 )

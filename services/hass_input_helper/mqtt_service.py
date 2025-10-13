@@ -22,7 +22,7 @@ DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 
 
 def _build_client(config: MQTTConfig, *, suffix: Optional[str] = None) -> mqtt_client.Client:
-    client_id = config.client_id or f"hass-input-helper-{uuid4().hex[:8]}"
+    client_id = config.client_id or f"hassems-{uuid4().hex[:8]}"
     if suffix:
         client_id = f"{client_id}-{suffix}"
     client = mqtt_client.Client(client_id=client_id, clean_session=True)
@@ -97,14 +97,12 @@ def verify_connection(config: MQTTConfig, *, timeout: float = 5.0) -> None:
     )
 
 
-def _state_topic(config: MQTTConfig, helper: InputHelper) -> str:
-    topic_prefix = config.topic_prefix.rstrip("/") or "homeassistant/input_helper"
-    return f"{topic_prefix}/{helper.slug}"
+def _state_topic(_: MQTTConfig, helper: InputHelper) -> str:
+    return helper.state_topic
 
 
-def _availability_topic(config: MQTTConfig, helper: InputHelper) -> str:
-    topic_prefix = config.topic_prefix.rstrip("/") or "homeassistant/input_helper"
-    return f"{topic_prefix}/{helper.slug}/availability"
+def _availability_topic(_: MQTTConfig, helper: InputHelper) -> str:
+    return helper.availability_topic
 
 
 def _publish(
@@ -184,9 +182,18 @@ def publish_value(
     _publish(config, topic, payload, retain=False, timeout=timeout)
 
 
-def _discovery_topic(helper: InputHelper, discovery_prefix: str = DEFAULT_DISCOVERY_PREFIX) -> str:
-    sanitized_prefix = discovery_prefix.strip("/") or DEFAULT_DISCOVERY_PREFIX
-    return f"{sanitized_prefix}/sensor/{helper.slug}/config"
+def _discovery_topic(
+    config: MQTTConfig, helper: InputHelper, discovery_prefix: Optional[str] = None
+) -> str:
+    prefix = (discovery_prefix or config.discovery_prefix or DEFAULT_DISCOVERY_PREFIX).strip("/")
+    if not prefix:
+        prefix = DEFAULT_DISCOVERY_PREFIX
+    parts = [prefix, helper.component]
+    if helper.node_id:
+        parts.append(helper.node_id)
+    parts.append(helper.object_id)
+    parts.append("config")
+    return "/".join(parts)
 
 
 def _value_template(helper: InputHelper) -> str:
@@ -207,49 +214,60 @@ def publish_discovery_config(
     config: MQTTConfig,
     helper: InputHelper,
     *,
-    discovery_prefix: str = DEFAULT_DISCOVERY_PREFIX,
+    discovery_prefix: Optional[str] = None,
     timeout: float = 5.0,
 ) -> None:
     """Publish a retained MQTT discovery payload for Home Assistant."""
 
     state_topic = _state_topic(config, helper)
     availability_topic = _availability_topic(config, helper)
+    device_identifiers = helper.device_identifiers or [helper.unique_id]
+    device: dict[str, Any] = {
+        "identifiers": device_identifiers,
+        "name": helper.device_name,
+    }
+    if helper.device_manufacturer:
+        device["manufacturer"] = helper.device_manufacturer
+    if helper.device_model:
+        device["model"] = helper.device_model
+    if helper.device_sw_version:
+        device["sw_version"] = helper.device_sw_version
+
     payload: dict[str, Any] = {
         "name": helper.name,
-        "uniq_id": helper.slug,
-        "stat_t": state_topic,
-        "val_tpl": _value_template(helper),
-        "json_attr_t": state_topic,
-        "json_attr_tpl": "{{ {'measured_at': value_json.measured_at} | tojson }}",
-        "avty_t": availability_topic,
-        "pl_avail": "online",
-        "pl_not_avail": "offline",
-        "dev": {
-            "identifiers": [f"hass_input_helper:{helper.slug}"],
-            "manufacturer": "HASS Input Helper",
-            "model": helper.helper_type.value.replace("_", " ").title(),
-            "name": helper.name,
-            "sw_version": "1.0.0",
-        },
+        "unique_id": helper.unique_id,
+        "object_id": helper.object_id,
+        "state_topic": state_topic,
+        "availability_topic": availability_topic,
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "force_update": helper.force_update,
+        "value_template": _value_template(helper),
+        "json_attributes_topic": state_topic,
+        "json_attributes_template": "{{ {'measured_at': value_json.measured_at} | tojson }}",
+        "device": device,
     }
 
     if helper.device_class:
-        payload["dev_cla"] = helper.device_class
+        payload["device_class"] = helper.device_class
     if helper.unit_of_measurement:
-        payload["unit_of_meas"] = helper.unit_of_measurement
+        payload["unit_of_measurement"] = helper.unit_of_measurement
 
-    state_class = _state_class(helper)
+    state_class = _state_class(helper) or helper.state_class
     if state_class:
-        payload["stat_cla"] = state_class
+        payload["state_class"] = state_class
+    if helper.icon:
+        payload["icon"] = helper.icon
 
-    topic = _discovery_topic(helper, discovery_prefix)
+    topic = _discovery_topic(config, helper, discovery_prefix)
     logger.info(
         "Publishing MQTT discovery payload",
         extra={
             "mqtt_topic": topic,
             "mqtt_state_topic": state_topic,
-            "mqtt_device_class": payload.get("dev_cla"),
-            "mqtt_unit": payload.get("unit_of_meas"),
+            "mqtt_component": helper.component,
+            "mqtt_device_class": payload.get("device_class"),
+            "mqtt_unit": payload.get("unit_of_measurement"),
         },
     )
     _publish(config, topic, json.dumps(payload), retain=True, timeout=timeout)
@@ -279,12 +297,12 @@ def clear_discovery_config(
     config: MQTTConfig,
     helper: InputHelper,
     *,
-    discovery_prefix: str = DEFAULT_DISCOVERY_PREFIX,
+    discovery_prefix: Optional[str] = None,
     timeout: float = 5.0,
 ) -> None:
     """Remove the retained MQTT discovery payload for a helper."""
 
-    topic = _discovery_topic(helper, discovery_prefix)
+    topic = _discovery_topic(config, helper, discovery_prefix)
     logger.info(
         "Clearing MQTT discovery payload",
         extra={

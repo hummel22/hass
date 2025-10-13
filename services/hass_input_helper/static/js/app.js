@@ -4,6 +4,7 @@
     selected: null,
     chart: null,
     toastTimer: null,
+    mqttConfig: null,
   };
 
   const toastEl = document.getElementById('toast');
@@ -17,6 +18,10 @@
   const detailLastValue = document.getElementById('detail-last-value');
   const detailMeasuredAt = document.getElementById('detail-measured-at');
   const detailUpdated = document.getElementById('detail-updated');
+  const detailComponent = document.getElementById('detail-component');
+  const detailDiscoveryTopic = document.getElementById('detail-discovery-topic');
+  const detailStateTopic = document.getElementById('detail-state-topic');
+  const detailAvailabilityTopic = document.getElementById('detail-availability-topic');
   const deleteBtn = document.getElementById('delete-helper');
   const createForm = document.getElementById('create-helper-form');
   const updateForm = document.getElementById('update-helper-form');
@@ -174,6 +179,23 @@
     { value: 'oz', label: 'Ounces (oz)' },
   ];
 
+  const COMPONENT_OPTIONS = [
+    { value: 'sensor', label: 'Sensor' },
+    { value: 'binary_sensor', label: 'Binary sensor' },
+    { value: 'number', label: 'Number' },
+    { value: 'switch', label: 'Switch' },
+    { value: 'select', label: 'Select' },
+    { value: 'text', label: 'Text' },
+    { value: 'button', label: 'Button' },
+  ];
+
+  const STATE_CLASS_OPTIONS = [
+    { value: '', label: 'None' },
+    { value: 'measurement', label: 'Measurement' },
+    { value: 'total', label: 'Total' },
+    { value: 'total_increasing', label: 'Total increasing' },
+  ];
+
   async function init() {
     mqttForm.addEventListener('submit', handleMqttSubmit);
     testMqttBtn.addEventListener('click', handleMqttTest);
@@ -181,6 +203,7 @@
     createForm.addEventListener('submit', handleCreateHelper);
     updateForm.addEventListener('submit', handleUpdateHelper);
     deleteBtn.addEventListener('click', handleDeleteHelper);
+    createForm.elements.helper_type.addEventListener('change', handleCreateTypeChange);
 
     populateSelectControls();
     await loadMqttConfig();
@@ -190,9 +213,14 @@
   function populateSelectControls() {
     const deviceSelects = document.querySelectorAll('select[name="device_class"]');
     const unitSelects = document.querySelectorAll('select[name="unit_of_measurement"]');
+    const componentSelects = document.querySelectorAll('select[name="component"]');
+    const stateClassSelects = document.querySelectorAll('select[name="state_class"]');
 
     deviceSelects.forEach((select) => populateSelect(select, DEVICE_CLASS_OPTIONS));
     unitSelects.forEach((select) => populateSelect(select, UNIT_OPTIONS));
+    componentSelects.forEach((select) => populateSelect(select, COMPONENT_OPTIONS));
+    stateClassSelects.forEach((select) => populateSelect(select, STATE_CLASS_OPTIONS));
+    setCreateDefaults();
   }
 
   function populateSelect(select, options) {
@@ -203,6 +231,46 @@
       opt.textContent = option.label;
       select.appendChild(opt);
     });
+  }
+
+  function setCreateDefaults() {
+    if (!createForm) return;
+    if (createForm.elements.component) {
+      setSelectValue(createForm.elements.component, 'sensor');
+    }
+    if (createForm.elements.state_class) {
+      setSelectValue(createForm.elements.state_class, 'measurement');
+    }
+    if (createForm.elements.node_id) {
+      createForm.elements.node_id.value = 'hassems';
+    }
+    if (createForm.elements.force_update) {
+      createForm.elements.force_update.checked = true;
+    }
+    if (createForm.elements.device_manufacturer) {
+      const manufacturer = createForm.elements.device_manufacturer.value?.trim();
+      if (!manufacturer) {
+        createForm.elements.device_manufacturer.value = 'HASSEMS';
+      }
+    }
+    handleCreateTypeChange();
+  }
+
+  function handleCreateTypeChange(event) {
+    if (!createForm.elements.state_class) return;
+    const type = event?.target?.value ?? createForm.elements.helper_type.value;
+    if (type === 'input_number') {
+      setSelectValue(createForm.elements.state_class, 'measurement');
+    } else {
+      setSelectValue(createForm.elements.state_class, '');
+    }
+    if (createForm.elements.options) {
+      const isSelect = type === 'input_select';
+      createForm.elements.options.disabled = !isSelect;
+      if (!isSelect) {
+        createForm.elements.options.value = '';
+      }
+    }
   }
 
   function setSelectValue(select, value) {
@@ -231,18 +299,21 @@
       const response = await fetch('/config/mqtt');
       if (response.status === 404) {
         mqttForm.reset();
+        mqttForm.discovery_prefix.value = 'homeassistant';
+        state.mqttConfig = null;
         return;
       }
       if (!response.ok) {
         throw new Error(response.statusText);
       }
       const data = await response.json();
+      state.mqttConfig = data;
       mqttForm.host.value = data.host || '';
       mqttForm.port.value = data.port ?? 1883;
       mqttForm.username.value = data.username || '';
       mqttForm.password.value = data.password || '';
       mqttForm.client_id.value = data.client_id || '';
-      mqttForm.topic_prefix.value = data.topic_prefix || 'homeassistant/input_helper';
+      mqttForm.discovery_prefix.value = data.discovery_prefix || 'homeassistant';
       mqttForm.use_tls.checked = Boolean(data.use_tls);
     } catch (error) {
       console.error('Failed to load MQTT config', error);
@@ -259,7 +330,7 @@
       username: formData.get('username')?.trim() || null,
       password: formData.get('password') || null,
       client_id: formData.get('client_id')?.trim() || null,
-      topic_prefix: formData.get('topic_prefix')?.trim() || 'homeassistant/input_helper',
+      discovery_prefix: 'homeassistant',
       use_tls: formData.get('use_tls') === 'on',
     };
 
@@ -273,7 +344,8 @@
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      mqttForm.topic_prefix.value = saved.topic_prefix;
+      state.mqttConfig = saved;
+      mqttForm.discovery_prefix.value = saved.discovery_prefix || 'homeassistant';
       showToast('MQTT configuration saved.', 'success');
     } catch (error) {
       showToast(error.message, 'error');
@@ -288,7 +360,7 @@
       use_tls: mqttForm.use_tls.checked,
       username_present: Boolean(mqttForm.username.value.trim()),
       client_id_present: Boolean(mqttForm.client_id.value.trim()),
-      topic_prefix: mqttForm.topic_prefix.value.trim() || 'homeassistant/input_helper',
+      discovery_prefix: mqttForm.discovery_prefix.value.trim() || 'homeassistant',
     };
 
     console.groupCollapsed('MQTT Test');
@@ -353,7 +425,13 @@
       title.textContent = helper.name;
 
       const meta = document.createElement('small');
-      const metaParts = [helper.helper_type];
+      const metaParts = [helper.component];
+      if (helper.device_class) {
+        metaParts.push(helper.device_class);
+      }
+      if (helper.unit_of_measurement) {
+        metaParts.push(helper.unit_of_measurement);
+      }
       if (helper.last_measured_at) {
         metaParts.push(formatTimestamp(helper.last_measured_at));
       }
@@ -379,14 +457,29 @@
   function populateDetail(helper) {
     detailCard.classList.remove('hidden');
     detailTitle.textContent = helper.name;
-    detailEntityId.textContent = `${helper.entity_id} · ${helper.slug}`;
+    detailEntityId.textContent = `${helper.entity_id} · ${helper.unique_id}`;
     updateForm.elements.name.value = helper.name;
     updateForm.elements.entity_id.value = helper.entity_id;
     updateForm.elements.helper_type.value = helperTypeMap[helper.helper_type] || helper.helper_type;
     updateForm.elements.description.value = helper.description ?? '';
     updateForm.elements.default_value.value = helper.default_value ?? '';
+    setSelectValue(updateForm.elements.component, helper.component ?? 'sensor');
     setSelectValue(updateForm.elements.device_class, helper.device_class ?? '');
     setSelectValue(updateForm.elements.unit_of_measurement, helper.unit_of_measurement ?? '');
+    const defaultStateClass = helper.helper_type === 'input_number' ? 'measurement' : '';
+    setSelectValue(updateForm.elements.state_class, helper.state_class ?? defaultStateClass);
+    updateForm.elements.unique_id.value = helper.unique_id ?? '';
+    updateForm.elements.object_id.value = helper.object_id ?? '';
+    updateForm.elements.node_id.value = helper.node_id ?? 'hassems';
+    updateForm.elements.state_topic.value = helper.state_topic ?? '';
+    updateForm.elements.availability_topic.value = helper.availability_topic ?? '';
+    updateForm.elements.icon.value = helper.icon ?? '';
+    updateForm.elements.force_update.checked = Boolean(helper.force_update);
+    updateForm.elements.device_name.value = helper.device_name ?? '';
+    updateForm.elements.device_manufacturer.value = helper.device_manufacturer ?? '';
+    updateForm.elements.device_model.value = helper.device_model ?? '';
+    updateForm.elements.device_sw_version.value = helper.device_sw_version ?? '';
+    updateForm.elements.device_identifiers.value = (helper.device_identifiers || []).join(', ');
 
     const optionsField = updateForm.elements.options;
     if (helper.helper_type === 'input_select') {
@@ -402,6 +495,10 @@
       ? formatTimestamp(helper.last_measured_at)
       : '—';
     detailUpdated.textContent = helper.updated_at ? formatTimestamp(helper.updated_at) : '—';
+    detailComponent.textContent = helper.component || '—';
+    detailStateTopic.textContent = helper.state_topic || '—';
+    detailAvailabilityTopic.textContent = helper.availability_topic || '—';
+    detailDiscoveryTopic.textContent = computeDiscoveryTopic(helper);
 
     renderValueInput(helper);
   }
@@ -414,6 +511,10 @@
     historyCanvas.classList.remove('hidden');
     historyList.classList.add('hidden');
     historyList.innerHTML = '';
+    detailComponent.textContent = '—';
+    detailDiscoveryTopic.textContent = '—';
+    detailStateTopic.textContent = '—';
+    detailAvailabilityTopic.textContent = '—';
     if (state.chart) {
       state.chart.destroy();
       state.chart = null;
@@ -432,6 +533,7 @@
         body: JSON.stringify(payload),
       });
       createForm.reset();
+      setCreateDefaults();
       showToast('Entity created.', 'success');
       await loadHelpers();
     } catch (error) {
@@ -441,37 +543,60 @@
 
   function buildCreatePayload(formData) {
     const helperType = formData.get('helper_type');
-    const name = formData.get('name')?.trim();
-    const entityId = formData.get('entity_id')?.trim();
-    const description = formData.get('description')?.trim();
-    const defaultRaw = formData.get('default_value')?.trim();
-    const optionsRaw = formData.get('options')?.trim();
-    const deviceClass = formData.get('device_class')?.trim();
-    const unit = formData.get('unit_of_measurement')?.trim();
-
     const payload = {
-      name,
-      entity_id: entityId,
+      name: formData.get('name')?.trim(),
+      entity_id: formData.get('entity_id')?.trim(),
       helper_type: helperType,
+      component: formData.get('component')?.trim() || 'sensor',
+      unique_id: formData.get('unique_id')?.trim(),
+      object_id: formData.get('object_id')?.trim(),
+      node_id: formData.get('node_id')?.trim() || null,
+      state_topic: formData.get('state_topic')?.trim(),
+      availability_topic: formData.get('availability_topic')?.trim(),
+      force_update: formData.get('force_update') === 'on',
+      device_name: formData.get('device_name')?.trim(),
     };
 
+    const description = formData.get('description')?.trim();
     if (description) payload.description = description;
-    if (defaultRaw) payload.default_value = coerceValue(helperType, defaultRaw);
+
+    const defaultRaw = formData.get('default_value')?.trim();
+    if (defaultRaw) {
+      payload.default_value = coerceValue(helperType, defaultRaw);
+    }
 
     if (helperType === 'input_select') {
-      const options = (optionsRaw || '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
+      const options = parseCsv(formData.get('options'));
       if (options.length) {
         payload.options = options;
       }
     }
 
+    const deviceClass = formData.get('device_class')?.trim();
     if (deviceClass) payload.device_class = deviceClass;
+
+    const unit = formData.get('unit_of_measurement')?.trim();
     if (unit) payload.unit_of_measurement = unit;
 
-    return payload;
+    const stateClass = formData.get('state_class')?.trim();
+    if (stateClass) payload.state_class = stateClass;
+
+    const icon = formData.get('icon')?.trim();
+    if (icon) payload.icon = icon;
+
+    const manufacturer = formData.get('device_manufacturer')?.trim();
+    if (manufacturer) payload.device_manufacturer = manufacturer;
+
+    const model = formData.get('device_model')?.trim();
+    if (model) payload.device_model = model;
+
+    const swVersion = formData.get('device_sw_version')?.trim();
+    if (swVersion) payload.device_sw_version = swVersion;
+
+    const identifiers = parseCsv(formData.get('device_identifiers'));
+    if (identifiers.length) payload.device_identifiers = identifiers;
+
+    return removeUndefined(payload);
   }
 
   async function handleUpdateHelper(event) {
@@ -508,8 +633,21 @@
       entity_id: formData.get('entity_id')?.trim(),
       description: formData.get('description')?.trim() || null,
       default_value: null,
+      component: formData.get('component')?.trim() || null,
+      unique_id: formData.get('unique_id')?.trim(),
+      object_id: formData.get('object_id')?.trim(),
+      node_id: formData.get('node_id')?.trim() || null,
+      state_topic: formData.get('state_topic')?.trim(),
+      availability_topic: formData.get('availability_topic')?.trim(),
+      icon: formData.get('icon')?.trim() || null,
       device_class: formData.get('device_class')?.trim() || null,
       unit_of_measurement: formData.get('unit_of_measurement')?.trim() || null,
+      state_class: formData.get('state_class')?.trim() || null,
+      force_update: formData.get('force_update') === 'on',
+      device_name: formData.get('device_name')?.trim(),
+      device_manufacturer: formData.get('device_manufacturer')?.trim() || null,
+      device_model: formData.get('device_model')?.trim() || null,
+      device_sw_version: formData.get('device_sw_version')?.trim() || null,
     };
 
     const defaultRaw = formData.get('default_value')?.trim();
@@ -518,16 +656,19 @@
     }
 
     if (helperType === 'input_select') {
-      const optionsRaw = formData.get('options')?.trim();
-      if (optionsRaw) {
-        payload.options = optionsRaw
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean);
+      const options = parseCsv(formData.get('options'));
+      if (options.length) {
+        payload.options = options;
       }
     }
 
-    return payload;
+    const identifiersRaw = formData.get('device_identifiers');
+    if (identifiersRaw !== null) {
+      const trimmed = identifiersRaw.trim();
+      payload.device_identifiers = trimmed ? parseCsv(trimmed) : [];
+    }
+
+    return removeUndefined(payload);
   }
 
   async function handleDeleteHelper() {
@@ -558,7 +699,7 @@
     valueForm.innerHTML = '';
     const field = document.createElement('label');
     field.className = 'form-field';
-    field.innerHTML = '<span>Value</span>';
+    field.innerHTML = '<span class="label-text">Value</span>';
 
     let input;
     if (helper.helper_type === 'input_boolean') {
@@ -611,7 +752,7 @@
 
     const measuredField = document.createElement('label');
     measuredField.className = 'form-field';
-    measuredField.innerHTML = '<span>Measured at</span>';
+    measuredField.innerHTML = '<span class="label-text">Measured at</span>';
 
     const measuredContainer = document.createElement('div');
     measuredContainer.className = 'datetime-inputs';
@@ -790,6 +931,33 @@
       return Number.isFinite(numberValue) ? numberValue : null;
     }
     return null;
+  }
+
+  function computeDiscoveryTopic(helper) {
+    const prefix = (state.mqttConfig?.discovery_prefix || 'homeassistant').replace(/\/+$/, '');
+    const parts = [prefix, helper.component];
+    const nodeSegment = helper.node_id ?? 'hassems';
+    if (nodeSegment) {
+      parts.push(nodeSegment);
+    }
+    parts.push(helper.object_id);
+    parts.push('config');
+    return parts.join('/');
+  }
+
+  function parseCsv(rawValue) {
+    if (!rawValue) {
+      return [];
+    }
+    return String(rawValue)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function removeUndefined(payload) {
+    const entries = Object.entries(payload).filter(([, value]) => value !== undefined);
+    return Object.fromEntries(entries);
   }
 
   function coerceValue(helperType, rawValue) {

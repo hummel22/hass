@@ -1,145 +1,104 @@
-# HASS Input Helper Service
+# Home Assistant Entity Management System (HASSEMS)
 
-A lightweight FastAPI service that helps manage Home Assistant input helpers (input_text,
-input_number, input_boolean, and input_select). The app keeps a local catalogue of the helpers you
-care about, exposes a REST API for CRUD operations, and proxies value updates to Home Assistant via
-its REST API.
+HASSEMS is a FastAPI application that manages Home Assistant helper entities, publishes Home
+Assistant MQTT discovery payloads, and stores helper history in SQLite. The bundled web console lets
+you configure broker access, publish test values, and manage discovery metadata without hand-writing
+JSON.
 
 ## Feature checklist
 
-- [x] Persist a catalogue of input helpers and MQTT settings in `data/input_helpers.db` (SQLite).
-- [x] CRUD endpoints to list, create, update, and delete helper definitions.
-- [x] Validate helper metadata (entity IDs, select options, default values).
-- [x] Forward value updates to Home Assistant for supported helper types.
-- [x] Publish helper values and Home Assistant MQTT discovery payloads with retained metadata.
-- [x] Fetch the latest state of a helper directly from Home Assistant.
-- [x] Provide a convenience script for local development (`start.sh`).
-- [x] Minimal landing page to manage MQTT connectivity and helper catalogue.
+- [x] Persist helper definitions, MQTT credentials, and history in `data/input_helpers.db` (SQLite).
+- [x] Create, update, delete, and list helpers via REST endpoints that validate metadata with Pydantic.
+- [x] Configure MQTT connectivity from the UI and verify credentials with a single "Test connection"
+      action.
+- [x] Publish retained MQTT discovery payloads that follow the
+      `<discovery_prefix>/<component>/[<node_id>/]<object_id>/config` pattern Home Assistant expects.
+- [x] Surface measured timestamps alongside helper history and allow backdating through date & time
+      pickers.
+- [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, and discovery
+      components plus inline tooltips describing each setting.
 
 ## Configuration
 
-The service reads Home Assistant connection details from the following environment variables (load
-from a `.env` file for convenience):
+HASSEMS still supports optional REST calls to Home Assistant. Configure them by setting the following
+environment variables (for development, copy `.env.example`):
 
-- `HASS_BASE_URL` – The base URL for your Home Assistant instance, e.g.
-  `http://homeassistant.local:8123`.
-- `HASS_ACCESS_TOKEN` – A long-lived access token generated in your Home Assistant user profile.
+- `HASS_BASE_URL` – Base URL for Home Assistant (e.g. `http://homeassistant.local:8123`).
+- `HASS_ACCESS_TOKEN` – Long-lived access token created from your Home Assistant profile.
 
-Copy the example file and edit the values:
-
-```bash
-cp services/hass_input_helper/.env.example services/hass_input_helper/.env
-```
-
-Without these values the service still starts, but any endpoint that talks to Home Assistant will
-return a `503` error.
+Without these variables MQTT publishing continues to function, but routes that call the Home
+Assistant HTTP API will return `503`.
 
 ## Running locally
 
-Create a virtual environment and start the API with the helper script:
+Create a virtual environment and launch the API using the included helper script:
 
 ```bash
 services/hass_input_helper/start.sh
 ```
 
-The application listens on `http://127.0.0.1:8100` by default. Opening the root path renders a
-minimal UI to:
+The server listens on `http://127.0.0.1:8100`. Visiting the root renders the HASSEMS console where
+you can:
 
-- Configure the MQTT broker connection stored in SQLite.
-- Test the Mosquitto/MQTT connection directly from the browser.
-- Create, edit, and delete helper entities (including device class and unit metadata).
-- View helper history and publish new values to MQTT.
-
-The UI uses the REST endpoints documented below, so you can also interact with the API directly.
+- Configure the Mosquitto broker credentials that are stored in SQLite (discovery prefix is locked to
+  `homeassistant` for compatibility with the integration).
+- Review broker connectivity logs via the **Test connection** button.
+- Create helpers with full discovery metadata (component, unique ID, object ID, node ID defaulting
+  to `hassems`, topics, icon, device class, unit, state class, and device registry fields).
+- Edit existing helpers, regenerate discovery payloads, and inspect state/availability topics.
+- Review helper history with inline charts and publish new readings that include `measured_at`
+  timestamps selected via date/time pickers.
 
 ## API overview
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| `GET` | `/health` | Basic health probe. |
-| `GET` | `/inputs` | List stored input helpers. |
-| `POST` | `/inputs` | Create a new helper definition. |
-| `PUT` | `/inputs/{slug}` | Update a helper definition. |
-| `DELETE` | `/inputs/{slug}` | Remove a helper definition. |
-| `POST` | `/inputs/{slug}/set` | Set the helper value in Home Assistant and publish to MQTT (accepts an optional `measured_at`). |
-| `GET` | `/inputs/{slug}/history` | Retrieve the stored history for a helper. |
-| `GET` | `/inputs/{slug}/state` | Fetch the current Home Assistant state. |
-| `GET` | `/config/mqtt` | Retrieve the stored MQTT configuration. |
-| `PUT` | `/config/mqtt` | Save or update the MQTT configuration. |
-| `POST` | `/config/mqtt/test` | Test the stored MQTT configuration. |
+| `GET`  | `/health` | Basic health probe. |
+| `GET`  | `/inputs` | List stored helpers and their metadata. |
+| `POST` | `/inputs` | Create a helper definition and publish discovery + availability payloads. |
+| `PUT`  | `/inputs/{slug}` | Update a helper definition and refresh discovery payloads. |
+| `DELETE` | `/inputs/{slug}` | Delete a helper and clear the retained discovery payload. |
+| `POST` | `/inputs/{slug}/set` | Publish a new helper value (optionally with `measured_at`). |
+| `GET`  | `/inputs/{slug}/history` | Return persisted history for a helper. |
+| `GET`  | `/config/mqtt` | Fetch stored MQTT configuration. |
+| `PUT`  | `/config/mqtt` | Save MQTT configuration (discovery prefix forced to `homeassistant`). |
+| `POST` | `/config/mqtt/test` | Attempt a broker connection using the stored credentials. |
 
-Refer to the inline OpenAPI docs (`/docs`) for the exact request/response schema.
+Refer to `/docs` for detailed schemas.
 
-## MQTT discovery payloads and telemetry
+## MQTT discovery & telemetry
 
-Every time a helper is created or updated the service publishes a retained MQTT discovery payload so
-Home Assistant can detect the entity automatically. The discovery topic follows the standard
-`homeassistant/<domain>/<unique_id>/config` pattern and uses Home Assistant's short-form keys:
+Every helper publish triggers three MQTT messages:
 
-```
-Topic: homeassistant/sensor/<slug>/config (retain)
-Payload:
-{
-  "name": "Example helper",
-  "uniq_id": "example_helper",
-  "stat_t": "homeassistant/input_helper/example_helper",
-  "val_tpl": "{{ value_json.value | float }}",
-  "json_attr_t": "homeassistant/input_helper/example_helper",
-  "json_attr_tpl": "{{ {'measured_at': value_json.measured_at} | tojson }}",
-  "avty_t": "homeassistant/input_helper/example_helper/availability",
-  "pl_avail": "online",
-  "pl_not_avail": "offline",
-  "dev": {
-    "identifiers": ["hass_input_helper:example_helper"],
-    "manufacturer": "HASS Input Helper",
-    "model": "Input Number",
-    "name": "Example helper",
-    "sw_version": "1.0.0"
-  },
-  "dev_cla": "distance",
-  "unit_of_meas": "in",
-  "stat_cla": "measurement"
-}
-```
+1. **Discovery** – Retained payload on
+   `homeassistant/<component>/[node_id/]<object_id>/config` using the metadata you configure in the UI.
+2. **Availability** – Retained payload on the helper-specific availability topic (defaults to
+   `online`/`offline`).
+3. **State** – JSON payload on the helper's state topic containing both the `value` and
+   `measured_at` timestamp.
 
-Setting a helper value publishes JSON to the configured topic prefix (`<topic_prefix>/<slug>`). Each
-payload always includes a numeric or textual `value` and an ISO-8601 `measured_at` timestamp alongside
-metadata describing the helper:
+Discovery payloads include a `value_template` so Home Assistant extracts the numeric/textual `value`
+from the JSON body. The same publish updates the entity's `measured_at` attribute via
+`json_attributes_topic`. You can review a fully annotated discovery example in
+[`MQTT_README.md`](./MQTT_README.md).
 
-```
-{
-  "entity_id": "input_number.example_helper",
-  "value": 63.25,
-  "measured_at": "2025-10-13T20:41:00-05:00",
-  "device_class": "distance",
-  "unit_of_measurement": "in",
-  "helper_type": "input_number"
-}
-```
+## Connecting to Home Assistant's MQTT add-on
 
-The history chart in the UI and the `/inputs/{slug}/history` endpoint both surface the `measured_at`
-timestamp so you can track when readings were captured. The "Send new value" form now provides date
-and time pickers so you can override the timestamp before publishing—leave them untouched to default
-to the current time.
+1. Install the **Mosquitto broker** add-on and enable the MQTT integration within Home Assistant.
+2. Create a dedicated MQTT user (Settings → People & Services → Users) and note the credentials.
+3. Open HASSEMS at `http://127.0.0.1:8100`, enter the broker host/port, credentials, and click **Save
+   configuration**. The discovery prefix is automatically set to `homeassistant`.
+4. Press **Test connection** to confirm the broker accepts the credentials.
+5. Create helpers with the desired discovery metadata. Each save republishes a retained discovery
+   payload so Home Assistant discovers or updates the entity automatically.
+6. Use the value publishing form to send new readings. The payload includes the helper's metadata and
+   the `measured_at` timestamp selected through the date/time pickers.
 
-## Connecting to the Home Assistant MQTT add-on
+## Additional references
 
-1. Install the **Mosquitto broker** add-on from the Home Assistant add-on store. Start the add-on
-   and ensure it is configured to start on boot.
-2. In Home Assistant, create a dedicated user account for MQTT (Settings → People & Services →
-   Users). Note the username and password.
-3. Enable the built-in **MQTT integration** (Settings → Devices & Services → Add integration →
-   MQTT). When prompted, provide the Mosquitto broker host (typically `homeassistant.local` or your
-   Home Assistant IP), port `1883`, and the user credentials created above.
-4. Open the input helper UI at `http://127.0.0.1:8100/` and fill in the same host, port, username,
-   and password in the MQTT broker card. Save the configuration and press **Test connection** to
-   validate the credentials. The configuration is stored in SQLite and reused across restarts.
-5. Create entities via the UI, then publish new helper values. Each entity automatically publishes a
-   retained MQTT discovery payload (with availability information and a `measured_at` attribute) so
-   Home Assistant can discover it instantly. Subsequent value publishes write to
-   `<topic_prefix>/<slug>` as JSON containing both the reading and the measurement timestamp, and each
-   update is persisted in SQLite for charting within the UI.
+- [`MQTT_README.md`](./MQTT_README.md) – Expanded guide covering MQTT discovery patterns, example
+  payloads, and supported device classes/state classes.
+- `services/hass_input_helper/mqtt_service.py` – Implementation of discovery/state publishing if you
+  need to integrate HASSEMS concepts into other tooling.
 
-The entity creation form exposes drop-down lists for valid Home Assistant device classes and common
-units of measurement, ensuring the generated MQTT discovery payloads align with expectations from the
-Home Assistant MQTT integration.
+Enjoy building and managing MQTT-discovered helpers without editing YAML!
