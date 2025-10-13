@@ -30,6 +30,149 @@
     input_select: 'Input select',
   };
 
+  const DEVICE_CLASS_OPTIONS = [
+    { value: '', label: 'None' },
+    { value: 'apparent_power', label: 'Apparent power' },
+    { value: 'aqi', label: 'Air quality index' },
+    { value: 'atmospheric_pressure', label: 'Atmospheric pressure' },
+    { value: 'battery', label: 'Battery' },
+    { value: 'carbon_dioxide', label: 'Carbon dioxide' },
+    { value: 'carbon_monoxide', label: 'Carbon monoxide' },
+    { value: 'cold', label: 'Cold (binary)' },
+    { value: 'connectivity', label: 'Connectivity' },
+    { value: 'concentration', label: 'Concentration' },
+    { value: 'conductivity', label: 'Conductivity' },
+    { value: 'consumption', label: 'Consumption' },
+    { value: 'current', label: 'Current' },
+    { value: 'data_rate', label: 'Data rate' },
+    { value: 'data_size', label: 'Data size' },
+    { value: 'date', label: 'Date' },
+    { value: 'distance', label: 'Distance' },
+    { value: 'door', label: 'Door (binary)' },
+    { value: 'duration', label: 'Duration' },
+    { value: 'enum', label: 'Enum' },
+    { value: 'energy', label: 'Energy' },
+    { value: 'energy_storage', label: 'Energy storage' },
+    { value: 'frequency', label: 'Frequency' },
+    { value: 'gas', label: 'Gas' },
+    { value: 'garage_door', label: 'Garage door (binary)' },
+    { value: 'heat', label: 'Heat (binary)' },
+    { value: 'humidity', label: 'Humidity' },
+    { value: 'illuminance', label: 'Illuminance' },
+    { value: 'irradiance', label: 'Irradiance' },
+    { value: 'light', label: 'Light (binary)' },
+    { value: 'lock', label: 'Lock (binary)' },
+    { value: 'monetary', label: 'Monetary' },
+    { value: 'moisture', label: 'Moisture (binary)' },
+    { value: 'motion', label: 'Motion (binary)' },
+    { value: 'moving', label: 'Moving (binary)' },
+    { value: 'nitrogen_dioxide', label: 'Nitrogen dioxide' },
+    { value: 'nitrogen_monoxide', label: 'Nitrogen monoxide' },
+    { value: 'nitrous_oxide', label: 'Nitrous oxide' },
+    { value: 'occupancy', label: 'Occupancy (binary)' },
+    { value: 'opening', label: 'Opening (binary)' },
+    { value: 'ozone', label: 'Ozone' },
+    { value: 'pm1', label: 'Particulate matter 1µm' },
+    { value: 'pm10', label: 'Particulate matter 10µm' },
+    { value: 'pm25', label: 'Particulate matter 2.5µm' },
+    { value: 'plug', label: 'Plug (binary)' },
+    { value: 'power', label: 'Power' },
+    { value: 'power_factor', label: 'Power factor' },
+    { value: 'precipitation', label: 'Precipitation' },
+    { value: 'precipitation_intensity', label: 'Precipitation intensity' },
+    { value: 'pressure', label: 'Pressure' },
+    { value: 'presence', label: 'Presence (binary)' },
+    { value: 'problem', label: 'Problem (binary)' },
+    { value: 'reactive_power', label: 'Reactive power' },
+    { value: 'running', label: 'Running (binary)' },
+    { value: 'safety', label: 'Safety (binary)' },
+    { value: 'signal_strength', label: 'Signal strength' },
+    { value: 'smoke', label: 'Smoke (binary)' },
+    { value: 'sound', label: 'Sound (binary)' },
+    { value: 'sound_pressure', label: 'Sound pressure' },
+    { value: 'speed', label: 'Speed' },
+    { value: 'sulphur_dioxide', label: 'Sulphur dioxide' },
+    { value: 'tamper', label: 'Tamper (binary)' },
+    { value: 'temperature', label: 'Temperature' },
+    { value: 'timestamp', label: 'Timestamp' },
+    { value: 'update', label: 'Update (binary)' },
+    { value: 'uv_index', label: 'UV index' },
+    { value: 'vibration', label: 'Vibration (binary)' },
+    { value: 'volatile_organic_compounds', label: 'VOC' },
+    { value: 'volatile_organic_compounds_parts', label: 'VOC parts' },
+    { value: 'voltage', label: 'Voltage' },
+    { value: 'volume', label: 'Volume' },
+    { value: 'volume_flow_rate', label: 'Volume flow rate' },
+    { value: 'water', label: 'Water' },
+    { value: 'weight', label: 'Weight' },
+    { value: 'wind_speed', label: 'Wind speed' },
+    { value: 'window', label: 'Window (binary)' },
+  ];
+
+  const UNIT_OPTIONS = [
+    { value: '', label: 'None' },
+    { value: '%', label: 'Percent (%)' },
+    { value: '°C', label: 'Degrees Celsius (°C)' },
+    { value: '°F', label: 'Degrees Fahrenheit (°F)' },
+    { value: 'K', label: 'Kelvin (K)' },
+    { value: 'A', label: 'Amperes (A)' },
+    { value: 'mA', label: 'Milliamperes (mA)' },
+    { value: 'µA', label: 'Microamperes (µA)' },
+    { value: 'V', label: 'Volts (V)' },
+    { value: 'W', label: 'Watts (W)' },
+    { value: 'kW', label: 'Kilowatts (kW)' },
+    { value: 'MW', label: 'Megawatts (MW)' },
+    { value: 'Wh', label: 'Watt hours (Wh)' },
+    { value: 'kWh', label: 'Kilowatt hours (kWh)' },
+    { value: 'VA', label: 'Volt-ampere (VA)' },
+    { value: 'var', label: 'Volt-ampere reactive (var)' },
+    { value: 'Hz', label: 'Hertz (Hz)' },
+    { value: 'lx', label: 'Lux (lx)' },
+    { value: 'lm', label: 'Lumens (lm)' },
+    { value: 'dB', label: 'Decibels (dB)' },
+    { value: 'ppm', label: 'Parts per million (ppm)' },
+    { value: 'ppb', label: 'Parts per billion (ppb)' },
+    { value: 'µg/m³', label: 'Micrograms per cubic meter (µg/m³)' },
+    { value: 'mg/m³', label: 'Milligrams per cubic meter (mg/m³)' },
+    { value: 'mg/L', label: 'Milligrams per litre (mg/L)' },
+    { value: 'µg/L', label: 'Micrograms per litre (µg/L)' },
+    { value: 'm³', label: 'Cubic meters (m³)' },
+    { value: 'm³/h', label: 'Cubic meters per hour (m³/h)' },
+    { value: 'L', label: 'Litres (L)' },
+    { value: 'gal', label: 'Gallons (gal)' },
+    { value: 'm', label: 'Meters (m)' },
+    { value: 'cm', label: 'Centimeters (cm)' },
+    { value: 'mm', label: 'Millimeters (mm)' },
+    { value: 'in', label: 'Inches (in)' },
+    { value: 'ft', label: 'Feet (ft)' },
+    { value: 'km', label: 'Kilometers (km)' },
+    { value: 'mi', label: 'Miles (mi)' },
+    { value: 'nm', label: 'Nautical miles (nm)' },
+    { value: 's', label: 'Seconds (s)' },
+    { value: 'min', label: 'Minutes (min)' },
+    { value: 'h', label: 'Hours (h)' },
+    { value: 'd', label: 'Days (d)' },
+    { value: '°', label: 'Degrees (°)' },
+    { value: '°/s', label: 'Degrees per second (°/s)' },
+    { value: 'm/s', label: 'Meters per second (m/s)' },
+    { value: 'km/h', label: 'Kilometers per hour (km/h)' },
+    { value: 'mph', label: 'Miles per hour (mph)' },
+    { value: 'kt', label: 'Knots (kt)' },
+    { value: 'Pa', label: 'Pascal (Pa)' },
+    { value: 'hPa', label: 'Hectopascal (hPa)' },
+    { value: 'kPa', label: 'Kilopascal (kPa)' },
+    { value: 'bar', label: 'Bar' },
+    { value: 'psi', label: 'Pounds per square inch (psi)' },
+    { value: 'mbar', label: 'Millibar (mbar)' },
+    { value: 'mmHg', label: 'Millimeters of mercury (mmHg)' },
+    { value: 'inHg', label: 'Inches of mercury (inHg)' },
+    { value: '°Bx', label: 'Degrees Brix (°Bx)' },
+    { value: 'g', label: 'Grams (g)' },
+    { value: 'kg', label: 'Kilograms (kg)' },
+    { value: 'lb', label: 'Pounds (lb)' },
+    { value: 'oz', label: 'Ounces (oz)' },
+  ];
+
   async function init() {
     mqttForm.addEventListener('submit', handleMqttSubmit);
     testMqttBtn.addEventListener('click', handleMqttTest);
@@ -38,8 +181,38 @@
     updateForm.addEventListener('submit', handleUpdateHelper);
     deleteBtn.addEventListener('click', handleDeleteHelper);
 
+    populateSelectControls();
     await loadMqttConfig();
     await loadHelpers();
+  }
+
+  function populateSelectControls() {
+    const deviceSelects = document.querySelectorAll('select[name="device_class"]');
+    const unitSelects = document.querySelectorAll('select[name="unit_of_measurement"]');
+
+    deviceSelects.forEach((select) => populateSelect(select, DEVICE_CLASS_OPTIONS));
+    unitSelects.forEach((select) => populateSelect(select, UNIT_OPTIONS));
+  }
+
+  function populateSelect(select, options) {
+    select.innerHTML = '';
+    options.forEach((option) => {
+      const opt = document.createElement('option');
+      opt.value = option.value;
+      opt.textContent = option.label;
+      select.appendChild(opt);
+    });
+  }
+
+  function setSelectValue(select, value) {
+    const normalized = value ?? '';
+    if (![...select.options].some((option) => option.value === normalized)) {
+      const opt = document.createElement('option');
+      opt.value = normalized;
+      opt.textContent = normalized || 'None';
+      select.appendChild(opt);
+    }
+    select.value = normalized;
   }
 
   function showToast(message, type = 'info') {
@@ -207,8 +380,8 @@
     updateForm.elements.helper_type.value = helperTypeMap[helper.helper_type] || helper.helper_type;
     updateForm.elements.description.value = helper.description ?? '';
     updateForm.elements.default_value.value = helper.default_value ?? '';
-    updateForm.elements.device_class.value = helper.device_class ?? '';
-    updateForm.elements.unit_of_measurement.value = helper.unit_of_measurement ?? '';
+    setSelectValue(updateForm.elements.device_class, helper.device_class ?? '');
+    setSelectValue(updateForm.elements.unit_of_measurement, helper.unit_of_measurement ?? '');
 
     const optionsField = updateForm.elements.options;
     if (helper.helper_type === 'input_select') {

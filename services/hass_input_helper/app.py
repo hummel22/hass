@@ -25,7 +25,13 @@ from .models import (
     SetValueRequest,
     coerce_helper_value,
 )
-from .mqtt_service import MQTTError, publish_value, verify_connection
+from .mqtt_service import (
+    MQTTError,
+    clear_discovery_config,
+    publish_discovery_config,
+    publish_value,
+    verify_connection,
+)
 from .storage import InputHelperStore
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -124,18 +130,44 @@ def list_inputs(store: InputHelperStore = Depends(get_store)) -> List[InputHelpe
 
 
 @app.post("/inputs", response_model=InputHelper, status_code=status.HTTP_201_CREATED)
-def create_input_helper(
+async def create_input_helper(
     payload: InputHelperCreate,
     store: InputHelperStore = Depends(get_store),
 ) -> InputHelper:
+    config = store.get_mqtt_config()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQTT configuration not provided. Save broker settings before creating helpers.",
+        )
+
     try:
-        return store.create_helper(payload)
+        helper = store.create_helper(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    try:
+        await asyncio.to_thread(publish_discovery_config, config, helper)
+    except MQTTError as exc:
+        logger.warning("Failed to publish MQTT discovery payload during helper creation: %s", exc)
+        try:
+            store.delete_helper(helper.slug)
+        except Exception:  # noqa: BLE001
+            logger.exception("Unable to roll back helper creation after MQTT failure")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error publishing MQTT discovery payload during helper creation")
+        try:
+            store.delete_helper(helper.slug)
+        except Exception:  # noqa: BLE001
+            logger.exception("Unable to roll back helper creation after unexpected MQTT failure")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    return helper
+
 
 @app.put("/inputs/{slug}", response_model=InputHelper)
-def update_input_helper(
+async def update_input_helper(
     slug: str,
     payload: InputHelperUpdate,
     store: InputHelperStore = Depends(get_store),
@@ -147,11 +179,29 @@ def update_input_helper(
         return helper_record.helper
 
     try:
-        return store.update_helper(slug, payload)
+        helper = store.update_helper(slug, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    config = store.get_mqtt_config()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MQTT configuration not provided. Save broker settings before updating helpers.",
+        )
+
+    try:
+        await asyncio.to_thread(publish_discovery_config, config, helper)
+    except MQTTError as exc:
+        logger.warning("Failed to publish MQTT discovery payload during helper update: %s", exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error publishing MQTT discovery payload during helper update")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    return helper
 
 
 @app.delete(
@@ -159,11 +209,24 @@ def update_input_helper(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_store)) -> Response:
+async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_store)) -> Response:
+    record = store.get_helper(slug)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+
+    store.delete_helper(slug)
+
+    config = store.get_mqtt_config()
+    if config is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     try:
-        store.delete_helper(slug)
-    except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        await asyncio.to_thread(clear_discovery_config, config, record.helper)
+    except MQTTError as exc:
+        logger.warning("Failed to clear MQTT discovery payload: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unexpected error clearing MQTT discovery payload")
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

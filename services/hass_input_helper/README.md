@@ -11,7 +11,7 @@ its REST API.
 - [x] CRUD endpoints to list, create, update, and delete helper definitions.
 - [x] Validate helper metadata (entity IDs, select options, default values).
 - [x] Forward value updates to Home Assistant for supported helper types.
-- [x] Publish helper values to MQTT topics and retain a local history timeline.
+- [x] Publish helper values and Home Assistant MQTT discovery payloads with retained metadata.
 - [x] Fetch the latest state of a helper directly from Home Assistant.
 - [x] Provide a convenience script for local development (`start.sh`).
 - [x] Minimal landing page to manage MQTT connectivity and helper catalogue.
@@ -82,6 +82,11 @@ Refer to the inline OpenAPI docs (`/docs`) for the exact request/response schema
 4. Open the input helper UI at `http://127.0.0.1:8100/` and fill in the same host, port, username,
    and password in the MQTT broker card. Save the configuration and press **Test connection** to
    validate the credentials. The configuration is stored in SQLite and reused across restarts.
-5. Create entities via the UI, then publish new helper values. Each publish action updates Home
-   Assistant (when configured), writes to MQTT under `<topic_prefix>/<slug>`, and stores a timestamped
-   history entry in SQLite for charting.
+5. Create entities via the UI, then publish new helper values. Each entity automatically publishes a
+   retained MQTT discovery payload to `homeassistant/sensor/<slug>/config` so Home Assistant can
+   discover it instantly. Subsequent value publishes write to `<topic_prefix>/<slug>`, and each update
+   is persisted in SQLite for charting within the UI.
+
+The entity creation form exposes drop-down lists for valid Home Assistant device classes and common
+units of measurement, ensuring the generated MQTT discovery payloads align with expectations from the
+Home Assistant MQTT integration.
