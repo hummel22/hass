@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class SetValueRequest(BaseModel):
     value: Any
+    measured_at: Optional[datetime] = None
 
 
 class HelperType(str, Enum):
@@ -142,6 +143,7 @@ class InputHelper(BaseModel):
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
     last_value: Optional[InputValue] = None
+    last_measured_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     device_class: Optional[str] = None
@@ -154,7 +156,8 @@ class InputHelper(BaseModel):
 
 
 class HistoryPoint(BaseModel):
-    timestamp: datetime
+    measured_at: datetime
+    recorded_at: datetime
     value: InputValue
 
 
@@ -189,6 +192,7 @@ class InputHelperRecord:
             default_value=payload.default_value,
             options=payload.options,
             last_value=payload.default_value,
+            last_measured_at=now if payload.default_value is not None else None,
             created_at=now,
             updated_at=now,
             device_class=payload.device_class,
@@ -236,9 +240,14 @@ class InputHelperRecord:
 
         self.helper = InputHelper(**data)
 
-    def touch_last_value(self, value: InputValue) -> None:
+    def touch_last_value(self, value: InputValue, measured_at: datetime) -> None:
+        now = datetime.now(timezone.utc)
         self.helper = self.helper.model_copy(
-            update={"last_value": value, "updated_at": datetime.now(timezone.utc)}
+            update={
+                "last_value": value,
+                "last_measured_at": measured_at,
+                "updated_at": now,
+            }
         )
 
     def as_dict(self) -> Dict[str, Any]:

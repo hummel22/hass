@@ -15,6 +15,7 @@
   const detailTitle = document.getElementById('detail-title');
   const detailEntityId = document.getElementById('detail-entity-id');
   const detailLastValue = document.getElementById('detail-last-value');
+  const detailMeasuredAt = document.getElementById('detail-measured-at');
   const detailUpdated = document.getElementById('detail-updated');
   const deleteBtn = document.getElementById('delete-helper');
   const createForm = document.getElementById('create-helper-form');
@@ -352,7 +353,11 @@
       title.textContent = helper.name;
 
       const meta = document.createElement('small');
-      meta.textContent = helper.helper_type;
+      const metaParts = [helper.helper_type];
+      if (helper.last_measured_at) {
+        metaParts.push(formatTimestamp(helper.last_measured_at));
+      }
+      meta.textContent = metaParts.join(' · ');
 
       button.append(title, meta);
       button.addEventListener('click', () => selectHelper(helper.slug));
@@ -393,6 +398,9 @@
     }
 
     detailLastValue.textContent = helper.last_value ?? '—';
+    detailMeasuredAt.textContent = helper.last_measured_at
+      ? formatTimestamp(helper.last_measured_at)
+      : '—';
     detailUpdated.textContent = helper.updated_at ? formatTimestamp(helper.updated_at) : '—';
 
     renderValueInput(helper);
@@ -601,12 +609,21 @@
 
     field.appendChild(input);
 
+    const measuredField = document.createElement('label');
+    measuredField.className = 'form-field';
+    measuredField.innerHTML = '<span>Measured at</span>';
+    const measuredInput = document.createElement('input');
+    measuredInput.type = 'datetime-local';
+    measuredInput.name = 'measured_at';
+    measuredInput.value = toLocalDateTimeValue(new Date());
+    measuredField.appendChild(measuredInput);
+
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.className = 'btn primary';
     submit.textContent = 'Publish to MQTT';
 
-    valueForm.append(field, submit);
+    valueForm.append(field, measuredField, submit);
     valueForm.removeEventListener('submit', handleValueSubmit);
     valueForm.addEventListener('submit', handleValueSubmit);
   }
@@ -620,10 +637,24 @@
 
     const helper = state.selected;
     const valueInput = valueForm.querySelector('[name="value"]');
+    const measuredInput = valueForm.querySelector('[name="measured_at"]');
     const rawValue = valueInput.value;
 
     try {
       const payload = { value: coerceValue(helper.helper_type, rawValue) };
+      if (measuredInput && measuredInput.value) {
+        const parsed = new Date(measuredInput.value);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new Error('Provide a valid measured at timestamp.');
+        }
+        payload.measured_at = parsed.toISOString();
+      } else {
+        const now = new Date();
+        payload.measured_at = now.toISOString();
+        if (measuredInput) {
+          measuredInput.value = toLocalDateTimeValue(now);
+        }
+      }
       const updated = await requestJson(`/inputs/${helper.slug}/set`, {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -636,6 +667,9 @@
       populateDetail(updated);
       renderHelperList();
       await loadHistory(updated.slug);
+      if (measuredInput) {
+        measuredInput.value = toLocalDateTimeValue(new Date());
+      }
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -663,7 +697,7 @@
       return;
     }
 
-    const labels = history.map((item) => formatTimestamp(item.timestamp));
+    const labels = history.map((item) => formatTimestamp(item.measured_at));
     const numericValues = history.map((item) => normalizeHistoryValue(helper.helper_type, item.value));
     const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
 
@@ -718,7 +752,7 @@
     history.forEach((item) => {
       const li = document.createElement('li');
       const label = document.createElement('span');
-      label.textContent = formatTimestamp(item.timestamp);
+      label.textContent = formatTimestamp(item.measured_at);
       const value = document.createElement('span');
       value.textContent = String(item.value);
       li.append(label, value);
@@ -772,6 +806,16 @@
     } catch (error) {
       return String(value);
     }
+  }
+
+  function toLocalDateTimeValue(date) {
+    const pad = (input) => String(input).padStart(2, '0');
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
   }
 
   async function requestJson(url, options = {}) {

@@ -78,6 +78,7 @@ class InputHelperStore:
                     default_value TEXT,
                     options TEXT,
                     last_value TEXT,
+                    last_measured_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     device_class TEXT,
@@ -91,6 +92,7 @@ class InputHelperStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     helper_slug TEXT NOT NULL,
                     value TEXT NOT NULL,
+                    measured_at TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(helper_slug) REFERENCES helpers(slug) ON DELETE CASCADE
                 )
@@ -110,6 +112,15 @@ class InputHelperStore:
                 )
                 """
             )
+
+            self._ensure_column(conn, "helpers", "last_measured_at", "TEXT")
+            self._ensure_column(conn, "history", "measured_at", "TEXT")
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        existing = {info["name"] for info in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate_from_json(self) -> None:
         legacy_path = self._db_path.with_suffix(".json")
@@ -140,8 +151,9 @@ class InputHelperStore:
                     """
                     INSERT OR REPLACE INTO helpers (
                         slug, name, entity_id, helper_type, description, default_value,
-                        options, last_value, created_at, updated_at, device_class, unit_of_measurement
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        options, last_value, last_measured_at, created_at, updated_at,
+                        device_class, unit_of_measurement
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
@@ -152,6 +164,7 @@ class InputHelperStore:
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
                         _serialize_value(helper.last_value),
+                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
                         helper.created_at.isoformat(),
                         helper.updated_at.isoformat(),
                         helper.device_class,
@@ -160,6 +173,7 @@ class InputHelperStore:
                 )
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
+        keys = set(row.keys())
         return InputHelper(
             slug=row["slug"],
             name=row["name"],
@@ -169,6 +183,9 @@ class InputHelperStore:
             default_value=_deserialize_value(row["default_value"]),
             options=_deserialize_options(row["options"]),
             last_value=_deserialize_value(row["last_value"]),
+            last_measured_at=datetime.fromisoformat(row["last_measured_at"])
+            if "last_measured_at" in keys and row["last_measured_at"]
+            else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             device_class=row["device_class"],
@@ -204,8 +221,9 @@ class InputHelperStore:
                     """
                     INSERT INTO helpers (
                         slug, name, entity_id, helper_type, description, default_value,
-                        options, last_value, created_at, updated_at, device_class, unit_of_measurement
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        options, last_value, last_measured_at, created_at, updated_at,
+                        device_class, unit_of_measurement
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
@@ -216,6 +234,7 @@ class InputHelperStore:
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
                         _serialize_value(helper.last_value),
+                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
                         helper.created_at.isoformat(),
                         helper.updated_at.isoformat(),
                         helper.device_class,
@@ -241,6 +260,7 @@ class InputHelperStore:
                            default_value = ?,
                            options = ?,
                            last_value = ?,
+                           last_measured_at = ?,
                            updated_at = ?,
                            device_class = ?,
                            unit_of_measurement = ?
@@ -253,6 +273,7 @@ class InputHelperStore:
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
                         _serialize_value(helper.last_value),
+                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
                         helper.updated_at.isoformat(),
                         helper.device_class,
                         helper.unit_of_measurement,
@@ -271,8 +292,9 @@ class InputHelperStore:
                 if cursor.rowcount == 0:
                     raise KeyError(f"Helper '{slug}' not found.")
 
-    def set_last_value(self, slug: str, value: InputValue) -> InputHelper:
+    def set_last_value(self, slug: str, value: InputValue, *, measured_at: datetime) -> InputHelper:
         timestamp = datetime.now(timezone.utc).isoformat()
+        measured_iso = measured_at.astimezone(timezone.utc).isoformat()
         serialized_value = _serialize_value(value)
         with self._lock:
             with self._connection() as conn:
@@ -280,19 +302,20 @@ class InputHelperStore:
                     """
                     UPDATE helpers
                        SET last_value = ?,
+                           last_measured_at = ?,
                            updated_at = ?
                      WHERE slug = ?
                     """,
-                    (serialized_value, timestamp, slug),
+                    (serialized_value, measured_iso, timestamp, slug),
                 )
                 if cursor.rowcount == 0:
                     raise KeyError(f"Helper '{slug}' not found.")
                 conn.execute(
                     """
-                    INSERT INTO history (helper_slug, value, created_at)
-                    VALUES (?, ?, ?)
+                    INSERT INTO history (helper_slug, value, measured_at, created_at)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (slug, serialized_value, timestamp),
+                    (slug, serialized_value, measured_iso, timestamp),
                 )
                 row = conn.execute(
                     "SELECT * FROM helpers WHERE slug = ?",
@@ -306,7 +329,7 @@ class InputHelperStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT value, created_at
+                SELECT value, measured_at, created_at
                   FROM history
                  WHERE helper_slug = ?
               ORDER BY datetime(created_at) ASC
@@ -316,11 +339,19 @@ class InputHelperStore:
             ).fetchall()
         history: List[HistoryPoint] = []
         for row in rows:
-            timestamp = datetime.fromisoformat(row["created_at"])
+            recorded_at = datetime.fromisoformat(row["created_at"])
             value = _deserialize_value(row["value"])
             if value is None:
                 continue
-            history.append(HistoryPoint(timestamp=timestamp, value=value))
+            measured_source = row["measured_at"] or row["created_at"]
+            measured_at = datetime.fromisoformat(measured_source)
+            history.append(
+                HistoryPoint(
+                    measured_at=measured_at,
+                    recorded_at=recorded_at,
+                    value=value,
+                )
+            )
         return history
 
     def get_mqtt_config(self) -> Optional[MQTTConfig]:

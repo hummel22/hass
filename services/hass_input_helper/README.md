@@ -61,7 +61,7 @@ The UI uses the REST endpoints documented below, so you can also interact with t
 | `POST` | `/inputs` | Create a new helper definition. |
 | `PUT` | `/inputs/{slug}` | Update a helper definition. |
 | `DELETE` | `/inputs/{slug}` | Remove a helper definition. |
-| `POST` | `/inputs/{slug}/set` | Set the helper value in Home Assistant and publish to MQTT. |
+| `POST` | `/inputs/{slug}/set` | Set the helper value in Home Assistant and publish to MQTT (accepts an optional `measured_at`). |
 | `GET` | `/inputs/{slug}/history` | Retrieve the stored history for a helper. |
 | `GET` | `/inputs/{slug}/state` | Fetch the current Home Assistant state. |
 | `GET` | `/config/mqtt` | Retrieve the stored MQTT configuration. |
@@ -69,6 +69,57 @@ The UI uses the REST endpoints documented below, so you can also interact with t
 | `POST` | `/config/mqtt/test` | Test the stored MQTT configuration. |
 
 Refer to the inline OpenAPI docs (`/docs`) for the exact request/response schema.
+
+## MQTT discovery payloads and telemetry
+
+Every time a helper is created or updated the service publishes a retained MQTT discovery payload so
+Home Assistant can detect the entity automatically. The discovery topic follows the standard
+`homeassistant/<domain>/<unique_id>/config` pattern and uses Home Assistant's short-form keys:
+
+```
+Topic: homeassistant/sensor/<slug>/config (retain)
+Payload:
+{
+  "name": "Example helper",
+  "uniq_id": "example_helper",
+  "stat_t": "homeassistant/input_helper/example_helper",
+  "val_tpl": "{{ value_json.value | float }}",
+  "json_attr_t": "homeassistant/input_helper/example_helper",
+  "json_attr_tpl": "{{ {'measured_at': value_json.measured_at} | tojson }}",
+  "avty_t": "homeassistant/input_helper/example_helper/availability",
+  "pl_avail": "online",
+  "pl_not_avail": "offline",
+  "dev": {
+    "identifiers": ["hass_input_helper:example_helper"],
+    "manufacturer": "HASS Input Helper",
+    "model": "Input Number",
+    "name": "Example helper",
+    "sw_version": "1.0.0"
+  },
+  "dev_cla": "distance",
+  "unit_of_meas": "in",
+  "stat_cla": "measurement"
+}
+```
+
+Setting a helper value publishes JSON to the configured topic prefix (`<topic_prefix>/<slug>`). Each
+payload always includes a numeric or textual `value` and an ISO-8601 `measured_at` timestamp alongside
+metadata describing the helper:
+
+```
+{
+  "entity_id": "input_number.example_helper",
+  "value": 63.25,
+  "measured_at": "2025-10-13T20:41:00-05:00",
+  "device_class": "distance",
+  "unit_of_measurement": "in",
+  "helper_type": "input_number"
+}
+```
+
+The history chart in the UI and the `/inputs/{slug}/history` endpoint both surface the `measured_at`
+timestamp so you can track when readings were captured. The "Send new value" form lets you override
+the timestamp before publishing—leave it untouched to default to the current time.
 
 ## Connecting to the Home Assistant MQTT add-on
 
@@ -83,9 +134,10 @@ Refer to the inline OpenAPI docs (`/docs`) for the exact request/response schema
    and password in the MQTT broker card. Save the configuration and press **Test connection** to
    validate the credentials. The configuration is stored in SQLite and reused across restarts.
 5. Create entities via the UI, then publish new helper values. Each entity automatically publishes a
-   retained MQTT discovery payload to `homeassistant/sensor/<slug>/config` so Home Assistant can
-   discover it instantly. Subsequent value publishes write to `<topic_prefix>/<slug>`, and each update
-   is persisted in SQLite for charting within the UI.
+   retained MQTT discovery payload (with availability information and a `measured_at` attribute) so
+   Home Assistant can discover it instantly. Subsequent value publishes write to
+   `<topic_prefix>/<slug>` as JSON containing both the reading and the measurement timestamp, and each
+   update is persisted in SQLite for charting within the UI.
 
 The entity creation form exposes drop-down lists for valid Home Assistant device classes and common
 units of measurement, ensuring the generated MQTT discovery payloads align with expectations from the

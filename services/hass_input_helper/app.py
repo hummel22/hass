@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-import logging
 import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -28,6 +29,7 @@ from .models import (
 from .mqtt_service import (
     MQTTError,
     clear_discovery_config,
+    publish_availability,
     publish_discovery_config,
     publish_value,
     verify_connection,
@@ -148,6 +150,7 @@ async def create_input_helper(
 
     try:
         await asyncio.to_thread(publish_discovery_config, config, helper)
+        await asyncio.to_thread(publish_availability, config, helper, True)
     except MQTTError as exc:
         logger.warning("Failed to publish MQTT discovery payload during helper creation: %s", exc)
         try:
@@ -194,6 +197,7 @@ async def update_input_helper(
 
     try:
         await asyncio.to_thread(publish_discovery_config, config, helper)
+        await asyncio.to_thread(publish_availability, config, helper, True)
     except MQTTError as exc:
         logger.warning("Failed to publish MQTT discovery payload during helper update: %s", exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -221,6 +225,7 @@ async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_s
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     try:
+        await asyncio.to_thread(publish_availability, config, record.helper, False)
         await asyncio.to_thread(clear_discovery_config, config, record.helper)
     except MQTTError as exc:
         logger.warning("Failed to clear MQTT discovery payload: %s", exc)
@@ -254,6 +259,10 @@ async def set_helper_value(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    measured_at = request.measured_at or datetime.now(timezone.utc)
+    if measured_at.tzinfo is None:
+        measured_at = measured_at.replace(tzinfo=timezone.utc)
+
     if client is not None:
         try:
             await client.set_helper_value(record.helper, coerced)
@@ -269,13 +278,13 @@ async def set_helper_value(
         )
 
     try:
-        await asyncio.to_thread(publish_value, mqtt_config, record.helper, coerced)
+        await asyncio.to_thread(publish_value, mqtt_config, record.helper, coerced, measured_at)
     except MQTTError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    return store.set_last_value(slug, coerced)
+    return store.set_last_value(slug, coerced, measured_at=measured_at)
 
 
 @app.get("/inputs/{slug}/state", response_model=HelperState)

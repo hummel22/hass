@@ -4,12 +4,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from threading import Event
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from paho.mqtt import client as mqtt_client
 
-from .models import InputHelper, InputValue, MQTTConfig
+from .models import HelperType, InputHelper, InputValue, MQTTConfig
 
 
 class MQTTError(RuntimeError):
@@ -102,6 +102,11 @@ def _state_topic(config: MQTTConfig, helper: InputHelper) -> str:
     return f"{topic_prefix}/{helper.slug}"
 
 
+def _availability_topic(config: MQTTConfig, helper: InputHelper) -> str:
+    topic_prefix = config.topic_prefix.rstrip("/") or "homeassistant/input_helper"
+    return f"{topic_prefix}/{helper.slug}/availability"
+
+
 def _publish(
     config: MQTTConfig,
     topic: str,
@@ -152,14 +157,22 @@ def _publish(
     )
 
 
-def publish_value(config: MQTTConfig, helper: InputHelper, value: InputValue, *, timeout: float = 5.0) -> None:
+def publish_value(
+    config: MQTTConfig,
+    helper: InputHelper,
+    value: InputValue,
+    measured_at: datetime,
+    *,
+    timeout: float = 5.0,
+) -> None:
     """Publish an updated helper value to the configured MQTT topic."""
 
+    measured_iso = measured_at.astimezone(timezone.utc).isoformat()
     payload = json.dumps(
         {
             "entity_id": helper.entity_id,
             "value": value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "measured_at": measured_iso,
             "device_class": helper.device_class,
             "unit_of_measurement": helper.unit_of_measurement,
             "helper_type": helper.helper_type.value,
@@ -176,6 +189,20 @@ def _discovery_topic(helper: InputHelper, discovery_prefix: str = DEFAULT_DISCOV
     return f"{sanitized_prefix}/sensor/{helper.slug}/config"
 
 
+def _value_template(helper: InputHelper) -> str:
+    if helper.helper_type == HelperType.INPUT_NUMBER:
+        return "{{ value_json.value | float }}"
+    if helper.helper_type == HelperType.INPUT_BOOLEAN:
+        return "{{ value_json.value | lower }}"
+    return "{{ value_json.value }}"
+
+
+def _state_class(helper: InputHelper) -> Optional[str]:
+    if helper.helper_type == HelperType.INPUT_NUMBER:
+        return "measurement"
+    return None
+
+
 def publish_discovery_config(
     config: MQTTConfig,
     helper: InputHelper,
@@ -185,36 +212,67 @@ def publish_discovery_config(
 ) -> None:
     """Publish a retained MQTT discovery payload for Home Assistant."""
 
-    payload = {
+    state_topic = _state_topic(config, helper)
+    availability_topic = _availability_topic(config, helper)
+    payload: dict[str, Any] = {
         "name": helper.name,
-        "unique_id": helper.slug,
-        "state_topic": _state_topic(config, helper),
-        "value_template": "{{ value_json.value }}",
-        "json_attributes_topic": _state_topic(config, helper),
+        "uniq_id": helper.slug,
+        "stat_t": state_topic,
+        "val_tpl": _value_template(helper),
+        "json_attr_t": state_topic,
+        "json_attr_tpl": "{{ {'measured_at': value_json.measured_at} | tojson }}",
+        "avty_t": availability_topic,
+        "pl_avail": "online",
+        "pl_not_avail": "offline",
+        "dev": {
+            "identifiers": [f"hass_input_helper:{helper.slug}"],
+            "manufacturer": "HASS Input Helper",
+            "model": helper.helper_type.value.replace("_", " ").title(),
+            "name": helper.name,
+            "sw_version": "1.0.0",
+        },
     }
-    if helper.device_class:
-        payload["device_class"] = helper.device_class
-    if helper.unit_of_measurement:
-        payload["unit_of_measurement"] = helper.unit_of_measurement
 
-    payload["device"] = {
-        "identifiers": [f"hass_input_helper:{helper.slug}"],
-        "manufacturer": "HASS Input Helper",
-        "model": helper.helper_type.value.replace("_", " ").title(),
-        "name": helper.name,
-    }
+    if helper.device_class:
+        payload["dev_cla"] = helper.device_class
+    if helper.unit_of_measurement:
+        payload["unit_of_meas"] = helper.unit_of_measurement
+
+    state_class = _state_class(helper)
+    if state_class:
+        payload["stat_cla"] = state_class
 
     topic = _discovery_topic(helper, discovery_prefix)
     logger.info(
         "Publishing MQTT discovery payload",
         extra={
             "mqtt_topic": topic,
-            "mqtt_state_topic": payload["state_topic"],
-            "mqtt_device_class": payload.get("device_class"),
-            "mqtt_unit": payload.get("unit_of_measurement"),
+            "mqtt_state_topic": state_topic,
+            "mqtt_device_class": payload.get("dev_cla"),
+            "mqtt_unit": payload.get("unit_of_meas"),
         },
     )
     _publish(config, topic, json.dumps(payload), retain=True, timeout=timeout)
+
+
+def publish_availability(
+    config: MQTTConfig,
+    helper: InputHelper,
+    available: bool,
+    *,
+    timeout: float = 5.0,
+) -> None:
+    topic = _availability_topic(config, helper)
+    payload = "online" if available else "offline"
+    logger.info(
+        "Publishing MQTT availability",
+        extra={
+            "mqtt_topic": topic,
+            "mqtt_payload": payload,
+            "mqtt_helper_slug": helper.slug,
+        },
+    )
+    _publish(config, topic, payload, retain=True, timeout=timeout)
 
 
 def clear_discovery_config(
@@ -240,6 +298,7 @@ def clear_discovery_config(
 __all__ = [
     "MQTTError",
     "clear_discovery_config",
+    "publish_availability",
     "publish_discovery_config",
     "publish_value",
     "verify_connection",
