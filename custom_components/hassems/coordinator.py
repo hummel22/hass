@@ -12,7 +12,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_ENTITY_ID,
-    ATTR_STATE_CLASS,
     ATTR_UNIT_OF_MEASUREMENT,
     EVENT_STATE_CHANGED,
 )
@@ -26,6 +25,7 @@ from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
 from .const import (
     ATTR_HISTORY,
     ATTR_LAST_MEASURED,
+    ATTR_STATE_CLASS,
     CONF_INCLUDED_HELPERS,
     CONF_IGNORED_HELPERS,
     DEFAULT_POLL_INTERVAL,

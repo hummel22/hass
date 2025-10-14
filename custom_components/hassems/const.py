@@ -33,3 +33,4 @@ EVENT_HELPER_VALUE = "helper_value"
 
 ATTR_HISTORY = "history"
 ATTR_LAST_MEASURED = "last_measured_at"
+ATTR_STATE_CLASS = "state_class"
