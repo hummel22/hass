@@ -18,6 +18,26 @@ JSON.
 - [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, icons, and
       discovery components plus inline tooltips describing each setting.
 
+## Installation
+
+### Prerequisites
+
+- Python 3.10+
+- Mosquitto or another MQTT broker (local or remote) for publishing discovery payloads
+
+### Steps
+
+```bash
+# from the repository root
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r services/hassems/requirements.txt
+```
+
+Running `services/hassems/start.sh` performs these setup steps automatically and then launches the
+development server.
+
 ## Configuration
 
 HASSEMS still supports optional REST calls to Home Assistant. Configure them by setting the following
