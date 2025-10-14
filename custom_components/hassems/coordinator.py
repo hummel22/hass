@@ -392,7 +392,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 },
                 context=context,
                 origin=EventOrigin.remote,
-                time_fired=dt_value,
+                time_fired_timestamp=dt_util.as_timestamp(dt_value),
             )
             events.append(event)
             recorded[measured_at] = None
