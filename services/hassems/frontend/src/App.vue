@@ -123,6 +123,62 @@
         </form>
       </section>
 
+      <section class="card" id="users-card" v-if="activePage === 'settings'">
+        <div class="card__header">
+          <div>
+            <h2>API Users</h2>
+            <p class="card__subtitle">
+              Generate tokens for Home Assistant and trusted services to access the HASSEMS API.
+            </p>
+          </div>
+          <div class="card__actions">
+            <button class="btn" type="button" @click="loadApiUsers">Refresh</button>
+            <button class="btn primary" type="button" @click="openUserDialog()">New user</button>
+          </div>
+        </div>
+
+        <p class="card__subtitle">
+          The built-in superuser token is always available and cannot be removed.
+        </p>
+
+        <div v-if="apiUsers.length" class="entity-table-wrapper">
+          <table class="entity-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Token</th>
+                <th scope="col" class="actions-column">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in apiUsers" :key="user.id">
+                <td>
+                  <div class="entity-name">
+                    <span class="entity-name__primary">{{ user.name }}</span>
+                    <span v-if="user.is_superuser" class="entity-name__badge">Superuser</span>
+                  </div>
+                </td>
+                <td><code>{{ user.token }}</code></td>
+                <td class="actions-cell">
+                  <div class="button-group">
+                    <button class="btn" type="button" @click.stop="openUserDialog(user)">Edit</button>
+                    <button
+                      class="btn danger"
+                      type="button"
+                      @click.stop="deleteUser(user)"
+                      :disabled="user.is_superuser"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="card__subtitle">No API users created yet.</p>
+      </section>
+
 
       <section class="card" id="entities-card" v-if="activePage === 'entities'">
         <div class="card__header">
@@ -1130,6 +1186,49 @@
       </template>
     </dialog>
 
+    <dialog ref="userDialog" class="modal" @cancel.prevent="closeUserDialog" @close="onUserDialogClose">
+      <div class="modal__container">
+        <div class="modal__header">
+          <h3>{{ userDialogMode === 'edit' ? 'Edit API user' : 'New API user' }}</h3>
+          <button type="button" class="modal__close" @click="closeUserDialog" aria-label="Close user dialog">×</button>
+        </div>
+        <form class="modal__form" @submit.prevent="submitUserForm">
+          <div class="modal__body">
+            <label class="form-field">
+              <span class="label-text">Name</span>
+              <input v-model="userForm.name" type="text" required placeholder="Automation service" />
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                API token
+                <button
+                  type="button"
+                  class="help-icon"
+                  data-tooltip="Tokens authenticate API clients. Store them securely and regenerate if compromised."
+                >?
+                </button>
+              </span>
+              <input
+                v-model="userForm.token"
+                type="text"
+                :required="userDialogMode === 'create'"
+                :disabled="userForm.is_superuser && userDialogMode === 'edit'"
+              />
+            </label>
+            <p v-if="userForm.is_superuser" class="form-helper">
+              The superuser token is fixed and cannot be modified or deleted.
+            </p>
+          </div>
+          <div class="modal__actions">
+            <button type="button" class="btn" @click="closeUserDialog">Cancel</button>
+            <button class="btn primary" type="submit" :disabled="userSaving">
+              {{ userSaving ? 'Saving…' : userDialogMode === 'edit' ? 'Save changes' : 'Create user' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <div
       id="toast"
       class="toast"
@@ -1362,6 +1461,17 @@ const mqttForm = reactive({
 });
 const mqttConfig = ref(null);
 const mqttSaving = ref(false);
+
+const apiUsers = ref([]);
+const userDialog = ref(null);
+const userDialogMode = ref('create');
+const userSaving = ref(false);
+const userForm = reactive({
+  id: null,
+  name: '',
+  token: '',
+  is_superuser: false,
+});
 
 const helpers = ref([]);
 const selectedSlug = ref(null);
@@ -1781,6 +1891,124 @@ async function loadHelpers() {
     }
   } catch (error) {
     showToast(`Failed to load entities: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
+}
+
+async function loadApiUsers() {
+  try {
+    const data = await requestJson('/users');
+    const items = Array.isArray(data) ? data : [];
+    apiUsers.value = items
+      .map((item) => ({
+        ...item,
+        is_superuser: Boolean(item.is_superuser),
+      }))
+      .sort((a, b) => {
+        if (a.is_superuser !== b.is_superuser) {
+          return a.is_superuser ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+  } catch (error) {
+    showToast(`Failed to load API users: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
+}
+
+function resetUserForm() {
+  userForm.id = null;
+  userForm.name = '';
+  userForm.token = '';
+  userForm.is_superuser = false;
+}
+
+function openUserDialog(user = null) {
+  const dialog = userDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  resetUserForm();
+  if (user) {
+    userDialogMode.value = 'edit';
+    userForm.id = user.id;
+    userForm.name = user.name;
+    userForm.token = user.token;
+    userForm.is_superuser = Boolean(user.is_superuser);
+  } else {
+    userDialogMode.value = 'create';
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeUserDialog() {
+  const dialog = userDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+}
+
+function onUserDialogClose() {
+  resetUserForm();
+  userDialogMode.value = 'create';
+}
+
+async function submitUserForm() {
+  const name = userForm.name.trim();
+  const token = userForm.token.trim();
+  if (!name) {
+    showToast('Provide a name for the API user.', 'error');
+    return;
+  }
+  if (userDialogMode.value === 'create' && !token) {
+    showToast('Provide a token for the new API user.', 'error');
+    return;
+  }
+  try {
+    userSaving.value = true;
+    if (userDialogMode.value === 'create') {
+      await requestJson('/users', {
+        method: 'POST',
+        body: JSON.stringify({ name, token }),
+      });
+      showToast('API user created.', 'success');
+    } else if (userForm.id !== null) {
+      const payload = { name };
+      if (!userForm.is_superuser && token) {
+        payload.token = token;
+      }
+      await requestJson(`/users/${userForm.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      showToast('API user updated.', 'success');
+    }
+    await loadApiUsers();
+    closeUserDialog();
+  } catch (error) {
+    showToast(`Failed to save API user: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  } finally {
+    userSaving.value = false;
+  }
+}
+
+async function deleteUser(user) {
+  if (user.is_superuser) {
+    showToast('The built-in superuser cannot be deleted.', 'error');
+    return;
+  }
+  if (typeof window !== 'undefined') {
+    const confirmed = window.confirm(`Delete API user "${user.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+  }
+  try {
+    await requestJson(`/users/${user.id}`, { method: 'DELETE' });
+    showToast('API user deleted.', 'success');
+    await loadApiUsers();
+  } catch (error) {
+    showToast(`Failed to delete API user: ${error instanceof Error ? error.message : String(error)}`, 'error');
   }
 }
 
@@ -2851,6 +3079,7 @@ onMounted(async () => {
   resetCreateForm();
   await loadMqttConfig();
   await loadHelpers();
+  await loadApiUsers();
 });
 
 onBeforeUnmount(() => {

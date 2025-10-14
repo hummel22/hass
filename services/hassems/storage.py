@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from .models import (
+    ApiUser,
+    ApiUserCreate,
+    ApiUserUpdate,
     EntityTransportType,
     HistoryPoint,
     HistoryPointUpdate,
@@ -18,6 +22,8 @@ from .models import (
     InputHelperUpdate,
     InputValue,
     MQTTConfig,
+    WebhookRegistration,
+    WebhookSubscription,
     slugify_identifier,
 )
 
@@ -70,6 +76,37 @@ def _deserialize_identifiers(value: Optional[str]) -> List[str]:
         if text:
             cleaned.append(text)
     return cleaned
+
+
+def _serialize_metadata(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not metadata:
+        return None
+    return json.dumps(metadata)
+
+
+def _deserialize_metadata(value: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not value:
+        return None
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
+@dataclass
+class WebhookTarget:
+    id: int
+    user_id: int
+    webhook_url: str
+    secret: Optional[str]
+    token: str
+    description: Optional[str]
+    metadata: Optional[Dict[str, Any]]
+    created_at: datetime
+    updated_at: datetime
 
 
 class InputHelperStore:
@@ -154,6 +191,34 @@ class InputHelperStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    token TEXT NOT NULL UNIQUE,
+                    is_superuser INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    description TEXT,
+                    webhook_url TEXT NOT NULL,
+                    secret TEXT,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(user_id, description),
+                    FOREIGN KEY(user_id) REFERENCES api_users(id) ON DELETE CASCADE
+                )
+                """
+            )
 
             self._ensure_column(conn, "helpers", "last_measured_at", "TEXT")
             self._ensure_column(conn, "helpers", "component", "TEXT NOT NULL DEFAULT 'sensor'")
@@ -173,12 +238,57 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
             self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
             self._ensure_column(conn, "history", "measured_at", "TEXT")
+            self._ensure_column(conn, "api_users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "webhook_subscriptions", "metadata", "TEXT")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         existing = {info["name"] for info in conn.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _row_to_api_user(row: sqlite3.Row) -> ApiUser:
+        keys = set(row.keys())
+        return ApiUser(
+            id=row["id"],
+            name=row["name"],
+            token=row["token"],
+            is_superuser=bool(row["is_superuser"]) if "is_superuser" in keys else False,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _row_to_webhook_subscription(row: sqlite3.Row) -> WebhookSubscription:
+        keys = set(row.keys())
+        description = row["description"].strip() if row["description"] else ""
+        return WebhookSubscription(
+            id=row["id"],
+            user_id=row["user_id"],
+            description=description or None,
+            webhook_url=row["webhook_url"],
+            secret=row["secret"] or None,
+            metadata=_deserialize_metadata(row["metadata"]) if "metadata" in keys else None,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _row_to_webhook_target(row: sqlite3.Row) -> WebhookTarget:
+        keys = set(row.keys())
+        description_raw = row["description"].strip() if row["description"] else ""
+        return WebhookTarget(
+            id=row["id"],
+            user_id=row["user_id"],
+            webhook_url=row["webhook_url"],
+            secret=row["secret"] or None,
+            token=row["token"],
+            description=description_raw or None,
+            metadata=_deserialize_metadata(row["metadata"]) if "metadata" in keys else None,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
 
     def _migrate_from_json(self) -> None:
         legacy_path = self._db_path.with_suffix(".json")
@@ -248,6 +358,254 @@ class InputHelperStore:
                     _serialize_identifiers(helper.device_identifiers),
                 ),
             )
+
+    def ensure_superuser(self, *, name: str, token: str) -> ApiUser:
+        cleaned_name = name.strip() or "Superuser"
+        cleaned_token = token.strip()
+        if not cleaned_token:
+            raise ValueError("Superuser token cannot be blank.")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM api_users WHERE token = ?",
+                    (cleaned_token,),
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO api_users (name, token, is_superuser, created_at, updated_at)
+                        VALUES (?, ?, 1, ?, ?)
+                        """,
+                        (cleaned_name, cleaned_token, now_iso, now_iso),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE api_users
+                           SET name = ?,
+                               is_superuser = 1,
+                               updated_at = ?
+                         WHERE id = ?
+                        """,
+                        (cleaned_name, now_iso, row["id"]),
+                    )
+                ensured = conn.execute(
+                    "SELECT * FROM api_users WHERE token = ?",
+                    (cleaned_token,),
+                ).fetchone()
+        if ensured is None:
+            raise RuntimeError("Unable to ensure superuser token.")
+        return self._row_to_api_user(ensured)
+
+    def list_api_users(self) -> List[ApiUser]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM api_users ORDER BY is_superuser DESC, name COLLATE NOCASE",
+            ).fetchall()
+        return [self._row_to_api_user(row) for row in rows]
+
+    def create_api_user(self, payload: ApiUserCreate) -> ApiUser:
+        cleaned_name = payload.name.strip()
+        cleaned_token = payload.token.strip()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._connection() as conn:
+                try:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO api_users (name, token, is_superuser, created_at, updated_at)
+                        VALUES (?, ?, 0, ?, ?)
+                        """,
+                        (cleaned_name, cleaned_token, now_iso, now_iso),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    if "api_users.token" in str(exc):
+                        raise ValueError("API token already exists.") from exc
+                    raise
+                row = conn.execute(
+                    "SELECT * FROM api_users WHERE id = ?",
+                    (cursor.lastrowid,),
+                ).fetchone()
+        if row is None:
+            raise RuntimeError("Unable to create API user.")
+        return self._row_to_api_user(row)
+
+    def update_api_user(self, user_id: int, payload: ApiUserUpdate) -> ApiUser:
+        update_data = payload.model_dump(exclude_unset=True)
+        cleaned_name = update_data.get("name")
+        cleaned_token = update_data.get("token")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._connection() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM api_users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+                if existing is None:
+                    raise KeyError(f"API user {user_id} not found.")
+                is_superuser = bool(existing["is_superuser"])
+                name_value = cleaned_name if cleaned_name is not None else existing["name"]
+                token_value = cleaned_token if cleaned_token is not None else existing["token"]
+                if is_superuser and cleaned_token is not None and cleaned_token != existing["token"]:
+                    raise ValueError("The superuser token cannot be modified.")
+                try:
+                    conn.execute(
+                        """
+                        UPDATE api_users
+                           SET name = ?,
+                               token = ?,
+                               updated_at = ?
+                         WHERE id = ?
+                        """,
+                        (name_value, token_value.strip(), now_iso, user_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    if "api_users.token" in str(exc):
+                        raise ValueError("API token already exists.") from exc
+                    raise
+                row = conn.execute(
+                    "SELECT * FROM api_users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+        if row is None:
+            raise RuntimeError("Unable to update API user.")
+        return self._row_to_api_user(row)
+
+    def delete_api_user(self, user_id: int) -> None:
+        with self._lock:
+            with self._connection() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM api_users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+                if existing is None:
+                    raise KeyError(f"API user {user_id} not found.")
+                if bool(existing["is_superuser"]):
+                    raise ValueError("The built-in superuser cannot be removed.")
+                conn.execute(
+                    "DELETE FROM api_users WHERE id = ?",
+                    (user_id,),
+                )
+
+    def get_api_user_by_token(self, token: str) -> Optional[ApiUser]:
+        cleaned = token.strip()
+        if not cleaned:
+            return None
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM api_users WHERE token = ?",
+                (cleaned,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_api_user(row)
+
+    def list_webhook_subscriptions(self, user_id: Optional[int] = None) -> List[WebhookSubscription]:
+        query = "SELECT * FROM webhook_subscriptions"
+        params: tuple[Any, ...]
+        if user_id is not None:
+            query += " WHERE user_id = ?"
+            params = (user_id,)
+        else:
+            params = tuple()
+        query += " ORDER BY datetime(created_at) ASC"
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_webhook_subscription(row) for row in rows]
+
+    def save_webhook_subscription(self, user_id: int, registration: WebhookRegistration) -> WebhookSubscription:
+        description_value = (registration.description or "").strip()
+        metadata_value = _serialize_metadata(registration.metadata)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._connection() as conn:
+                user_row = conn.execute(
+                    "SELECT id FROM api_users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+                if user_row is None:
+                    raise KeyError(f"API user {user_id} not found.")
+                existing = conn.execute(
+                    "SELECT * FROM webhook_subscriptions WHERE user_id = ? AND description = ?",
+                    (user_id, description_value),
+                ).fetchone()
+                webhook_url_value = str(registration.webhook_url)
+                secret_value = registration.secret or None
+                if existing is None:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO webhook_subscriptions (
+                            user_id, description, webhook_url, secret, metadata, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            user_id,
+                            description_value,
+                            webhook_url_value,
+                            secret_value,
+                            metadata_value,
+                            now_iso,
+                            now_iso,
+                        ),
+                    )
+                    subscription_id = cursor.lastrowid
+                else:
+                    conn.execute(
+                        """
+                        UPDATE webhook_subscriptions
+                           SET webhook_url = ?,
+                               secret = ?,
+                               metadata = ?,
+                               updated_at = ?
+                         WHERE id = ?
+                        """,
+                        (
+                            webhook_url_value,
+                            secret_value,
+                            metadata_value,
+                            now_iso,
+                            existing["id"],
+                        ),
+                    )
+                    subscription_id = existing["id"]
+                row = conn.execute(
+                    "SELECT * FROM webhook_subscriptions WHERE id = ?",
+                    (subscription_id,),
+                ).fetchone()
+        if row is None:
+            raise RuntimeError("Unable to persist webhook subscription.")
+        return self._row_to_webhook_subscription(row)
+
+    def delete_webhook_subscription(
+        self,
+        subscription_id: int,
+        *,
+        user_id: Optional[int] = None,
+    ) -> None:
+        query = "DELETE FROM webhook_subscriptions WHERE id = ?"
+        params: tuple[Any, ...]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params = (subscription_id, user_id)
+        else:
+            params = (subscription_id,)
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(query, params)
+                if cursor.rowcount == 0:
+                    raise KeyError(f"Webhook subscription {subscription_id} not found.")
+
+    def list_webhook_targets(self) -> List[WebhookTarget]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT ws.*, u.token
+                  FROM webhook_subscriptions AS ws
+                  JOIN api_users AS u ON u.id = ws.user_id
+                """
+            ).fetchall()
+        return [self._row_to_webhook_target(row) for row in rows]
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
         mapping = dict(row)
@@ -319,6 +677,14 @@ class InputHelperStore:
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM helpers ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+        return [self._row_to_helper(row) for row in rows]
+
+    def list_helpers_by_type(self, entity_type: EntityTransportType) -> List[InputHelper]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM helpers WHERE entity_type = ? ORDER BY name COLLATE NOCASE",
+                (entity_type.value,),
             ).fetchall()
         return [self._row_to_helper(row) for row in rows]
 

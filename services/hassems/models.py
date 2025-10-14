@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_validator
 
 
 class SetValueRequest(BaseModel):
@@ -559,6 +559,99 @@ class MQTTConfig(BaseModel):
 class MQTTTestResponse(BaseModel):
     success: bool
     message: str
+
+
+class ApiUserBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Provide a descriptive name for the API user.")
+        return cleaned
+
+
+class ApiUserCreate(ApiUserBase):
+    token: str = Field(..., min_length=8, max_length=255)
+
+    @field_validator("token")
+    @classmethod
+    def strip_token(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("API tokens must contain at least one non-space character.")
+        return cleaned
+
+
+class ApiUserUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    token: Optional[str] = Field(default=None, min_length=8, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def validate_optional_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Provide a descriptive name for the API user.")
+        return cleaned
+
+    @field_validator("token")
+    @classmethod
+    def validate_optional_token(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("API tokens must contain at least one non-space character.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def ensure_updates_present(self) -> "ApiUserUpdate":
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one field to update.")
+        return self
+
+
+class ApiUser(ApiUserBase):
+    id: int
+    token: str
+    is_superuser: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class WebhookRegistration(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=255)
+    webhook_url: AnyHttpUrl
+    secret: Optional[str] = Field(default=None, max_length=255)
+    metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator("description")
+    @classmethod
+    def strip_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("secret")
+    @classmethod
+    def strip_secret(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class WebhookSubscription(WebhookRegistration):
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass
