@@ -21,6 +21,11 @@ from .models import (
     InputHelperRecord,
     InputHelperUpdate,
     InputValue,
+    IntegrationConnectionCreate,
+    IntegrationConnectionDetail,
+    IntegrationConnectionHistoryItem,
+    IntegrationConnectionOwner,
+    IntegrationConnectionSummary,
     MQTTConfig,
     WebhookRegistration,
     WebhookSubscription,
@@ -219,6 +224,24 @@ class InputHelperStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS integration_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_user_id INTEGER NOT NULL,
+                    entry_id TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    helper_count INTEGER NOT NULL DEFAULT 0,
+                    included_helpers TEXT,
+                    ignored_helpers TEXT,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_seen TEXT,
+                    FOREIGN KEY(api_user_id) REFERENCES api_users(id) ON DELETE CASCADE
+                )
+                """
+            )
 
             self._ensure_column(conn, "helpers", "last_measured_at", "TEXT")
             self._ensure_column(conn, "helpers", "component", "TEXT NOT NULL DEFAULT 'sensor'")
@@ -240,6 +263,9 @@ class InputHelperStore:
             self._ensure_column(conn, "history", "measured_at", "TEXT")
             self._ensure_column(conn, "api_users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "webhook_subscriptions", "metadata", "TEXT")
+            self._ensure_column(conn, "integration_connections", "last_seen", "TEXT")
+            self._ensure_column(conn, "integration_connections", "helper_count", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "integration_connections", "metadata", "TEXT")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -288,6 +314,32 @@ class InputHelperStore:
             metadata=_deserialize_metadata(row["metadata"]) if "metadata" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _row_to_integration_connection(
+        row: sqlite3.Row,
+    ) -> IntegrationConnectionDetail:
+        owner_name = row["api_user_name"] if row["api_user_name"] else "Unnamed API user"
+        last_seen_raw = row["last_seen"] if "last_seen" in row.keys() else None
+        last_seen = datetime.fromisoformat(last_seen_raw) if last_seen_raw else None
+        return IntegrationConnectionDetail(
+            id=row["id"],
+            api_user_id=row["api_user_id"],
+            entry_id=row["entry_id"],
+            title=row["title"] or None,
+            helper_count=int(row["helper_count"] or 0),
+            included_helpers=_deserialize_options(row["included_helpers"]),
+            ignored_helpers=_deserialize_options(row["ignored_helpers"]),
+            metadata=_deserialize_metadata(row["metadata"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            last_seen=last_seen,
+            owner=IntegrationConnectionOwner(
+                id=row["api_user_id"],
+                name=owner_name,
+                is_superuser=bool(row["api_user_is_superuser"]),
+            ),
         )
 
     def _migrate_from_json(self) -> None:
@@ -606,6 +658,183 @@ class InputHelperStore:
                 """
             ).fetchall()
         return [self._row_to_webhook_target(row) for row in rows]
+
+    def list_integration_connections(self) -> List[IntegrationConnectionSummary]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT ic.*, au.name AS api_user_name, au.is_superuser AS api_user_is_superuser
+                  FROM integration_connections AS ic
+                  JOIN api_users AS au ON au.id = ic.api_user_id
+                 ORDER BY datetime(ic.updated_at) DESC
+                """
+            ).fetchall()
+        return [self._row_to_integration_connection(row) for row in rows]
+
+    def get_integration_connection(self, entry_id: str) -> Optional[IntegrationConnectionDetail]:
+        cleaned = entry_id.strip()
+        if not cleaned:
+            return None
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT ic.*, au.name AS api_user_name, au.is_superuser AS api_user_is_superuser
+                  FROM integration_connections AS ic
+                  JOIN api_users AS au ON au.id = ic.api_user_id
+                 WHERE ic.entry_id = ?
+                """,
+                (cleaned,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_integration_connection(row)
+
+    def save_integration_connection(
+        self,
+        user: ApiUser,
+        payload: IntegrationConnectionCreate,
+    ) -> IntegrationConnectionDetail:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        last_seen_iso = (
+            payload.last_seen.isoformat()
+            if payload.last_seen is not None
+            else now_iso
+        )
+        included_value = _serialize_options(payload.included_helpers)
+        ignored_value = _serialize_options(payload.ignored_helpers)
+        metadata_value = _serialize_metadata(payload.metadata)
+        helper_count_value = int(payload.helper_count or 0)
+        with self._lock:
+            with self._connection() as conn:
+                existing = conn.execute(
+                    "SELECT id FROM integration_connections WHERE entry_id = ?",
+                    (payload.entry_id,),
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO integration_connections (
+                            api_user_id, entry_id, title, helper_count, included_helpers,
+                            ignored_helpers, metadata, created_at, updated_at, last_seen
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            user.id,
+                            payload.entry_id,
+                            payload.title,
+                            helper_count_value,
+                            included_value,
+                            ignored_value,
+                            metadata_value,
+                            now_iso,
+                            now_iso,
+                            last_seen_iso,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE integration_connections
+                           SET api_user_id = ?,
+                               title = ?,
+                               helper_count = ?,
+                               included_helpers = ?,
+                               ignored_helpers = ?,
+                               metadata = ?,
+                               updated_at = ?,
+                               last_seen = ?
+                         WHERE entry_id = ?
+                        """,
+                        (
+                            user.id,
+                            payload.title,
+                            helper_count_value,
+                            included_value,
+                            ignored_value,
+                            metadata_value,
+                            now_iso,
+                            last_seen_iso,
+                            payload.entry_id,
+                        ),
+                    )
+                row = conn.execute(
+                    """
+                    SELECT ic.*, au.name AS api_user_name, au.is_superuser AS api_user_is_superuser
+                      FROM integration_connections AS ic
+                      JOIN api_users AS au ON au.id = ic.api_user_id
+                     WHERE ic.entry_id = ?
+                    """,
+                    (payload.entry_id,),
+                ).fetchone()
+        if row is None:
+            raise RuntimeError("Unable to persist integration connection.")
+        return self._row_to_integration_connection(row)
+
+    def delete_integration_connection(
+        self,
+        entry_id: str,
+        *,
+        user_id: Optional[int] = None,
+    ) -> None:
+        cleaned = entry_id.strip()
+        if not cleaned:
+            raise ValueError("Provide a valid entry id to delete.")
+        query = "DELETE FROM integration_connections WHERE entry_id = ?"
+        params: tuple[Any, ...]
+        if user_id is not None:
+            query += " AND api_user_id = ?"
+            params = (cleaned, user_id)
+        else:
+            params = (cleaned,)
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(query, params)
+                if cursor.rowcount == 0:
+                    raise KeyError(f"Integration connection {cleaned} not found.")
+
+    def list_integration_connection_history(
+        self,
+        entry_id: str,
+        *,
+        limit: int = 200,
+    ) -> List[IntegrationConnectionHistoryItem]:
+        connection = self.get_integration_connection(entry_id)
+        if connection is None:
+            raise KeyError(f"Integration connection {entry_id} not found.")
+        helper_slugs = connection.included_helpers or []
+        if not helper_slugs:
+            return []
+        placeholders = ",".join(["?"] * len(helper_slugs))
+        query = f"""
+            SELECT h.helper_slug, h.value, h.measured_at, h.created_at, he.name
+              FROM history AS h
+              JOIN helpers AS he ON he.slug = h.helper_slug
+             WHERE h.helper_slug IN ({placeholders})
+             ORDER BY datetime(COALESCE(h.measured_at, h.created_at)) DESC
+             LIMIT ?
+        """
+        params: List[Any] = list(helper_slugs)
+        params.append(limit)
+        with self._connection() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        history: List[IntegrationConnectionHistoryItem] = []
+        for row in rows:
+            recorded_at = datetime.fromisoformat(row["created_at"])
+            measured_source = row["measured_at"] or row["created_at"]
+            try:
+                measured_at = datetime.fromisoformat(measured_source) if measured_source else None
+            except ValueError:
+                measured_at = None
+            history.append(
+                IntegrationConnectionHistoryItem(
+                    helper_slug=row["helper_slug"],
+                    helper_name=row["name"],
+                    value=_deserialize_value(row["value"]),
+                    measured_at=measured_at,
+                    recorded_at=recorded_at,
+                )
+            )
+        return history
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
         mapping = dict(row)

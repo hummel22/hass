@@ -2,15 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Set
 
 from aiohttp import web
 from homeassistant import config_entries
+from homeassistant.components import recorder
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    ATTR_DEVICE_CLASS,
+    ATTR_ENTITY_ID,
+    ATTR_STATE_CLASS,
+    ATTR_UNIT_OF_MEASUREMENT,
+    EVENT_STATE_CHANGED,
+)
+from homeassistant.core import Context, Event, EventOrigin, HomeAssistant, State
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
 from .const import (
@@ -51,6 +61,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self.entry = entry
         self._helpers: Dict[str, Dict[str, Any]] = {}
         self._history: Dict[str, List[Dict[str, Any]]] = {}
+        self._recorded_measurements: Dict[str, OrderedDict[str, None]] = {}
         self._pending_discoveries: Set[str] = set()
         self._included: Set[str] = set(entry.options.get(CONF_INCLUDED_HELPERS, []))
         self._ignored: Set[str] = set(entry.options.get(CONF_IGNORED_HELPERS, []))
@@ -107,6 +118,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         added = [slug for slug in allowed_slugs if slug not in current]
 
         self._history = {slug: self._history.get(slug, []) for slug in allowed_slugs}
+        self._recorded_measurements = {
+            slug: self._recorded_measurements.get(slug, OrderedDict())
+            for slug in allowed_slugs
+        }
 
         if current != updated:
             self.async_set_updated_data(updated)
@@ -136,6 +151,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
 
         data = {slug: mapping[slug] for slug in allowed_slugs}
         self._history = {slug: self._history.get(slug, []) for slug in allowed_slugs}
+        self._recorded_measurements = {
+            slug: self._recorded_measurements.get(slug, OrderedDict())
+            for slug in allowed_slugs
+        }
 
         if added:
             for slug in added:
@@ -161,6 +180,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 self._history[slug] = []
             else:
                 self._history[slug] = list(result)
+            if self._history.get(slug):
+                await self._async_store_measurements(slug, self._history[slug])
 
     def _select_allowed_slugs(self, mapping: Dict[str, Dict[str, Any]]) -> List[str]:
         available = set(mapping.keys())
@@ -185,6 +206,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             except HASSEMSError as exc:
                 raise HomeAssistantError(str(exc)) from exc
             self._history[slug] = list(history)
+            if self._history[slug]:
+                await self._async_store_measurements(slug, self._history[slug])
         return list(self._history.get(slug, []))
 
     async def async_set_helper_value(self, slug: str, value: Any) -> None:
@@ -222,6 +245,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 new_data = dict(self.data)
                 new_data.pop(slug, None)
                 self._history.pop(slug, None)
+                self._recorded_measurements.pop(slug, None)
                 self.async_set_updated_data(new_data)
                 async_dispatcher_send(self.hass, self.signal_remove, slug)
             return
@@ -239,6 +263,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             })
             if len(history) > 50:
                 del history[:-50]
+            if measurement:
+                await self._async_store_measurements(slug, [history[-1]])
 
         allowed_slugs = set(self._select_allowed_slugs(self._helpers))
         if slug not in allowed_slugs:
@@ -277,3 +303,96 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
 
     def helper_history(self, slug: str) -> List[Dict[str, Any]]:
         return list(self._history.get(slug, []))
+
+    async def _async_store_measurements(
+        self, slug: str, measurements: List[Dict[str, Any]]
+    ) -> None:
+        helper = self._helpers.get(slug)
+        if not helper:
+            return
+        entity_id = helper.get("entity_id")
+        if not entity_id:
+            return
+        try:
+            instance = recorder.get_instance(self.hass)
+        except KeyError:
+            return
+        if not instance.is_running:
+            return
+        try:
+            if not recorder.is_entity_recorded(self.hass, entity_id):
+                return
+        except KeyError:
+            return
+
+        recorded = self._recorded_measurements.setdefault(slug, OrderedDict())
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is not None:
+            base_attributes = {
+                key: value
+                for key, value in state_obj.attributes.items()
+                if key != ATTR_HISTORY
+            }
+        else:
+            base_attributes = {}
+            if (unit := helper.get("unit_of_measurement")) is not None:
+                base_attributes[ATTR_UNIT_OF_MEASUREMENT] = unit
+            if (device_class := helper.get("device_class")) is not None:
+                base_attributes[ATTR_DEVICE_CLASS] = device_class
+            if (state_class := helper.get("state_class")) is not None:
+                base_attributes[ATTR_STATE_CLASS] = state_class
+            if (icon := helper.get("icon")) is not None:
+                base_attributes["icon"] = icon
+
+        events: List[Event] = []
+        previous_state: State | None = None
+
+        for item in sorted(
+            measurements, key=lambda entry: entry.get("measured_at") or ""
+        ):
+            measured_at = item.get("measured_at")
+            if not measured_at or measured_at in recorded:
+                continue
+            dt_value = dt_util.parse_datetime(measured_at)
+            if dt_value is None:
+                continue
+            dt_value = dt_util.as_utc(dt_value)
+            state_value = item.get("value")
+            state_str = "" if state_value is None else str(state_value)
+
+            attributes = dict(base_attributes)
+            attributes.pop(ATTR_HISTORY, None)
+            attributes[ATTR_LAST_MEASURED] = measured_at
+
+            context = Context()
+            new_state = State(
+                entity_id,
+                state_str,
+                attributes,
+                last_changed=dt_value,
+                last_updated=dt_value,
+                context=context,
+            )
+            events.append(
+                Event(
+                    EVENT_STATE_CHANGED,
+                    {
+                        ATTR_ENTITY_ID: entity_id,
+                        "old_state": previous_state,
+                        "new_state": new_state,
+                    },
+                    time_fired=dt_value,
+                    context=context,
+                    origin=EventOrigin.remote,
+                )
+            )
+            recorded[measured_at] = None
+            while len(recorded) > 200:
+                recorded.popitem(last=False)
+            previous_state = new_state
+
+        if not events:
+            return
+
+        for event in events:
+            instance._queue.put_nowait(event)

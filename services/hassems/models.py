@@ -654,6 +654,81 @@ class WebhookSubscription(WebhookRegistration):
     updated_at: datetime
 
 
+class IntegrationConnectionOwner(BaseModel):
+    id: int
+    name: str
+    is_superuser: bool = False
+
+
+class IntegrationConnectionBase(BaseModel):
+    entry_id: str = Field(..., min_length=1, max_length=120)
+    title: Optional[str] = Field(default=None, max_length=255)
+    helper_count: int = Field(default=0, ge=0)
+    included_helpers: Optional[List[str]] = None
+    ignored_helpers: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator("entry_id")
+    @classmethod
+    def strip_entry_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Provide a valid config entry id.")
+        return cleaned
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("included_helpers", "ignored_helpers")
+    @classmethod
+    def normalise_helper_list(
+        cls, value: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        if not value:
+            return None
+        cleaned = []
+        seen = set()
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                continue
+            if text in seen:
+                continue
+            seen.add(text)
+            cleaned.append(text)
+        return cleaned or None
+
+
+class IntegrationConnectionCreate(IntegrationConnectionBase):
+    last_seen: Optional[datetime] = None
+
+
+class IntegrationConnectionDetail(IntegrationConnectionBase):
+    id: int
+    api_user_id: int
+    owner: IntegrationConnectionOwner
+    created_at: datetime
+    updated_at: datetime
+    last_seen: Optional[datetime] = None
+
+
+class IntegrationConnectionSummary(IntegrationConnectionDetail):
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class IntegrationConnectionHistoryItem(BaseModel):
+    helper_slug: str
+    helper_name: str
+    value: Any
+    measured_at: Optional[datetime] = None
+    recorded_at: datetime
+
+
 @dataclass
 class InputHelperRecord:
     helper: InputHelper
