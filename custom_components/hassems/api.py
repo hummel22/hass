@@ -27,9 +27,10 @@ class HASSEMSClient:
         return self._base_url
 
     def _headers(self) -> Dict[str, str]:
-        return {
-            "X-HASSEMS-Token": self._token,
-        }
+        headers: Dict[str, str] = {}
+        if self._token:
+            headers["X-HASSEMS-Token"] = self._token
+        return headers
 
     def _url(self, path: str) -> str:
         path = path.lstrip("/")
@@ -105,4 +106,28 @@ class HASSEMSClient:
         await self._request(
             "DELETE",
             f"/integrations/home-assistant/webhooks/{subscription_id}",
+        )
+
+    async def async_generate_token(self) -> str:
+        data = await self._request("POST", "/integrations/home-assistant/tokens")
+        if isinstance(data, dict):
+            token = data.get("token")
+            if isinstance(token, str) and token:
+                return token
+        raise HASSEMSError("Unexpected response when generating token")
+
+    async def async_upsert_connection(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = await self._request(
+            "POST",
+            "/integrations/home-assistant/connections",
+            json=payload,
+        )
+        if isinstance(result, dict):
+            return result
+        raise HASSEMSError("Unexpected response when saving integration connection")
+
+    async def async_delete_connection(self, entry_id: str) -> None:
+        await self._request(
+            "DELETE",
+            f"/integrations/home-assistant/connections/{entry_id}",
         )

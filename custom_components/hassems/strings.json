@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to HASSEMS",
+        "description": "Enter the base URL of your HASSEMS server and an API token. Enable \"Generate token\" and submit to create a new key automatically.",
+        "data": {
+          "base_url": "Base URL",
+          "token": "API token",
+          "generate_token": "Generate token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API token.",
+      "cannot_connect": "Unable to connect to HASSEMS.",
+      "token_generation_failed": "Failed to generate a new API token. Please verify the URL and try again.",
+      "token_generated": "Generated a new API token. Review the populated value before continuing."
+    }
+  }
+}

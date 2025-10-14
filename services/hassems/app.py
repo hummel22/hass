@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,6 +25,10 @@ from .models import (
     InputHelper,
     InputHelperCreate,
     InputHelperUpdate,
+    IntegrationConnectionCreate,
+    IntegrationConnectionDetail,
+    IntegrationConnectionHistoryItem,
+    IntegrationConnectionSummary,
     MQTTConfig,
     MQTTTestResponse,
     SetValueRequest,
@@ -187,6 +192,22 @@ def delete_api_user(user_id: int, store: InputHelperStore = Depends(get_store)) 
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@api_router.post("/integrations/home-assistant/tokens")
+def integration_generate_token(
+    store: InputHelperStore = Depends(get_store),
+) -> Dict[str, Any]:
+    random_token = secrets.token_urlsafe(32)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    name = f"Home Assistant {timestamp}"
+    try:
+        user = store.create_api_user(ApiUserCreate(name=name, token=random_token))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"token": user.token, "user_id": user.id, "name": user.name}
+
+
 @api_router.get("/inputs", response_model=List[InputHelper])
 def list_inputs(store: InputHelperStore = Depends(get_store)) -> List[InputHelper]:
     return store.list_helpers()
@@ -499,6 +520,84 @@ def integration_delete_webhook(
     target_user_id = None if user.is_superuser else user.id
     try:
         store.delete_webhook_subscription(subscription_id, user_id=target_user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@api_router.get(
+    "/integrations/home-assistant/connections",
+    response_model=List[IntegrationConnectionSummary],
+)
+def integration_list_connections(
+    store: InputHelperStore = Depends(get_store),
+) -> List[IntegrationConnectionSummary]:
+    return store.list_integration_connections()
+
+
+@api_router.get(
+    "/integrations/home-assistant/connections/{entry_id}",
+    response_model=IntegrationConnectionDetail,
+)
+def integration_get_connection(
+    entry_id: str,
+    store: InputHelperStore = Depends(get_store),
+) -> IntegrationConnectionDetail:
+    record = store.get_integration_connection(entry_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Integration connection '{entry_id}' not found.",
+        )
+    return record
+
+
+@api_router.get(
+    "/integrations/home-assistant/connections/{entry_id}/history",
+    response_model=List[IntegrationConnectionHistoryItem],
+)
+def integration_get_connection_history(
+    entry_id: str,
+    store: InputHelperStore = Depends(get_store),
+) -> List[IntegrationConnectionHistoryItem]:
+    try:
+        return store.list_integration_connection_history(entry_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@api_router.post(
+    "/integrations/home-assistant/connections",
+    response_model=IntegrationConnectionDetail,
+)
+def integration_upsert_connection(
+    payload: IntegrationConnectionCreate,
+    user: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+) -> IntegrationConnectionDetail:
+    try:
+        return store.save_integration_connection(user, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@api_router.delete(
+    "/integrations/home-assistant/connections/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def integration_delete_connection(
+    entry_id: str,
+    user: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+) -> Response:
+    try:
+        store.delete_integration_connection(
+            entry_id,
+            user_id=None if user.is_superuser else user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

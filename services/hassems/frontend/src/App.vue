@@ -179,6 +179,55 @@
         <p v-else class="card__subtitle">No API users created yet.</p>
       </section>
 
+      <section class="card" id="integrations-card" v-if="activePage === 'settings'">
+        <div class="card__header">
+          <div>
+            <h2>Home Assistant integrations</h2>
+            <p class="card__subtitle">
+              Connected Home Assistant instances using the HASSEMS integration.
+            </p>
+          </div>
+          <div class="card__actions">
+            <button class="btn" type="button" @click="loadIntegrationConnections">Refresh</button>
+          </div>
+        </div>
+
+        <div v-if="integrationConnections.length" class="entity-table-wrapper">
+          <table class="entity-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Entry ID</th>
+                <th scope="col">API user</th>
+                <th scope="col">Helpers</th>
+                <th scope="col">Last seen</th>
+                <th scope="col" class="actions-column">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="connection in integrationConnections" :key="connection.entry_id">
+                <td>{{ connection.title || 'Home Assistant' }}</td>
+                <td><code>{{ connection.entry_id }}</code></td>
+                <td>{{ connection.owner?.name || 'Unknown' }}</td>
+                <td>{{ connection.helper_count }}</td>
+                <td>{{ connection.last_seen ? formatTimestamp(connection.last_seen) : '—' }}</td>
+                <td class="actions-cell">
+                  <div class="button-group">
+                    <button class="btn" type="button" @click.stop="openConnectionDialog(connection, 'history')">
+                      View history
+                    </button>
+                    <button class="btn" type="button" @click.stop="openConnectionDialog(connection, 'config')">
+                      View config
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="card__subtitle">No Home Assistant integrations have connected yet.</p>
+      </section>
+
 
       <section class="card" id="entities-card" v-if="activePage === 'entities'">
         <div class="card__header">
@@ -369,6 +418,129 @@
         <p class="card__subtitle">Select an entity from the table to view configuration and history.</p>
       </section>
     </main>
+
+    <dialog
+      ref="connectionDialog"
+      class="modal"
+      @cancel.prevent="closeConnectionDialog"
+      @close="onConnectionDialogClose"
+    >
+      <div class="modal__container">
+        <div class="modal__header">
+          <h3>
+            {{
+              connectionDialogMode === 'history'
+                ? 'Integration history'
+                : 'Integration configuration'
+            }}
+          </h3>
+          <button
+            type="button"
+            class="modal__close"
+            @click="closeConnectionDialog"
+            aria-label="Close integration dialog"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <p v-if="connectionDetailLoading" class="modal__subtitle">Loading integration details…</p>
+          <template v-else-if="connectionDetail">
+            <template v-if="connectionDialogMode === 'history'">
+              <p class="modal__subtitle">
+                Recent helper values received from
+                {{ connectionDetail.title || connectionDetail.entry_id }}.
+              </p>
+              <p v-if="connectionHistoryLoading" class="modal__subtitle">Loading history…</p>
+              <ul
+                v-else-if="connectionHistory.length"
+                class="history-list"
+              >
+                <li
+                  v-for="item in connectionHistory"
+                  :key="`${item.helper_slug}-${item.recorded_at}`"
+                >
+                  <span>
+                    {{ item.helper_name }} ·
+                    {{ formatTimestamp(item.measured_at || item.recorded_at) }}
+                  </span>
+                  <span>{{ item.value ?? '—' }}</span>
+                </li>
+              </ul>
+              <p v-else class="modal__subtitle">No history available for this integration.</p>
+            </template>
+            <template v-else>
+              <p class="modal__subtitle">
+                Configuration details for
+                {{ connectionDetail.title || connectionDetail.entry_id }}.
+              </p>
+              <dl class="detail-list detail-list--modal">
+                <div class="detail-list__item">
+                  <dt>Entry ID</dt>
+                  <dd class="detail-list__value detail-list__value--wrap">
+                    <code>{{ connectionDetail.entry_id }}</code>
+                  </dd>
+                </div>
+                <div class="detail-list__item">
+                  <dt>API user</dt>
+                  <dd class="detail-list__value">
+                    {{ connectionDetail.owner?.name || 'Unknown' }}
+                  </dd>
+                </div>
+                <div class="detail-list__item">
+                  <dt>Included helpers</dt>
+                  <dd class="detail-list__value detail-list__value--wrap">
+                    {{ formattedIncludedHelpers }}
+                  </dd>
+                </div>
+                <div class="detail-list__item">
+                  <dt>Ignored helpers</dt>
+                  <dd class="detail-list__value detail-list__value--wrap">
+                    {{ formattedIgnoredHelpers }}
+                  </dd>
+                </div>
+                <div class="detail-list__item">
+                  <dt>Helpers synced</dt>
+                  <dd class="detail-list__value">{{ connectionDetail.helper_count }}</dd>
+                </div>
+                <div class="detail-list__item">
+                  <dt>Last seen</dt>
+                  <dd class="detail-list__value">
+                    {{ connectionDetail.last_seen ? formatTimestamp(connectionDetail.last_seen) : '—' }}
+                  </dd>
+                </div>
+                <template v-for="item in connectionMetadataDetails" :key="item.label">
+                  <div class="detail-list__item">
+                    <dt>{{ item.label }}</dt>
+                    <dd class="detail-list__value detail-list__value--wrap">
+                      {{ item.value }}
+                    </dd>
+                  </div>
+                </template>
+              </dl>
+            </template>
+          </template>
+          <p v-else class="modal__subtitle">
+            {{
+              connectionDialogMode === 'history'
+                ? 'Select an integration to load history.'
+                : 'Select an integration to view configuration.'
+            }}
+          </p>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn" @click="closeConnectionDialog">Close</button>
+          <button
+            v-if="connectionDetail"
+            class="btn"
+            type="button"
+            @click="toggleConnectionDialogMode"
+          >
+            {{ connectionDialogMode === 'history' ? 'View config' : 'View history' }}
+          </button>
+        </div>
+      </div>
+    </dialog>
 
     <dialog
       ref="createDialog"
@@ -1473,6 +1645,15 @@ const userForm = reactive({
   is_superuser: false,
 });
 
+const integrationConnections = ref([]);
+const connectionDialog = ref(null);
+const connectionDetail = ref(null);
+const connectionDialogMode = ref('history');
+const connectionDetailLoading = ref(false);
+const connectionHistory = ref([]);
+const connectionHistoryLoading = ref(false);
+const selectedConnectionEntryId = ref(null);
+
 const helpers = ref([]);
 const selectedSlug = ref(null);
 const historyRecords = ref([]);
@@ -1483,6 +1664,44 @@ const chartInstance = ref(null);
 const historyDialog = ref(null);
 const historyDialogVisible = ref(false);
 const historyEditorRows = ref([]);
+
+const formattedIncludedHelpers = computed(() =>
+  formatHelperList(connectionDetail.value?.included_helpers),
+);
+const formattedIgnoredHelpers = computed(() =>
+  formatHelperList(connectionDetail.value?.ignored_helpers),
+);
+const connectionMetadataDetails = computed(() => {
+  const detail = connectionDetail.value;
+  const metadata = detail?.metadata;
+  if (!metadata || typeof metadata !== 'object') {
+    return [];
+  }
+  const entries = [];
+  if (metadata.base_url) {
+    entries.push({ label: 'HASSEMS URL', value: metadata.base_url });
+  }
+  if (metadata.webhook_id) {
+    entries.push({ label: 'Webhook ID', value: metadata.webhook_id });
+  }
+  if (metadata.subscription_id) {
+    entries.push({ label: 'Subscription ID', value: metadata.subscription_id });
+  }
+  const haMeta = metadata.home_assistant || {};
+  if (haMeta.name) {
+    entries.push({ label: 'Home Assistant name', value: haMeta.name });
+  }
+  if (haMeta.version) {
+    entries.push({ label: 'Home Assistant version', value: haMeta.version });
+  }
+  if (haMeta.unit_system) {
+    entries.push({ label: 'Unit system', value: haMeta.unit_system });
+  }
+  if (haMeta.time_zone) {
+    entries.push({ label: 'Time zone', value: haMeta.time_zone });
+  }
+  return entries;
+});
 
 const discoveryPreview = ref(null);
 const discoveryDialog = ref(null);
@@ -1775,6 +1994,12 @@ watch(activePage, (page) => {
     closeEditDialog();
     closeHistoryDialog();
   }
+  if (page === 'settings') {
+    loadIntegrationConnections();
+  }
+  if (page !== 'settings') {
+    closeConnectionDialog();
+  }
 });
 
 watch(
@@ -1914,6 +2139,18 @@ async function loadApiUsers() {
   }
 }
 
+async function loadIntegrationConnections() {
+  try {
+    const data = await requestJson('/integrations/home-assistant/connections');
+    integrationConnections.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    showToast(
+      `Failed to load integrations: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
+  }
+}
+
 function resetUserForm() {
   userForm.id = null;
   userForm.name = '';
@@ -2009,6 +2246,105 @@ async function deleteUser(user) {
     await loadApiUsers();
   } catch (error) {
     showToast(`Failed to delete API user: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
+}
+
+async function fetchConnectionDetail(entryId, { fetchHistory = false, force = false } = {}) {
+  const needsDetail =
+    force ||
+    !connectionDetail.value ||
+    connectionDetail.value.entry_id !== entryId;
+  if (needsDetail) {
+    connectionDetailLoading.value = true;
+    try {
+      const detail = await requestJson(`/integrations/home-assistant/connections/${entryId}`);
+      connectionDetail.value = detail || null;
+      if (detail && typeof detail === 'object') {
+        integrationConnections.value = integrationConnections.value.map((item) =>
+          item.entry_id === detail.entry_id ? { ...item, ...detail } : item,
+        );
+      }
+    } catch (error) {
+      connectionDetail.value = null;
+      throw error;
+    } finally {
+      connectionDetailLoading.value = false;
+    }
+  }
+  if (fetchHistory) {
+    connectionHistoryLoading.value = true;
+    try {
+      const history = await requestJson(
+        `/integrations/home-assistant/connections/${entryId}/history`,
+      );
+      connectionHistory.value = Array.isArray(history) ? history : [];
+    } catch (error) {
+      connectionHistory.value = [];
+      throw error;
+    } finally {
+      connectionHistoryLoading.value = false;
+    }
+  } else {
+    connectionHistory.value = [];
+  }
+}
+
+async function openConnectionDialog(connection, mode = 'history') {
+  const dialog = connectionDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  const entryId = connection?.entry_id;
+  if (!entryId) {
+    showToast('Unable to open integration details. Missing entry id.', 'error');
+    return;
+  }
+  selectedConnectionEntryId.value = entryId;
+  connectionDialogMode.value = mode;
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  try {
+    await fetchConnectionDetail(entryId, { fetchHistory: mode === 'history' });
+  } catch (error) {
+    showToast(
+      `Failed to load integration details: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
+    closeConnectionDialog();
+  }
+}
+
+function closeConnectionDialog() {
+  const dialog = connectionDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+}
+
+function onConnectionDialogClose() {
+  connectionDetail.value = null;
+  connectionHistory.value = [];
+  selectedConnectionEntryId.value = null;
+  connectionDialogMode.value = 'history';
+  connectionDetailLoading.value = false;
+  connectionHistoryLoading.value = false;
+}
+
+async function toggleConnectionDialogMode() {
+  const entryId = selectedConnectionEntryId.value;
+  if (!entryId) {
+    return;
+  }
+  const nextMode = connectionDialogMode.value === 'history' ? 'config' : 'history';
+  connectionDialogMode.value = nextMode;
+  try {
+    await fetchConnectionDetail(entryId, { fetchHistory: nextMode === 'history', force: false });
+  } catch (error) {
+    showToast(
+      `Failed to update integration view: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
   }
 }
 
@@ -2860,22 +3196,27 @@ function renderHistory(helper, history) {
     historyList.value = [];
     return;
   }
-  const labels = sorted.map((item) => formatTimestamp(item.measured_at));
+  const labels = sorted.map((item) =>
+    formatHistoryDate(item.measured_at || item.recorded_at),
+  );
   const numericValues = sorted.map((item) => normalizeHistoryValue(helper.type, item.value));
   const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
   if (allNumeric && historyCanvas.value) {
     historyMode.value = 'chart';
-    const dataset = numericValues.map((value) => Number(value));
-  const yScaleOptions = helper.type === 'input_boolean'
-    ? {
-        ticks: {
-          callback: (value) => (value === 1 ? 'On' : 'Off'),
-          stepSize: 1,
-        },
-        suggestedMin: 0,
-        suggestedMax: 1,
-      }
-    : {};
+    const dataset = numericValues.map((value, index) => ({
+      y: Number(value),
+      timestamp: sorted[index]?.measured_at || sorted[index]?.recorded_at,
+    }));
+    const yScaleOptions = helper.type === 'input_boolean'
+      ? {
+          ticks: {
+            callback: (value) => (value === 1 ? 'On' : 'Off'),
+            stepSize: 1,
+          },
+          suggestedMin: 0,
+          suggestedMax: 1,
+        }
+      : {};
     chartInstance.value = new Chart(historyCanvas.value, {
       type: 'line',
       data: {
@@ -2893,6 +3234,9 @@ function renderHistory(helper, history) {
       },
       options: {
         responsive: true,
+        parsing: {
+          yAxisKey: 'y',
+        },
         scales: {
           y: {
             beginAtZero: helper.type !== 'input_number',
@@ -2901,6 +3245,17 @@ function renderHistory(helper, history) {
         },
         plugins: {
           legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const entry = items?.[0]?.raw;
+                if (entry?.timestamp) {
+                  return formatTimestamp(entry.timestamp);
+                }
+                return items?.[0]?.label ?? '';
+              },
+            },
+          },
         },
       },
     });
@@ -2908,7 +3263,7 @@ function renderHistory(helper, history) {
   }
   historyMode.value = 'list';
   historyList.value = sorted.map((item) => ({
-    measured_at: formatTimestamp(item.measured_at),
+    measured_at: formatTimestamp(item.measured_at || item.recorded_at),
     value: String(item.value ?? '—'),
   }));
 }
@@ -2996,6 +3351,28 @@ function formatTimestamp(value) {
   }
 }
 
+function formatHistoryDate(value) {
+  try {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    const month = date.toLocaleString('en-US', { month: 'short' });
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${month} ${day} ${year}`;
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function formatHelperList(list) {
+  if (!Array.isArray(list) || list.length === 0) {
+    return 'None';
+  }
+  return list.join(', ');
+}
+
 function setMeasuredInputsToNow(referenceDate = new Date()) {
   const pad = (input) => String(input).padStart(2, '0');
   const year = referenceDate.getFullYear();
@@ -3080,6 +3457,7 @@ onMounted(async () => {
   await loadMqttConfig();
   await loadHelpers();
   await loadApiUsers();
+  await loadIntegrationConnections();
 });
 
 onBeforeUnmount(() => {
