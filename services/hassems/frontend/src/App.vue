@@ -1417,6 +1417,16 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
+import 'chartjs-adapter-luxon';
+
+function debugLog(message, payload = undefined) {
+  const prefix = '[HASSEMS dashboard]';
+  if (payload !== undefined) {
+    console.debug(prefix, message, payload);
+  } else {
+    console.debug(prefix, message);
+  }
+}
 
 const helperTypeMap = {
   input_text: 'Input text',
@@ -1971,6 +1981,10 @@ watch(discoveryPreview, (preview) => {
 });
 
 watch(selectedHelper, async (helper, previous) => {
+  debugLog('selectedHelper changed', {
+    previous: previous?.slug ?? null,
+    current: helper?.slug ?? null,
+  });
   closeHistoryDialog();
   if (helper) {
     populateUpdateForm(helper);
@@ -2005,6 +2019,10 @@ watch(activePage, (page) => {
 watch(
   [historyRecords, selectedHelper],
   ([records, helper]) => {
+    debugLog('History records or helper changed', {
+      helper: helper?.slug ?? null,
+      recordCount: records?.length ?? 0,
+    });
     if (!helper) {
       destroyChart();
       historyMode.value = 'empty';
@@ -2019,6 +2037,7 @@ watch(
 );
 
 async function loadMqttConfig() {
+  debugLog('Loading MQTT config');
   try {
     const data = await requestJson('/config/mqtt');
     if (!data) {
@@ -2035,6 +2054,7 @@ async function loadMqttConfig() {
       return;
     }
     mqttConfig.value = data;
+    debugLog('Loaded MQTT config', data);
     Object.assign(mqttForm, {
       host: data.host || '',
       port: data.port ?? 1883,
@@ -2103,10 +2123,12 @@ async function testMqttConfig() {
 async function loadHelpers() {
   try {
     const data = await requestJson('/inputs');
+    debugLog('Loaded helpers response', data);
     helpers.value = Array.isArray(data) ? data : [];
     if (selectedSlug.value) {
       const exists = helpers.value.some((helper) => helper.slug === selectedSlug.value);
       if (!exists) {
+        debugLog('Previously selected helper no longer exists, clearing selection', selectedSlug.value);
         selectedSlug.value = null;
       }
     }
@@ -2119,6 +2141,7 @@ async function loadApiUsers() {
   try {
     const data = await requestJson('/users');
     const items = Array.isArray(data) ? data : [];
+    debugLog('Loaded API users', items);
     apiUsers.value = items
       .map((item) => ({
         ...item,
@@ -2138,6 +2161,7 @@ async function loadApiUsers() {
 async function loadIntegrationConnections() {
   try {
     const data = await requestJson('/integrations/home-assistant/connections');
+    debugLog('Loaded integration connections', data);
     integrationConnections.value = Array.isArray(data) ? data : [];
   } catch (error) {
     showToast(
@@ -2345,6 +2369,7 @@ async function toggleConnectionDialogMode() {
 }
 
 function selectHelper(slug) {
+  debugLog('Selecting helper', { slug });
   selectedSlug.value = slug;
 }
 
@@ -3021,10 +3046,12 @@ async function submitValue() {
       payload.measured_at = new Date().toISOString();
       setMeasuredInputsToNow();
     }
+    debugLog('Submitting value payload', { helper: helper.slug, payload });
     const updated = await requestJson(`/inputs/${helper.slug}/set`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    debugLog('Value submission response', { helper: helper.slug, updated });
     const successMessage = helper.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
     showToast(successMessage, 'success');
     helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
@@ -3107,9 +3134,11 @@ function syncHistoryEditorRows() {
 }
 
 async function loadHistory(slug) {
+  debugLog('Loading history for helper', { slug });
   try {
     const history = await requestJson(`/inputs/${slug}/history`);
     const records = Array.isArray(history) ? history : [];
+    debugLog('History response', { slug, recordsCount: records.length, records });
     historyRecords.value = sortHistoryRecords(records);
     syncHistoryEditorRows();
   } catch (error) {
@@ -3187,26 +3216,58 @@ async function deleteHistoryRow(row) {
 function renderHistory(helper, history) {
   destroyChart();
   const sorted = sortHistoryRecords(history);
+  debugLog('Rendering history', {
+    helper: helper.slug,
+    entries: sorted.length,
+    rawHistory: history,
+  });
   if (!sorted.length) {
     historyMode.value = 'empty';
     historyList.value = [];
+    debugLog('No history entries to render', { helper: helper.slug });
     return;
   }
-  const labels = sorted.map((item) =>
-    formatHistoryDate(item.measured_at || item.recorded_at),
-  );
-  const numericValues = sorted.map((item) => normalizeHistoryValue(helper.type, item.value));
-  const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
-  if (allNumeric) {
+  const datasetPoints = [];
+  const skippedEntries = [];
+  for (const item of sorted) {
+    const timestampSource = item.measured_at || item.recorded_at;
+    const timestampDate = timestampSource ? new Date(timestampSource) : null;
+    const timestampValid = timestampDate instanceof Date && !Number.isNaN(timestampDate?.getTime?.());
+    const normalizedValue = normalizeHistoryValue(helper.type, item.value);
+    const numericValue = normalizedValue === null ? null : Number(normalizedValue);
+    if (!timestampValid || numericValue === null || Number.isNaN(numericValue)) {
+      skippedEntries.push({
+        timestamp: timestampSource ?? null,
+        value: item.value,
+        normalizedValue,
+        timestampValid,
+      });
+      continue;
+    }
+    datasetPoints.push({ x: timestampDate, y: numericValue });
+  }
+  debugLog('Prepared history dataset', {
+    helper: helper.slug,
+    points: datasetPoints.length,
+    skippedEntries: skippedEntries.length,
+  });
+  if (skippedEntries.length) {
+    debugLog('Skipped history entries that could not be charted', {
+      helper: helper.slug,
+      skippedEntries,
+    });
+  }
+  if (datasetPoints.length) {
     const canvasEl = historyCanvas.value;
     if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
       const context = canvasEl.getContext('2d');
       if (context) {
         historyMode.value = 'chart';
-        const dataset = numericValues.map((value, index) => ({
-          y: Number(value),
-          timestamp: sorted[index]?.measured_at || sorted[index]?.recorded_at,
-        }));
+        historyList.value = [];
+        debugLog('Rendering chart dataset', {
+          helper: helper.slug,
+          datasetPoints,
+        });
         const yScaleOptions = helper.type === 'input_boolean'
           ? {
               ticks: {
@@ -3217,52 +3278,82 @@ function renderHistory(helper, history) {
               suggestedMax: 1,
             }
           : {};
-        chartInstance.value = new Chart(canvasEl, {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [
-              {
-                label: helper.name,
-                data: dataset,
-                fill: false,
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                tension: 0.25,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            parsing: {
-              yAxisKey: 'y',
+        try {
+          chartInstance.value = new Chart(canvasEl, {
+            type: 'line',
+            data: {
+              datasets: [
+                {
+                  label: helper.name,
+                  data: datasetPoints,
+                  fill: false,
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                  tension: 0.25,
+                },
+              ],
             },
-            scales: {
-              y: {
-                beginAtZero: helper.type !== 'input_number',
-                ...yScaleOptions,
+            options: {
+              parsing: false,
+              responsive: true,
+              scales: {
+                x: {
+                  type: 'time',
+                  time: {
+                    tooltipFormat: 'yyyy-LL-dd HH:mm:ss',
+                    displayFormats: {
+                      minute: 'HH:mm',
+                      hour: 'HH:mm',
+                      day: 'MMM d',
+                    },
+                  },
+                  ticks: {
+                    source: 'auto',
+                    autoSkip: true,
+                    maxRotation: 0,
+                  },
+                },
+                y: {
+                  beginAtZero: helper.type !== 'input_number',
+                  ...yScaleOptions,
+                },
               },
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  title: (items) => {
-                    const entry = items?.[0]?.raw;
-                    if (entry?.timestamp) {
-                      return formatTimestamp(entry.timestamp);
-                    }
-                    return items?.[0]?.label ?? '';
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    title: (items) => {
+                      const timestamp = items?.[0]?.parsed?.x ?? null;
+                      return timestamp ? formatTimestamp(timestamp) : '';
+                    },
+                    label: (item) => {
+                      const value = item?.parsed?.y;
+                      if (value === undefined || value === null) {
+                        return '';
+                      }
+                      if (helper.type === 'input_boolean') {
+                        return value === 1 ? 'On' : 'Off';
+                      }
+                      const formatted = typeof value === 'number' ? value.toLocaleString() : String(value);
+                      const unit = helper.unit_of_measurement || '';
+                      return unit ? `${formatted} ${unit}` : formatted;
+                    },
                   },
                 },
               },
             },
-          },
-        });
-        return;
+          });
+          debugLog('Chart rendered successfully', { helper: helper.slug });
+          return;
+        } catch (error) {
+          console.error('Failed to render history chart', error, { helper, datasetPoints });
+        }
+      } else {
+        debugLog('Canvas context unavailable, cannot render chart', { helper: helper.slug });
       }
     }
   }
+  debugLog('Falling back to history list view', { helper: helper.slug });
   historyMode.value = 'list';
   historyList.value = sorted.map((item) => ({
     measured_at: formatTimestamp(item.measured_at || item.recorded_at),
@@ -3272,6 +3363,7 @@ function renderHistory(helper, history) {
 
 function destroyChart() {
   if (!chartInstance.value) {
+    debugLog('destroyChart called with no active chart');
     return;
   }
   try {
@@ -3280,6 +3372,7 @@ function destroyChart() {
       chart.stop();
     }
     chart.destroy();
+    debugLog('Destroyed existing chart instance');
   } catch (error) {
     console.warn('Failed to destroy chart instance', error);
   } finally {
@@ -3363,21 +3456,6 @@ function formatTimestamp(value) {
   }
 }
 
-function formatHistoryDate(value) {
-  try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return String(value);
-    }
-    const month = date.toLocaleString('en-US', { month: 'short' });
-    const day = String(date.getDate()).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${month} ${day} ${year}`;
-  } catch (error) {
-    return String(value);
-  }
-}
-
 function formatHelperList(list) {
   if (!Array.isArray(list) || list.length === 0) {
     return 'None';
@@ -3398,11 +3476,13 @@ function setMeasuredInputsToNow(referenceDate = new Date()) {
 
 async function requestJson(url, options = {}) {
   const fullUrl = url.startsWith('/api') ? url : `/api${url}`;
+  debugLog('HTTP request', { url: fullUrl, options });
   const response = await fetch(fullUrl, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   });
   if (response.status === 204) {
+    debugLog('HTTP 204 response', { url: fullUrl });
     return null;
   }
   const contentType = response.headers.get('content-type') || '';
@@ -3412,6 +3492,7 @@ async function requestJson(url, options = {}) {
     if (isJson) {
       try {
         const data = await response.json();
+        debugLog('HTTP error payload', { url: fullUrl, status: response.status, data });
         message = data?.detail || data?.message || message;
       } catch (error) {
         // ignore JSON parsing errors
@@ -3420,9 +3501,12 @@ async function requestJson(url, options = {}) {
     throw new Error(message);
   }
   if (!isJson) {
+    debugLog('HTTP non-JSON response ignored', { url: fullUrl, status: response.status });
     return null;
   }
-  return response.json();
+  const data = await response.json();
+  debugLog('HTTP response', { url: fullUrl, status: response.status, data });
+  return data;
 }
 
 function showToast(message, type = 'info') {
@@ -3465,6 +3549,7 @@ function buildAvailabilityTopic(nodeId, deviceId, entityName) {
 }
 
 onMounted(async () => {
+  debugLog('App mounted - initializing data loads');
   resetCreateForm();
   await loadMqttConfig();
   await loadHelpers();
@@ -3473,6 +3558,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  debugLog('App unmounting - cleaning up timers and charts');
   if (toastTimer) {
     clearTimeout(toastTimer);
   }
