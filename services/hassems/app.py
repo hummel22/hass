@@ -121,11 +121,11 @@ def healthcheck() -> dict:
     return {"status": "ok"}
 
 
-@api_router.get("/config/mqtt", response_model=MQTTConfig)
-def read_mqtt_config(store: InputHelperStore = Depends(get_store)) -> MQTTConfig:
+@api_router.get("/config/mqtt", response_model=Optional[MQTTConfig])
+def read_mqtt_config(store: InputHelperStore = Depends(get_store)) -> Optional[MQTTConfig]:
     config = store.get_mqtt_config()
     if config is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MQTT configuration not found.")
+        return None
     return config
 @api_router.put("/config/mqtt", response_model=MQTTConfig)
 def update_mqtt_config(payload: MQTTConfig, store: InputHelperStore = Depends(get_store)) -> MQTTConfig:

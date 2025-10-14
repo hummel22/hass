@@ -2020,8 +2020,8 @@ watch(
 
 async function loadMqttConfig() {
   try {
-    const response = await fetch('/api/config/mqtt');
-    if (response.status === 404) {
+    const data = await requestJson('/config/mqtt');
+    if (!data) {
       Object.assign(mqttForm, {
         host: '',
         port: 1883,
@@ -2034,10 +2034,6 @@ async function loadMqttConfig() {
       mqttConfig.value = null;
       return;
     }
-    if (!response.ok) {
-      throw new Error(response.statusText);
-    }
-    const data = await response.json();
     mqttConfig.value = data;
     Object.assign(mqttForm, {
       host: data.host || '',
@@ -3201,65 +3197,71 @@ function renderHistory(helper, history) {
   );
   const numericValues = sorted.map((item) => normalizeHistoryValue(helper.type, item.value));
   const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
-  if (allNumeric && historyCanvas.value) {
-    historyMode.value = 'chart';
-    const dataset = numericValues.map((value, index) => ({
-      y: Number(value),
-      timestamp: sorted[index]?.measured_at || sorted[index]?.recorded_at,
-    }));
-    const yScaleOptions = helper.type === 'input_boolean'
-      ? {
-          ticks: {
-            callback: (value) => (value === 1 ? 'On' : 'Off'),
-            stepSize: 1,
+  if (allNumeric) {
+    const canvasEl = historyCanvas.value;
+    if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
+      const context = canvasEl.getContext('2d');
+      if (context) {
+        historyMode.value = 'chart';
+        const dataset = numericValues.map((value, index) => ({
+          y: Number(value),
+          timestamp: sorted[index]?.measured_at || sorted[index]?.recorded_at,
+        }));
+        const yScaleOptions = helper.type === 'input_boolean'
+          ? {
+              ticks: {
+                callback: (value) => (value === 1 ? 'On' : 'Off'),
+                stepSize: 1,
+              },
+              suggestedMin: 0,
+              suggestedMax: 1,
+            }
+          : {};
+        chartInstance.value = new Chart(context, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: helper.name,
+                data: dataset,
+                fill: false,
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                tension: 0.25,
+              },
+            ],
           },
-          suggestedMin: 0,
-          suggestedMax: 1,
-        }
-      : {};
-    chartInstance.value = new Chart(historyCanvas.value, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          {
-            label: helper.name,
-            data: dataset,
-            fill: false,
-            borderColor: '#2563eb',
-            backgroundColor: 'rgba(37, 99, 235, 0.15)',
-            tension: 0.25,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        parsing: {
-          yAxisKey: 'y',
-        },
-        scales: {
-          y: {
-            beginAtZero: helper.type !== 'input_number',
-            ...yScaleOptions,
-          },
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                const entry = items?.[0]?.raw;
-                if (entry?.timestamp) {
-                  return formatTimestamp(entry.timestamp);
-                }
-                return items?.[0]?.label ?? '';
+          options: {
+            responsive: true,
+            parsing: {
+              yAxisKey: 'y',
+            },
+            scales: {
+              y: {
+                beginAtZero: helper.type !== 'input_number',
+                ...yScaleOptions,
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: (items) => {
+                    const entry = items?.[0]?.raw;
+                    if (entry?.timestamp) {
+                      return formatTimestamp(entry.timestamp);
+                    }
+                    return items?.[0]?.label ?? '';
+                  },
+                },
               },
             },
           },
-        },
-      },
-    });
-    return;
+        });
+        return;
+      }
+    }
   }
   historyMode.value = 'list';
   historyList.value = sorted.map((item) => ({
@@ -3269,8 +3271,14 @@ function renderHistory(helper, history) {
 }
 
 function destroyChart() {
-  if (chartInstance.value) {
+  if (!chartInstance.value) {
+    return;
+  }
+  try {
     chartInstance.value.destroy();
+  } catch (error) {
+    console.warn('Failed to destroy chart instance', error);
+  } finally {
     chartInstance.value = null;
   }
 }

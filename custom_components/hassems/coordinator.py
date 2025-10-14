@@ -382,9 +382,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 },
                 context=context,
                 origin=EventOrigin.remote,
+                time_fired=dt_value,
             )
-            # Preserve the measurement timestamp on the event for the recorder.
-            event._time_fired = dt_value
             events.append(event)
             recorded[measured_at] = None
             while len(recorded) > 200:
