@@ -3217,7 +3217,7 @@ function renderHistory(helper, history) {
               suggestedMax: 1,
             }
           : {};
-        chartInstance.value = new Chart(context, {
+        chartInstance.value = new Chart(canvasEl, {
           type: 'line',
           data: {
             labels,
