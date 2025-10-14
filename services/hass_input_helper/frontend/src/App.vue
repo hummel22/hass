@@ -7,13 +7,25 @@
         <span class="navbar__subtitle">Home Assistant Entity Management System</span>
       </div>
       <nav class="navbar__links">
-        <a href="#mqtt-card">MQTT</a>
-        <a href="#entities-card">Entities</a>
+        <button
+          type="button"
+          :class="{ active: activePage === 'entities' }"
+          @click="activePage = 'entities'"
+        >
+          Entities
+        </button>
+        <button
+          type="button"
+          :class="{ active: activePage === 'settings' }"
+          @click="activePage = 'settings'"
+        >
+          Settings
+        </button>
       </nav>
     </header>
 
     <main class="layout">
-      <section class="card" id="mqtt-card">
+      <section class="card" id="mqtt-card" v-if="activePage === 'settings'">
         <div class="card__header">
           <div>
             <h2>MQTT Broker</h2>
@@ -124,402 +136,61 @@
       </section>
 
 
-      <section class="card" id="entities-card">
+      <section class="card" id="entities-card" v-if="activePage === 'entities'">
         <div class="card__header">
-          <h2>Entities</h2>
-          <button class="btn" type="button" @click="loadHelpers">Refresh</button>
+          <div>
+            <h2>Entities</h2>
+            <p class="card__subtitle">
+              Manage helper entities stored in HASSEMS and published to Home Assistant.
+            </p>
+          </div>
+          <div class="card__actions">
+            <button class="btn" type="button" @click="loadHelpers">Refresh</button>
+            <button class="btn primary" type="button" @click="openCreateDialog">New entity</button>
+          </div>
         </div>
 
-        <div class="entity-list">
-          <p v-if="!helpers.length" class="card__subtitle">No entities created yet.</p>
-          <button
-            v-for="helper in helpers"
-            :key="helper.slug"
-            type="button"
-            class="entity-item"
-            :class="{ active: helper.slug === selectedSlug }"
-            @click="selectHelper(helper.slug)"
-          >
-            <span class="entity-item__title">{{ helper.name }}</span>
-            <small>{{ helperMeta(helper) }}</small>
-          </button>
+        <div v-if="helpers.length" class="entity-table-wrapper">
+          <table class="entity-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Entity ID</th>
+                <th scope="col">Type</th>
+                <th scope="col">Last value</th>
+                <th scope="col">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="helper in helpers"
+                :key="helper.slug"
+                :class="{ active: helper.slug === selectedSlug }"
+                @click="selectHelper(helper.slug)"
+                @keydown.enter.prevent="selectHelper(helper.slug)"
+                @keydown.space.prevent="selectHelper(helper.slug)"
+                role="button"
+                tabindex="0"
+              >
+                <td>
+                  <div class="entity-name">
+                    <span class="entity-name__primary">{{ helper.name }}</span>
+                    <span v-if="helper.device_name" class="entity-name__secondary">{{ helper.device_name }}</span>
+                  </div>
+                </td>
+                <td><code>{{ helper.entity_id }}</code></td>
+                <td>{{ helperTypeMap[helper.type] || helper.type }}</td>
+                <td>{{ helper.last_value ?? '—' }}</td>
+                <td>{{ helper.updated_at ? formatTimestamp(helper.updated_at) : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-
-        <div class="divider"></div>
-
-        <h3>Create new entity</h3>
-        <form id="create-helper-form" @submit.prevent="createHelper">
-          <div class="form-grid form-grid--base">
-            <label class="form-field">
-              <span class="label-text">
-                Device name
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Name shown for the parent device grouping in Home Assistant's Devices tab."
-                >?
-                </button>
-              </span>
-              <input v-model="createForm.device_name" type="text" required placeholder="Child Metrics" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity name
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Friendly label shown in Home Assistant once the entity is discovered."
-                >?
-                </button>
-              </span>
-              <input v-model="createForm.name" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Description
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Internal notes about the entity's purpose. Stored for reference only."
-                >?
-                </button>
-              </span>
-              <textarea v-model="createForm.description" rows="2"></textarea>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Type
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Select the Home Assistant helper domain this entity mirrors (input_text, input_number, etc.)."
-                >?
-                </button>
-              </span>
-              <select v-model="createForm.type">
-                <option value="input_text">Input text</option>
-                <option value="input_number">Input number</option>
-                <option value="input_boolean">Input boolean</option>
-                <option value="input_select">Input select</option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device class
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Maps the measurement to a Home Assistant concept (distance, temperature, humidity, etc.)."
-                >?
-                </button>
-              </span>
-              <select v-model="createForm.device_class">
-                <option v-for="option in deviceClassOptions" :key="`create-device-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Unit of measurement
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Unit string shown in Home Assistant. The options follow device class guidelines."
-                >?
-                </button>
-              </span>
-              <select v-model="createForm.unit_of_measurement">
-                <option v-for="option in unitOptions" :key="`create-unit-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Icon
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Select an icon from the Material Design Icons set to represent the entity in Home Assistant."
-                >?
-                </button>
-              </span>
-              <select v-model="createForm.icon">
-                <option v-for="option in iconOptions" :key="`create-icon-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity ID
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Automatically generated from the device and entity names. Update if you already created a matching helper in Home Assistant."
-                >?
-                </button>
-              </span>
-              <input
-                v-model="createForm.entity_id"
-                type="text"
-                required
-                placeholder="input_number.child_metrics_height"
-                @input="createAutoFlags.entityId = false"
-              />
-            </label>
-            <label class="form-checkbox">
-              <input v-model="createForm.force_update" type="checkbox" />
-              <span class="label-text">
-                Force update
-                <button
-                  type="button"
-                  class="help-icon"
-                  data-tooltip="Emit state_changed events even when the value is unchanged. Useful for clean charts."
-                >?
-                </button>
-              </span>
-            </label>
-          </div>
-
-          <details class="form-advanced">
-            <summary>Advanced configuration</summary>
-            <div class="form-grid">
-              <label class="form-field">
-                <span class="label-text">
-                  Options (comma separated)
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Comma-delimited options for input_select helpers. Example: short,average,tall."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.options"
-                  type="text"
-                  placeholder="Only for input_select"
-                  :disabled="createOptionsDisabled"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Default value
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Optional initial value stored in both HASSEMS and Home Assistant when the entity is created."
-                  >?
-                  </button>
-                </span>
-                <input v-model="createForm.default_value" type="text" />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Component
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="MQTT discovery platform (sensor, binary_sensor, number, etc.). Determines how Home Assistant treats the entity."
-                  >?
-                  </button>
-                </span>
-                <select v-model="createForm.component">
-                  <option v-for="option in componentOptions" :key="`create-component-${option.value}`" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  State class
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Controls Home Assistant statistics handling. Choose measurement for most sensors."
-                  >?
-                  </button>
-                </span>
-                <select v-model="createForm.state_class">
-                  <option v-for="option in stateClassOptions" :key="`create-state-${option.value}`" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Unique ID
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Auto-generated from the device and entity names. Edit to override the identifier Home Assistant tracks."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.unique_id"
-                  type="text"
-                  required
-                  placeholder="child_metrics_child_height"
-                  @input="createAutoFlags.uniqueId = false"
-                  @blur="handleCreateUniqueBlur"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Object ID
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Final segment of the discovery topic. Defaults to the unique ID."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.object_id"
-                  type="text"
-                  required
-                  placeholder="child_metrics_child_height"
-                  @input="createAutoFlags.objectId = false"
-                  @blur="handleCreateObjectBlur"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Device ID
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Slug used to group entities from the same device. Generated from the device name by default."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.device_id"
-                  type="text"
-                  placeholder="child_metrics"
-                  @input="createAutoFlags.deviceId = false"
-                  @blur="handleCreateDeviceIdBlur"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Node ID
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Optional grouping folder between the component and object ID. Defaults to hassems."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.node_id"
-                  type="text"
-                  placeholder="hassems"
-                  @blur="handleCreateNodeBlur"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  State topic
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="MQTT topic where HASSEMS publishes value updates. Generated from the node ID, device ID, and entity ID."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.state_topic"
-                  type="text"
-                  required
-                  placeholder="hassems/child_metrics/input_number.child_metrics_height/state"
-                  @input="createAutoFlags.stateTopic = false"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Availability topic
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="MQTT topic that reports if the device is online (payloads: online/offline). Generated alongside the state topic."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.availability_topic"
-                  type="text"
-                  required
-                  placeholder="hassems/child_metrics/input_number.child_metrics_height/availability"
-                  @input="createAutoFlags.availabilityTopic = false"
-                />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Device manufacturer
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Manufacturer metadata reported to Home Assistant. Defaults to HASSEMS."
-                  >?
-                  </button>
-                </span>
-                <input v-model="createForm.device_manufacturer" type="text" placeholder="HASSEMS" />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Device model
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Model identifier used when grouping entities under a device."
-                  >?
-                  </button>
-                </span>
-                <input v-model="createForm.device_model" type="text" placeholder="Input Number" />
-              </label>
-              <label class="form-field">
-                <span class="label-text">
-                  Device firmware
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Optional firmware or software version string shown in the device panel."
-                  >?
-                  </button>
-                </span>
-                <input v-model="createForm.device_sw_version" type="text" placeholder="1.0.0" />
-              </label>
-              <label class="form-field full-width">
-                <span class="label-text">
-                  Device identifiers
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Comma-separated identifiers that uniquely describe the device in Home Assistant's registry. Defaults to node_id:unique_id."
-                  >?
-                  </button>
-                </span>
-                <input
-                  v-model="createForm.device_identifiers"
-                  type="text"
-                  placeholder="hassems:child_metrics_child_height"
-                />
-              </label>
-            </div>
-          </details>
-
-          <div class="form-actions">
-            <button class="btn primary" type="submit">Create entity</button>
-            <button class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
-          </div>
-        </form>
+        <p v-else class="card__subtitle">No entities created yet.</p>
       </section>
 
 
-      <section v-if="selectedHelper" class="card" id="entity-detail-card">
+      <section v-if="activePage === 'entities' && selectedHelper" class="card" id="entity-detail-card">
         <div class="card__header">
           <div>
             <h2 id="detail-title">Entity details</h2>
@@ -527,7 +198,10 @@
               {{ selectedHelper?.entity_id }} · {{ selectedHelper?.unique_id }}
             </p>
           </div>
-          <button class="btn danger" type="button" @click="deleteHelper">Delete</button>
+          <div class="card__actions">
+            <button class="btn" type="button" @click="openApiDialog">Call app</button>
+            <button class="btn danger" type="button" @click="deleteHelper">Delete</button>
+          </div>
         </div>
 
         <form id="update-helper-form" @submit.prevent="updateHelper">
@@ -782,7 +456,403 @@
           </form>
         </section>
       </section>
+      <section v-else-if="activePage === 'entities'" class="card card--empty" id="entity-detail-card">
+        <div class="card__header">
+          <h2>Entity details</h2>
+        </div>
+        <p class="card__subtitle">Select an entity from the table to view configuration and history.</p>
+      </section>
     </main>
+
+    <dialog
+      ref="createDialog"
+      class="modal"
+      @cancel.prevent="closeCreateDialog"
+      @close="onCreateDialogClose"
+    >
+      <div class="modal__container">
+        <div class="modal__header">
+          <h3>New entity</h3>
+          <button
+            type="button"
+            class="modal__close"
+            @click="closeCreateDialog"
+            aria-label="Close create entity dialog"
+          >
+            ×
+          </button>
+        </div>
+        <form class="modal__form" id="create-helper-form" @submit.prevent="createHelper">
+          <div class="modal__body">
+            <div class="form-grid form-grid--base">
+              <label class="form-field">
+                <span class="label-text">
+                  Device name
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Name shown for the parent device grouping in Home Assistant's Devices tab."
+                  >?
+                  </button>
+                </span>
+                <input v-model="createForm.device_name" type="text" required placeholder="Child Metrics" />
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Entity name
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Friendly label shown in Home Assistant once the entity is discovered."
+                  >?
+                  </button>
+                </span>
+                <input v-model="createForm.name" type="text" required />
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Description
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Internal notes about the entity's purpose. Stored for reference only."
+                  >?
+                  </button>
+                </span>
+                <textarea v-model="createForm.description" rows="2"></textarea>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Type
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Select the Home Assistant helper domain this entity mirrors (input_text, input_number, etc.)."
+                  >?
+                  </button>
+                </span>
+                <select v-model="createForm.type">
+                  <option value="input_text">Input text</option>
+                  <option value="input_number">Input number</option>
+                  <option value="input_boolean">Input boolean</option>
+                  <option value="input_select">Input select</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Device class
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Maps the measurement to a Home Assistant concept (distance, temperature, humidity, etc.)."
+                  >?
+                  </button>
+                </span>
+                <select v-model="createForm.device_class">
+                  <option v-for="option in deviceClassOptions" :key="`create-device-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Unit of measurement
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Unit string shown in Home Assistant. The options follow device class guidelines."
+                  >?
+                  </button>
+                </span>
+                <select v-model="createForm.unit_of_measurement">
+                  <option v-for="option in unitOptions" :key="`create-unit-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Icon
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Select an icon from the Material Design Icons set to represent the entity in Home Assistant."
+                  >?
+                  </button>
+                </span>
+                <select v-model="createForm.icon">
+                  <option v-for="option in iconOptions" :key="`create-icon-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span class="label-text">
+                  Entity ID
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Automatically generated from the device and entity names. Update if you already created a matching helper in Home Assistant."
+                  >?
+                  </button>
+                </span>
+                <input
+                  v-model="createForm.entity_id"
+                  type="text"
+                  required
+                  placeholder="input_number.child_metrics_height"
+                  @input="createAutoFlags.entityId = false"
+                />
+              </label>
+              <label class="form-checkbox">
+                <input v-model="createForm.force_update" type="checkbox" />
+                <span class="label-text">
+                  Force update
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Emit state_changed events even when the value is unchanged. Useful for clean charts."
+                  >?
+                  </button>
+                </span>
+              </label>
+            </div>
+
+            <details class="form-advanced">
+              <summary>Advanced configuration</summary>
+              <div class="form-grid">
+                <label class="form-field">
+                  <span class="label-text">
+                    Options (comma separated)
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Comma-delimited options for input_select helpers. Example: short,average,tall."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.options"
+                    type="text"
+                    placeholder="Only for input_select"
+                    :disabled="createOptionsDisabled"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Default value
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Optional initial value stored in both HASSEMS and Home Assistant when the entity is created."
+                    >?
+                    </button>
+                  </span>
+                  <input v-model="createForm.default_value" type="text" />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Component
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="MQTT discovery platform (sensor, binary_sensor, number, etc.). Determines how Home Assistant treats the entity."
+                    >?
+                    </button>
+                  </span>
+                  <select v-model="createForm.component">
+                    <option v-for="option in componentOptions" :key="`create-component-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    State class
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Controls Home Assistant statistics handling. Choose measurement for most sensors."
+                    >?
+                    </button>
+                  </span>
+                  <select v-model="createForm.state_class">
+                    <option v-for="option in stateClassOptions" :key="`create-state-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Unique ID
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Auto-generated from the device and entity names. Edit to override the identifier Home Assistant tracks."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.unique_id"
+                    type="text"
+                    required
+                    placeholder="child_metrics_child_height"
+                    @input="createAutoFlags.uniqueId = false"
+                    @blur="handleCreateUniqueBlur"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Object ID
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Final segment of the discovery topic. Defaults to the unique ID."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.object_id"
+                    type="text"
+                    required
+                    placeholder="child_metrics_child_height"
+                    @input="createAutoFlags.objectId = false"
+                    @blur="handleCreateObjectBlur"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Device ID
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Slug used to group entities from the same device. Generated from the device name by default."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.device_id"
+                    type="text"
+                    placeholder="child_metrics"
+                    @input="createAutoFlags.deviceId = false"
+                    @blur="handleCreateDeviceIdBlur"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Node ID
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Optional grouping folder between the component and object ID. Defaults to hassems."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.node_id"
+                    type="text"
+                    placeholder="hassems"
+                    @blur="handleCreateNodeBlur"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    State topic
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="MQTT topic where HASSEMS publishes value updates. Generated from the node ID, device ID, and entity ID."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.state_topic"
+                    type="text"
+                    required
+                    placeholder="hassems/child_metrics/input_number.child_metrics_height/state"
+                    @input="createAutoFlags.stateTopic = false"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Availability topic
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="MQTT topic that reports if the device is online (payloads: online/offline). Generated alongside the state topic."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.availability_topic"
+                    type="text"
+                    required
+                    placeholder="hassems/child_metrics/input_number.child_metrics_height/availability"
+                    @input="createAutoFlags.availabilityTopic = false"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Device manufacturer
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Manufacturer metadata reported to Home Assistant. Defaults to HASSEMS."
+                    >?
+                    </button>
+                  </span>
+                  <input v-model="createForm.device_manufacturer" type="text" placeholder="HASSEMS" />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Device model
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Model identifier used when grouping entities under a device."
+                    >?
+                    </button>
+                  </span>
+                  <input v-model="createForm.device_model" type="text" placeholder="Input Number" />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Device firmware
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Optional firmware or software version string shown in the device panel."
+                    >?
+                    </button>
+                  </span>
+                  <input v-model="createForm.device_sw_version" type="text" placeholder="1.0.0" />
+                </label>
+                <label class="form-field full-width">
+                  <span class="label-text">
+                    Device identifiers
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Comma-separated identifiers that uniquely describe the device in Home Assistant's registry. Defaults to node_id:unique_id."
+                    >?
+                    </button>
+                  </span>
+                  <input
+                    v-model="createForm.device_identifiers"
+                    type="text"
+                    placeholder="hassems:child_metrics_child_height"
+                  />
+                </label>
+              </div>
+            </details>
+          </div>
+          <div class="modal__actions">
+            <button class="btn primary" type="submit">Create entity</button>
+            <button class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
 
     <dialog ref="discoveryDialog" class="modal" @cancel.prevent="closeDiscoveryPreview" @close="onDiscoveryDialogClose">
       <template v-if="discoveryPreview">
@@ -802,6 +872,44 @@
           </div>
           <div class="modal__actions">
             <button type="button" class="btn" @click="closeDiscoveryPreview">Close</button>
+          </div>
+        </div>
+      </template>
+    </dialog>
+
+    <dialog ref="apiDialog" class="modal" @cancel.prevent="closeApiDialog" @close="onApiDialogClose">
+      <template v-if="selectedHelper">
+        <div class="modal__container">
+          <div class="modal__header">
+            <h3>Call this helper from another app</h3>
+            <button type="button" class="modal__close" @click="closeApiDialog" aria-label="Close API details dialog">
+              ×
+            </button>
+          </div>
+          <div class="modal__body">
+            <p>
+              Use this endpoint to push values into HASSEMS. It records history and publishes MQTT messages the same way as the
+              "Send new value" form.
+            </p>
+            <p class="modal__topic">
+              <strong>Endpoint:</strong>
+              <code id="api-endpoint">{{ selectedApiUrl }}</code>
+            </p>
+            <p class="modal__note">
+              Send a <code>POST</code> request with a JSON body like the example below. Replace the value with the reading you want
+              to report.
+            </p>
+            <pre id="api-payload-example" class="modal__pre">{{ selectedApiPayloadPretty }}</pre>
+            <p>
+              Example using <code>curl</code>:
+            </p>
+            <pre id="api-curl-example" class="modal__pre">{{ selectedApiCurl }}</pre>
+            <p class="modal__note">
+              The <code>measured_at</code> field is optional. If it is omitted the server stores the current timestamp automatically.
+            </p>
+          </div>
+          <div class="modal__actions">
+            <button type="button" class="btn" @click="closeApiDialog">Close</button>
           </div>
         </div>
       </template>
@@ -1021,6 +1129,8 @@ const toast = reactive({
 });
 let toastTimer = null;
 
+const activePage = ref('entities');
+
 const mqttForm = reactive({
   host: '',
   port: 1883,
@@ -1043,6 +1153,9 @@ const chartInstance = ref(null);
 
 const discoveryPreview = ref(null);
 const discoveryDialog = ref(null);
+const createDialog = ref(null);
+const apiDialog = ref(null);
+const apiOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
 
 function createCreateDefaults() {
   return {
@@ -1130,6 +1243,42 @@ const selectedDiscoveryTopic = computed(() => {
   const helper = selectedHelper.value;
   return helper ? computeDiscoveryTopic(helper) : '—';
 });
+const selectedApiPath = computed(() => {
+  const helper = selectedHelper.value;
+  return helper ? `/api/inputs/${helper.slug}/set` : '';
+});
+const selectedApiUrl = computed(() => {
+  const path = selectedApiPath.value;
+  if (!path) {
+    return '';
+  }
+  return apiOrigin ? `${apiOrigin}${path}` : path;
+});
+const selectedApiPayload = computed(() => {
+  const helper = selectedHelper.value;
+  const measuredAt = new Date().toISOString();
+  if (!helper) {
+    return {
+      value: 'example',
+      measured_at: measuredAt,
+    };
+  }
+  return {
+    value: exampleValueFor(helper),
+    measured_at: measuredAt,
+  };
+});
+const selectedApiPayloadPretty = computed(() => JSON.stringify(selectedApiPayload.value, null, 2));
+const selectedApiPayloadMinified = computed(() => JSON.stringify(selectedApiPayload.value));
+const selectedApiCurl = computed(() => {
+  const url = selectedApiUrl.value;
+  const payload = selectedApiPayloadMinified.value;
+  if (!url || !payload) {
+    return '';
+  }
+  const sanitized = payload.replace(/'/g, "'\\''");
+  return `curl -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -d '${sanitized}'`;
+});
 const valueInputType = computed(() => {
   const helper = selectedHelper.value;
   if (!helper) return 'text';
@@ -1195,6 +1344,13 @@ watch(selectedHelper, async (helper, previous) => {
     historyRecords.value = [];
     historyList.value = [];
     historyMode.value = 'empty';
+    closeApiDialog();
+  }
+});
+
+watch(activePage, (page) => {
+  if (page !== 'entities') {
+    closeApiDialog();
   }
 });
 
@@ -1319,6 +1475,54 @@ function selectHelper(slug) {
   selectedSlug.value = slug;
 }
 
+function openCreateDialog() {
+  const dialog = createDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  resetCreateForm();
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeCreateDialog() {
+  const dialog = createDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+}
+
+function onCreateDialogClose() {
+  resetCreateForm();
+}
+
+function openApiDialog() {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity to view API details.', 'error');
+    return;
+  }
+  const dialog = apiDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeApiDialog() {
+  const dialog = apiDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+}
+
+function onApiDialogClose() {
+  // Dialog state is managed directly via the native <dialog> element.
+}
+
 function helperMeta(helper) {
   const parts = [helper.component];
   if (helper.device_class) {
@@ -1432,6 +1636,7 @@ async function createHelper() {
     showToast('Entity created.', 'success');
     resetCreateForm();
     await loadHelpers();
+    closeCreateDialog();
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
   }
@@ -1766,6 +1971,44 @@ async function deleteHelper() {
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
   }
+}
+
+function exampleValueFor(helper) {
+  if (!helper) {
+    return 'example';
+  }
+  const fallback = helper.last_value ?? helper.default_value ?? null;
+  if (helper.type === 'input_boolean') {
+    if (fallback !== null && fallback !== undefined) {
+      const normalized = String(fallback).toLowerCase();
+      if (['true', 'on', '1', 'yes'].includes(normalized)) return true;
+      if (['false', 'off', '0', 'no'].includes(normalized)) return false;
+    }
+    return true;
+  }
+  if (helper.type === 'input_number') {
+    if (fallback !== null && fallback !== undefined) {
+      const parsed = Number(fallback);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+  if (helper.type === 'input_select') {
+    const options = Array.isArray(helper.options) ? helper.options : [];
+    if (options.length) {
+      return options[0];
+    }
+    if (fallback !== null && fallback !== undefined && String(fallback).trim() !== '') {
+      return String(fallback);
+    }
+    return 'choice';
+  }
+  if (fallback !== null && fallback !== undefined && String(fallback).trim() !== '') {
+    return String(fallback);
+  }
+  return 'example';
 }
 
 function populateValueForm(helper) {
