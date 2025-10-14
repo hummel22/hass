@@ -7,8 +7,9 @@ smarter home. It is organized around three services plus a set of blueprints for
   manage domain allow/deny lists, and persists entity information for other tooling.
 - **`services/hassems`** – The Home Assistant Entity Management System used to curate helpers and
   publish MQTT discovery payloads with a bundled management UI.
-- **`services/hass_integration`** – A custom Home Assistant integration that consumes HASSEMS
-  metadata so entities are available natively within Home Assistant.
+- **`services/hass_integration`** – Documentation for the custom Home Assistant integration that
+  consumes HASSEMS metadata so entities are available natively within Home Assistant. The actual
+  integration code lives in `custom_components/hassems/` for compatibility with HACS.
 - **`blueprints/`** – Automations for common scenarios such as auto-locking doors, sunrise/sunset
   controls, and webhook-driven notifications.
 
@@ -33,6 +34,7 @@ Assistant.
 ```text
 .
 ├── blueprints/            # Home Assistant automation blueprints
+├── custom_components/     # HASSEMS Home Assistant integration
 ├── services/
 │   ├── hass_helper/       # Metadata ingestion and helper UI
 │   ├── hassems/           # Helper management service with MQTT support

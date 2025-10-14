@@ -1,0 +1,8 @@
+{
+  "name": "HASSEMS",
+  "content_in_root": false,
+  "render_readme": true,
+  "domains": ["hassems"],
+  "country": ["US"],
+  "homeassistant": "2023.8.0"
+}
