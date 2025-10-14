@@ -256,6 +256,30 @@ class InputHelperStore:
             entity_type = EntityTransportType(entity_type_value or "mqtt")
         except ValueError:
             entity_type = EntityTransportType.MQTT
+        is_mqtt = entity_type == EntityTransportType.MQTT
+        node_id = mapping.get("node_id") if is_mqtt else None
+        slug = mapping["slug"]
+        state_topic_value = (
+            (mapping.get("state_topic") or "").strip() if is_mqtt else None
+        )
+        availability_topic_value = (
+            (mapping.get("availability_topic") or "").strip() if is_mqtt else None
+        )
+        if is_mqtt:
+            if not state_topic_value:
+                state_topic_value = f"{slug}/state"
+            if not availability_topic_value:
+                availability_topic_value = f"{slug}/availability"
+        force_update_value = bool(mapping.get("force_update", 1)) if is_mqtt else False
+        device_manufacturer = mapping.get("device_manufacturer") if is_mqtt else None
+        device_model = mapping.get("device_model") if is_mqtt else None
+        device_sw_version = mapping.get("device_sw_version") if is_mqtt else None
+        identifiers = (
+            _deserialize_identifiers(mapping.get("device_identifiers"))
+            if is_mqtt
+            else []
+        )
+
         return InputHelper(
             slug=mapping["slug"],
             name=mapping["name"],
@@ -276,20 +300,18 @@ class InputHelperStore:
             component=mapping.get("component", "sensor"),
             unique_id=mapping.get("unique_id", mapping["slug"]),
             object_id=mapping.get("object_id", mapping["slug"]),
-            node_id=mapping.get("node_id"),
-            state_topic=mapping.get("state_topic", f"{mapping['slug']}/state"),
-            availability_topic=mapping.get(
-                "availability_topic", f"{mapping['slug']}/availability"
-            ),
+            node_id=node_id,
+            state_topic=state_topic_value,
+            availability_topic=availability_topic_value,
             icon=mapping.get("icon"),
             state_class=mapping.get("state_class"),
-            force_update=bool(mapping.get("force_update", 1)),
+            force_update=force_update_value,
             device_name=mapping.get("device_name", mapping["name"]),
             device_id=mapping.get("device_id", slugify_identifier(mapping.get("device_name", ""))),
-            device_manufacturer=mapping.get("device_manufacturer"),
-            device_model=mapping.get("device_model"),
-            device_sw_version=mapping.get("device_sw_version"),
-            device_identifiers=_deserialize_identifiers(mapping.get("device_identifiers")),
+            device_manufacturer=device_manufacturer,
+            device_model=device_model,
+            device_sw_version=device_sw_version,
+            device_identifiers=identifiers,
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -347,8 +369,8 @@ class InputHelperStore:
                         helper.unique_id,
                         helper.object_id,
                         helper.node_id,
-                        helper.state_topic,
-                        helper.availability_topic,
+                        helper.state_topic or "",
+                        helper.availability_topic or "",
                         helper.icon,
                         helper.state_class,
                         int(helper.force_update),
@@ -417,8 +439,8 @@ class InputHelperStore:
                         helper.unique_id,
                         helper.object_id,
                         helper.node_id,
-                        helper.state_topic,
-                        helper.availability_topic,
+                        helper.state_topic or "",
+                        helper.availability_topic or "",
                         helper.icon,
                         helper.state_class,
                         int(helper.force_update),

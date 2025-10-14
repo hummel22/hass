@@ -133,6 +133,38 @@ body {
   flex-wrap: wrap;
 }
 
+.icon-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--accent-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.45);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.icon-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
 .card__subtitle {
   margin: 0.25rem 0 0;
   color: var(--text-muted);
@@ -149,11 +181,51 @@ body {
   margin-bottom: 1rem;
 }
 
-.form-field { 
+.form-field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   font-size: 0.95rem;
+}
+
+.entity-summary {
+  margin-top: -0.5rem;
+}
+
+.detail-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.detail-list__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.detail-list dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.detail-list__value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.detail-list__value--wrap {
+  white-space: pre-wrap;
+}
+
+.detail-list__value--empty {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .entity-type-field {
