@@ -1,5 +1,8 @@
 {
   "config": {
+    "abort": {
+      "not_ready": "HASSEMS isn't fully set up yet. Please try again shortly."
+    },
     "step": {
       "user": {
         "title": "Connect to HASSEMS",
