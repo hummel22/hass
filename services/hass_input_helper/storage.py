@@ -11,6 +11,7 @@ from typing import Iterator, List, Optional
 from .models import (
     EntityTransportType,
     HistoryPoint,
+    HistoryPointUpdate,
     InputHelper,
     InputHelperCreate,
     InputHelperRecord,
@@ -502,7 +503,7 @@ class InputHelperStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT value, measured_at, created_at
+                SELECT id, value, measured_at, created_at
                   FROM history
                  WHERE helper_slug = ?
               ORDER BY datetime(created_at) ASC
@@ -512,20 +513,123 @@ class InputHelperStore:
             ).fetchall()
         history: List[HistoryPoint] = []
         for row in rows:
-            recorded_at = datetime.fromisoformat(row["created_at"])
-            value = _deserialize_value(row["value"])
-            if value is None:
-                continue
-            measured_source = row["measured_at"] or row["created_at"]
-            measured_at = datetime.fromisoformat(measured_source)
-            history.append(
-                HistoryPoint(
-                    measured_at=measured_at,
-                    recorded_at=recorded_at,
-                    value=value,
-                )
-            )
+            point = self._row_to_history_point(row)
+            if point is not None:
+                history.append(point)
         return history
+
+    def update_history_point(
+        self,
+        slug: str,
+        history_id: int,
+        payload: HistoryPointUpdate,
+    ) -> HistoryPoint:
+        measured_iso = (
+            payload.measured_at.astimezone(timezone.utc).isoformat()
+            if payload.measured_at is not None
+            else None
+        )
+        serialized_value = _serialize_value(payload.value)
+        if serialized_value is None:
+            raise ValueError("History value cannot be null.")
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE history
+                       SET value = ?,
+                           measured_at = ?
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (serialized_value, measured_iso, history_id, slug),
+                )
+                if cursor.rowcount == 0:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                row = conn.execute(
+                    """
+                    SELECT id, value, measured_at, created_at
+                      FROM history
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (history_id, slug),
+                ).fetchone()
+                self._sync_helper_last_value(conn, slug)
+        if row is None:
+            raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+        point = self._row_to_history_point(row)
+        if point is None:
+            raise ValueError("History value could not be deserialized.")
+        return point
+
+    def delete_history_point(self, slug: str, history_id: int) -> None:
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM history WHERE id = ? AND helper_slug = ?",
+                    (history_id, slug),
+                )
+                if cursor.rowcount == 0:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                self._sync_helper_last_value(conn, slug)
+
+    def _row_to_history_point(self, row: sqlite3.Row) -> Optional[HistoryPoint]:
+        if row is None:
+            return None
+        value = _deserialize_value(row["value"])
+        if value is None:
+            return None
+        recorded_at = datetime.fromisoformat(row["created_at"])
+        measured_source = row["measured_at"] or row["created_at"]
+        measured_at = datetime.fromisoformat(measured_source)
+        return HistoryPoint(
+            id=row["id"],
+            measured_at=measured_at,
+            recorded_at=recorded_at,
+            value=value,
+        )
+
+    def _sync_helper_last_value(self, conn: sqlite3.Connection, slug: str) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        latest = conn.execute(
+            """
+            SELECT value, measured_at, created_at
+              FROM history
+             WHERE helper_slug = ?
+          ORDER BY datetime(created_at) DESC
+             LIMIT 1
+            """,
+            (slug,),
+        ).fetchone()
+        if latest is None:
+            conn.execute(
+                """
+                UPDATE helpers
+                   SET last_value = NULL,
+                       last_measured_at = NULL,
+                       updated_at = ?
+                 WHERE slug = ?
+                """,
+                (now_iso, slug),
+            )
+            return
+        measured_source = latest["measured_at"] or latest["created_at"]
+        conn.execute(
+            """
+            UPDATE helpers
+               SET last_value = ?,
+                   last_measured_at = ?,
+                   updated_at = ?
+             WHERE slug = ?
+            """,
+            (
+                latest["value"],
+                measured_source,
+                now_iso,
+                slug,
+            ),
+        )
 
     def get_mqtt_config(self) -> Optional[MQTTConfig]:
         with self._connection() as conn:

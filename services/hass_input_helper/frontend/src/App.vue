@@ -238,7 +238,21 @@
         <div class="divider"></div>
 
         <section class="history">
-          <h3>Recent values</h3>
+          <div class="history__header">
+            <h3>Recent values</h3>
+            <button
+              class="icon-button"
+              type="button"
+              @click="openHistoryDialog"
+              aria-label="Edit history entries"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M16.862 3.487a1.75 1.75 0 0 1 2.475 0l1.176 1.176a1.75 1.75 0 0 1 0 2.475l-9.9 9.9a1.75 1.75 0 0 1-.74.434l-4.01 1.147a.75.75 0 0 1-.92-.92l1.147-4.01a1.75 1.75 0 0 1 .434-.74l9.9-9.9Zm-2.475 2.475-9.9 9.9a.25.25 0 0 0-.062.106l-.84 2.934 2.934-.84a.25.25 0 0 0 .106-.062l9.9-9.9-2.138-2.138Zm3.243-1.06a.25.25 0 0 0-.354 0l-1.06 1.06 2.138 2.138 1.06-1.06a.25.25 0 0 0 0-.354l-1.176-1.176a.25.25 0 0 0-.354 0Z"
+                />
+              </svg>
+            </button>
+          </div>
           <canvas
             v-show="historyMode === 'chart'"
             id="history-chart"
@@ -959,6 +973,102 @@
       </template>
     </dialog>
 
+    <dialog
+      ref="historyDialog"
+      class="modal"
+      @cancel.prevent="closeHistoryDialog"
+      @close="onHistoryDialogClose"
+    >
+      <template v-if="selectedHelper">
+        <div class="modal__container">
+          <div class="modal__header">
+            <h3>Edit history entries</h3>
+            <button
+              type="button"
+              class="modal__close"
+              @click="closeHistoryDialog"
+              aria-label="Close history editor"
+            >
+              ×
+            </button>
+          </div>
+          <div class="modal__body history-editor-body">
+            <p class="modal__subtitle">
+              Adjust recorded values for <strong>{{ selectedHelper.name }}</strong> or remove entries you no longer need.
+            </p>
+            <div v-if="historyEditorRows.length" class="history-editor-wrapper">
+              <table class="history-editor-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Measured at</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Recorded</th>
+                    <th scope="col" class="history-editor-actions-header">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in historyEditorRows" :key="row.id">
+                    <td data-label="Measured at">
+                      <input type="datetime-local" v-model="row.measuredInput" />
+                    </td>
+                    <td data-label="Value">
+                      <template v-if="valueInputType === 'boolean'">
+                        <select v-model="row.valueInput">
+                          <option value="false">Off</option>
+                          <option value="true">On</option>
+                        </select>
+                      </template>
+                      <template v-else-if="valueInputType === 'number'">
+                        <input type="number" v-model="row.valueInput" />
+                      </template>
+                      <template v-else-if="valueInputType === 'select'">
+                        <select v-model="row.valueInput">
+                          <option v-for="option in valueOptions" :key="option" :value="option">
+                            {{ option }}
+                          </option>
+                        </select>
+                      </template>
+                      <template v-else>
+                        <input type="text" v-model="row.valueInput" />
+                      </template>
+                    </td>
+                    <td data-label="Recorded">
+                      <span>{{ row.recordedDisplay }}</span>
+                    </td>
+                    <td data-label="Actions">
+                      <div class="history-editor-actions">
+                        <button
+                          class="btn small"
+                          type="button"
+                          @click="saveHistoryRow(row)"
+                          :disabled="row.saving || row.deleting"
+                        >
+                          {{ row.saving ? 'Saving…' : 'Save' }}
+                        </button>
+                        <button
+                          class="btn danger small"
+                          type="button"
+                          @click="deleteHistoryRow(row)"
+                          :disabled="row.saving || row.deleting"
+                        >
+                          {{ row.deleting ? 'Deleting…' : 'Delete' }}
+                        </button>
+                      </div>
+                      <p v-if="row.error" class="history-editor-error">{{ row.error }}</p>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="modal__subtitle">No history has been recorded for this entity yet.</p>
+          </div>
+          <div class="modal__actions">
+            <button type="button" class="btn" @click="closeHistoryDialog">Close</button>
+          </div>
+        </div>
+      </template>
+    </dialog>
+
     <dialog ref="discoveryDialog" class="modal" @cancel.prevent="closeDiscoveryPreview" @close="onDiscoveryDialogClose">
       <template v-if="discoveryPreview">
         <div class="modal__container">
@@ -1260,6 +1370,9 @@ const historyMode = ref('empty');
 const historyList = ref([]);
 const historyCanvas = ref(null);
 const chartInstance = ref(null);
+const historyDialog = ref(null);
+const historyDialogVisible = ref(false);
+const historyEditorRows = ref([]);
 
 const discoveryPreview = ref(null);
 const discoveryDialog = ref(null);
@@ -1529,6 +1642,7 @@ watch(discoveryPreview, (preview) => {
 });
 
 watch(selectedHelper, async (helper, previous) => {
+  closeHistoryDialog();
   if (helper) {
     populateUpdateForm(helper);
     populateValueForm(helper);
@@ -1541,6 +1655,7 @@ watch(selectedHelper, async (helper, previous) => {
     historyList.value = [];
     historyMode.value = 'empty';
     closeApiDialog();
+    historyEditorRows.value = [];
   }
 });
 
@@ -1548,6 +1663,7 @@ watch(activePage, (page) => {
   if (page !== 'entities') {
     closeApiDialog();
     closeEditDialog();
+    closeHistoryDialog();
   }
 });
 
@@ -1721,6 +1837,36 @@ function onEditDialogClose() {
   if (!selectedHelper.value) {
     resetUpdateForm();
   }
+}
+
+function openHistoryDialog() {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity to edit history.', 'error');
+    return;
+  }
+  syncHistoryEditorRows();
+  const dialog = historyDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  historyDialogVisible.value = true;
+}
+
+function closeHistoryDialog() {
+  const dialog = historyDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+  historyDialogVisible.value = false;
+}
+
+function onHistoryDialogClose() {
+  historyDialogVisible.value = false;
+  syncHistoryEditorRows();
 }
 
 function openApiDialog() {
@@ -2348,13 +2494,133 @@ function sortHistoryRecords(records) {
   return [...records].sort((a, b) => getHistoryTimestamp(a) - getHistoryTimestamp(b));
 }
 
+function formatHistoryValueForInput(helperType, value) {
+  if (helperType === 'input_boolean') {
+    const normalized = String(value).toLowerCase();
+    if (['true', 'on', '1', 'yes'].includes(normalized)) {
+      return 'true';
+    }
+    return 'false';
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value);
+}
+
+function toDateTimeLocalString(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const pad = (input) => String(input).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function buildHistoryEditorRows(records) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    return [];
+  }
+  const helperType = helper.type;
+  return records.map((entry) => ({
+    id: entry.id,
+    valueInput: formatHistoryValueForInput(helperType, entry.value),
+    measuredInput: toDateTimeLocalString(entry.measured_at || entry.recorded_at),
+    recordedDisplay: formatTimestamp(entry.recorded_at),
+    saving: false,
+    deleting: false,
+    error: '',
+  }));
+}
+
+function syncHistoryEditorRows() {
+  historyEditorRows.value = buildHistoryEditorRows(historyRecords.value);
+}
+
 async function loadHistory(slug) {
   try {
     const history = await requestJson(`/inputs/${slug}/history`);
     const records = Array.isArray(history) ? history : [];
     historyRecords.value = sortHistoryRecords(records);
+    syncHistoryEditorRows();
   } catch (error) {
     showToast(`Failed to load history: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  }
+}
+
+async function saveHistoryRow(row) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity before editing history.', 'error');
+    return;
+  }
+  let measuredAtIso = null;
+  if (row.measuredInput) {
+    const measuredDate = new Date(row.measuredInput);
+    if (Number.isNaN(measuredDate.getTime())) {
+      row.error = 'Enter a valid measurement time.';
+      return;
+    }
+    measuredAtIso = measuredDate.toISOString();
+  }
+  let value;
+  try {
+    value = coerceValue(helper.type, row.valueInput);
+  } catch (error) {
+    row.error = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  row.error = '';
+  row.saving = true;
+  try {
+    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        value,
+        measured_at: measuredAtIso,
+      }),
+    });
+    showToast('History entry updated.', 'success');
+    await loadHistory(helper.slug);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    row.saving = false;
+  }
+}
+
+async function deleteHistoryRow(row) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity before editing history.', 'error');
+    return;
+  }
+  const confirmed =
+    typeof window === 'undefined' || window.confirm('Delete this history entry? This cannot be undone.');
+  if (!confirmed) {
+    return;
+  }
+  row.error = '';
+  row.deleting = true;
+  try {
+    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+      method: 'DELETE',
+    });
+    showToast('History entry deleted.', 'success');
+    await loadHistory(helper.slug);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    row.deleting = false;
   }
 }
 

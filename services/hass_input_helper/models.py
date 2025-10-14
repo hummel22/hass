@@ -535,9 +535,15 @@ class InputHelper(BaseModel):
 
 
 class HistoryPoint(BaseModel):
+    id: int
     measured_at: datetime
     recorded_at: datetime
     value: InputValue
+
+
+class HistoryPointUpdate(BaseModel):
+    value: InputValue
+    measured_at: Optional[datetime] = None
 
 
 class MQTTConfig(BaseModel):
@@ -732,6 +738,7 @@ __all__ = [
     "InputHelperUpdate",
     "InputValue",
     "HistoryPoint",
+    "HistoryPointUpdate",
     "MQTTConfig",
     "MQTTTestResponse",
     "SetValueRequest",

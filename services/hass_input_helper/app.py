@@ -16,6 +16,7 @@ from .hass_client import HomeAssistantClient
 from .models import (
     EntityTransportType,
     HistoryPoint,
+    HistoryPointUpdate,
     HelperState,
     InputHelper,
     InputHelperCreate,
@@ -230,6 +231,57 @@ def get_helper_history(slug: str, store: InputHelperStore = Depends(get_store)) 
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
     return store.list_history(slug)
+
+
+@api_router.put("/inputs/{slug}/history/{history_id}", response_model=HistoryPoint)
+def update_helper_history_point(
+    slug: str,
+    history_id: int,
+    request: HistoryPointUpdate,
+    store: InputHelperStore = Depends(get_store),
+) -> HistoryPoint:
+    record = store.get_helper(slug)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+
+    helper = record.helper
+    try:
+        coerced = coerce_helper_value(helper.type, request.value, helper.options)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    measured_at = request.measured_at
+    if measured_at is not None:
+        if measured_at.tzinfo is None:
+            measured_at = measured_at.replace(tzinfo=timezone.utc)
+        else:
+            measured_at = measured_at.astimezone(timezone.utc)
+
+    try:
+        return store.update_history_point(
+            slug,
+            history_id,
+            HistoryPointUpdate(value=coerced, measured_at=measured_at),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
+
+
+@api_router.delete("/inputs/{slug}/history/{history_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_helper_history_point(
+    slug: str,
+    history_id: int,
+    store: InputHelperStore = Depends(get_store),
+) -> Response:
+    record = store.get_helper(slug)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+
+    try:
+        store.delete_history_point(slug, history_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 @api_router.post("/inputs/{slug}/set", response_model=InputHelper)
 async def set_helper_value(
     slug: str,
