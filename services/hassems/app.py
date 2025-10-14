@@ -8,12 +8,15 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .hass_client import HomeAssistantClient
 from .models import (
+    ApiUser,
+    ApiUserCreate,
+    ApiUserUpdate,
     EntityTransportType,
     HistoryPoint,
     HistoryPointUpdate,
@@ -24,6 +27,8 @@ from .models import (
     MQTTConfig,
     MQTTTestResponse,
     SetValueRequest,
+    WebhookRegistration,
+    WebhookSubscription,
     coerce_helper_value,
 )
 from .mqtt_service import (
@@ -35,6 +40,7 @@ from .mqtt_service import (
     verify_connection,
 )
 from .storage import InputHelperStore
+from .webhooks import WebhookNotifier
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
@@ -45,6 +51,10 @@ STATIC_DIR.mkdir(exist_ok=True)
 
 DATA_FILE = BASE_DIR / "data" / "input_helpers.db"
 store = InputHelperStore(DATA_FILE)
+SUPERUSER_NAME = "HASSEMS Superuser"
+SUPERUSER_TOKEN = "hassems-super-token"
+store.ensure_superuser(name=SUPERUSER_NAME, token=SUPERUSER_TOKEN)
+notifier = WebhookNotifier(store)
 ha_client = HomeAssistantClient.from_env()
 
 app = FastAPI(title="Home Assistant Entity Management System", version="0.2.0")
@@ -75,6 +85,28 @@ def get_client() -> HomeAssistantClient:
 
 def get_optional_client() -> Optional[HomeAssistantClient]:
     return ha_client
+
+
+def require_api_user(
+    x_hassems_token: Optional[str] = Header(default=None, alias="X-HASSEMS-Token"),
+    authorization: Optional[str] = Header(default=None),
+    store: InputHelperStore = Depends(get_store),
+) -> ApiUser:
+    token = (x_hassems_token or "").strip()
+    if not token and authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer":
+            token = value.strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Provide a valid HASSEMS API token in the X-HASSEMS-Token header or an Authorization bearer token.",
+        )
+    user = store.get_api_user_by_token(token)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API token.")
+    return user
+
 
 api_router = APIRouter()
 
@@ -117,6 +149,44 @@ async def test_mqtt_config(store: InputHelperStore = Depends(get_store)) -> MQTT
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unexpected error during MQTT connection test")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@api_router.get("/users", response_model=List[ApiUser])
+def list_api_users(store: InputHelperStore = Depends(get_store)) -> List[ApiUser]:
+    return store.list_api_users()
+
+
+@api_router.post("/users", response_model=ApiUser, status_code=status.HTTP_201_CREATED)
+def create_api_user(payload: ApiUserCreate, store: InputHelperStore = Depends(get_store)) -> ApiUser:
+    try:
+        return store.create_api_user(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@api_router.put("/users/{user_id}", response_model=ApiUser)
+def update_api_user(
+    user_id: int,
+    payload: ApiUserUpdate,
+    store: InputHelperStore = Depends(get_store),
+) -> ApiUser:
+    try:
+        return store.update_api_user(user_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@api_router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def delete_api_user(user_id: int, store: InputHelperStore = Depends(get_store)) -> Response:
+    try:
+        store.delete_api_user(user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 @api_router.get("/inputs", response_model=List[InputHelper])
 def list_inputs(store: InputHelperStore = Depends(get_store)) -> List[InputHelper]:
     return store.list_helpers()
@@ -156,6 +226,8 @@ async def create_input_helper(
                 logger.exception("Unable to roll back helper creation after unexpected MQTT failure")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    if helper.entity_type == EntityTransportType.HASSEMS:
+        await notifier.helper_created(helper)
     return helper
 @api_router.put("/inputs/{slug}", response_model=InputHelper)
 async def update_input_helper(
@@ -194,6 +266,8 @@ async def update_input_helper(
             logger.exception("Unexpected error publishing MQTT discovery payload during helper update")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    if helper.entity_type == EntityTransportType.HASSEMS:
+        await notifier.helper_updated(helper)
     return helper
 @api_router.delete(
     "/inputs/{slug}",
@@ -208,6 +282,8 @@ async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_s
     store.delete_helper(slug)
 
     if record.helper.entity_type != EntityTransportType.MQTT:
+        if record.helper.entity_type == EntityTransportType.HASSEMS:
+            await notifier.helper_deleted(record.helper)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     config = store.get_mqtt_config()
@@ -324,7 +400,108 @@ async def set_helper_value(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    return store.set_last_value(slug, coerced, measured_at=measured_at)
+    helper_after = store.set_last_value(slug, coerced, measured_at=measured_at)
+    if helper_after.entity_type == EntityTransportType.HASSEMS:
+        await notifier.helper_value(helper_after, value=coerced, measured_at=measured_at)
+    return helper_after
+
+
+@api_router.get("/integrations/home-assistant/helpers", response_model=List[InputHelper])
+def integration_list_helpers(
+    store: InputHelperStore = Depends(get_store),
+    _: ApiUser = Depends(require_api_user),
+) -> List[InputHelper]:
+    return store.list_helpers_by_type(EntityTransportType.HASSEMS)
+
+
+@api_router.get("/integrations/home-assistant/helpers/{slug}", response_model=InputHelper)
+def integration_get_helper(
+    slug: str,
+    store: InputHelperStore = Depends(get_store),
+    _: ApiUser = Depends(require_api_user),
+) -> InputHelper:
+    record = store.get_helper(slug)
+    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+    return record.helper
+
+
+@api_router.get(
+    "/integrations/home-assistant/helpers/{slug}/history",
+    response_model=List[HistoryPoint],
+)
+def integration_get_history(
+    slug: str,
+    store: InputHelperStore = Depends(get_store),
+    _: ApiUser = Depends(require_api_user),
+) -> List[HistoryPoint]:
+    record = store.get_helper(slug)
+    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+    return store.list_history(slug)
+
+
+@api_router.post(
+    "/integrations/home-assistant/helpers/{slug}/set",
+    response_model=InputHelper,
+)
+async def integration_set_helper_value(
+    slug: str,
+    request: SetValueRequest,
+    _: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+    client: Optional[HomeAssistantClient] = Depends(get_optional_client),
+) -> InputHelper:
+    record = store.get_helper(slug)
+    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+    return await set_helper_value(slug, request, store=store, client=client)
+
+
+@api_router.get(
+    "/integrations/home-assistant/webhooks",
+    response_model=List[WebhookSubscription],
+)
+def integration_list_webhooks(
+    user: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+) -> List[WebhookSubscription]:
+    target_user_id = None if user.is_superuser else user.id
+    return store.list_webhook_subscriptions(target_user_id)
+
+
+@api_router.post(
+    "/integrations/home-assistant/webhooks",
+    response_model=WebhookSubscription,
+    status_code=status.HTTP_201_CREATED,
+)
+def integration_register_webhook(
+    payload: WebhookRegistration,
+    user: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+) -> WebhookSubscription:
+    try:
+        return store.save_webhook_subscription(user.id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@api_router.delete(
+    "/integrations/home-assistant/webhooks/{subscription_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def integration_delete_webhook(
+    subscription_id: int,
+    user: ApiUser = Depends(require_api_user),
+    store: InputHelperStore = Depends(get_store),
+) -> Response:
+    target_user_id = None if user.is_superuser else user.id
+    try:
+        store.delete_webhook_subscription(subscription_id, user_id=target_user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @api_router.get("/inputs/{slug}/state", response_model=HelperState)

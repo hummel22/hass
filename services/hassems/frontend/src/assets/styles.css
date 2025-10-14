@@ -521,6 +521,52 @@ body {
   font-size: 0.85rem;
 }
 
+.entity-name__badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--accent-strong);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.actions-column {
+  width: 160px;
+  text-align: right;
+}
+
+.actions-cell {
+  text-align: right;
+}
+
+.button-group {
+  display: inline-flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+#users-card .entity-table tbody tr {
+  cursor: default;
+}
+
+#users-card .entity-table tbody tr:hover,
+#users-card .entity-table tbody tr:focus-visible {
+  background: transparent;
+}
+
+#users-card .entity-table tbody tr:focus-visible {
+  outline: none;
+}
+
+#users-card .entity-table code {
+  word-break: break-all;
+}
+
 .divider {
   height: 1px;
   background: var(--border);
