@@ -108,18 +108,6 @@
             </span>
             <input v-model="mqttForm.discovery_prefix" type="text" readonly />
           </label>
-          <label class="form-checkbox">
-            <input v-model="mqttForm.use_tls" type="checkbox" />
-            <span class="label-text">
-              Use TLS
-              <button
-                type="button"
-                class="help-icon"
-                data-tooltip="Enable if your broker requires TLS/SSL (typically port 8883). HASSEMS uses system certificates."
-              >?
-              </button>
-            </span>
-          </label>
           <div class="form-actions">
             <button class="btn primary" type="submit" :disabled="mqttSaving">
               {{ mqttSaving ? 'Saving…' : 'Save configuration' }}
@@ -157,6 +145,7 @@
                 <th scope="col">Name</th>
                 <th scope="col">Entity ID</th>
                 <th scope="col">Type</th>
+                <th scope="col">Entity type</th>
                 <th scope="col">Last value</th>
                 <th scope="col">Updated</th>
               </tr>
@@ -180,6 +169,7 @@
                 </td>
                 <td><code>{{ helper.entity_id }}</code></td>
                 <td>{{ helperTypeMap[helper.type] || helper.type }}</td>
+                <td>{{ entityTransportLabels[helper.entity_type] || helper.entity_type }}</td>
                 <td>{{ helper.last_value ?? '—' }}</td>
                 <td>{{ helper.updated_at ? formatTimestamp(helper.updated_at) : '—' }}</td>
               </tr>
@@ -199,201 +189,47 @@
             </p>
           </div>
           <div class="card__actions">
+            <button
+              class="icon-button"
+              type="button"
+              @click="openEditDialog"
+              aria-label="Edit entity"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M16.862 3.487a1.75 1.75 0 0 1 2.475 0l1.176 1.176a1.75 1.75 0 0 1 0 2.475l-9.9 9.9a1.75 1.75 0 0 1-.74.434l-4.01 1.147a.75.75 0 0 1-.92-.92l1.147-4.01a1.75 1.75 0 0 1 .434-.74l9.9-9.9Zm-2.475 2.475-9.9 9.9a.25.25 0 0 0-.062.106l-.84 2.934 2.934-.84a.25.25 0 0 0 .106-.062l9.9-9.9-2.138-2.138Zm3.243-1.06a.25.25 0 0 0-.354 0l-1.06 1.06 2.138 2.138 1.06-1.06a.25.25 0 0 0 0-.354l-1.176-1.176a.25.25 0 0 0-.354 0Z"
+                />
+              </svg>
+            </button>
             <button class="btn" type="button" @click="openApiDialog">Call app</button>
             <button class="btn danger" type="button" @click="deleteHelper">Delete</button>
           </div>
         </div>
 
-        <form id="update-helper-form" @submit.prevent="updateHelper">
-          <div class="form-grid form-grid--base">
-            <label class="form-field">
-              <span class="label-text">
-                Device name
-                <button type="button" class="help-icon" data-tooltip="Parent device name in Home Assistant.">?</button>
-              </span>
-              <input v-model="updateForm.device_name" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity name
-                <button type="button" class="help-icon" data-tooltip="Update the friendly name shown in Home Assistant.">?</button>
-              </span>
-              <input v-model="updateForm.name" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Description
-                <button type="button" class="help-icon" data-tooltip="Reference notes about the entity.">?</button>
-              </span>
-              <textarea v-model="updateForm.description" rows="2"></textarea>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Type
-                <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited.">?</button>
-              </span>
-              <input :value="selectedTypeLabel" type="text" readonly />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device class
-                <button type="button" class="help-icon" data-tooltip="Home Assistant device class.">?</button>
-              </span>
-              <select v-model="updateForm.device_class">
-                <option v-for="option in deviceClassOptions" :key="`update-device-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Unit of measurement
-                <button type="button" class="help-icon" data-tooltip="Measurement unit reported to Home Assistant.">?</button>
-              </span>
-              <select v-model="updateForm.unit_of_measurement">
-                <option v-for="option in unitOptions" :key="`update-unit-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Icon
-                <button type="button" class="help-icon" data-tooltip="Material Design Icon reference used in the UI.">?</button>
-              </span>
-              <select v-model="updateForm.icon">
-                <option v-for="option in iconOptions" :key="`update-icon-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Entity ID
-                <button type="button" class="help-icon" data-tooltip="Home Assistant helper entity ID (domain.object_id).">?</button>
-              </span>
-              <input v-model="updateForm.entity_id" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Default value
-                <button type="button" class="help-icon" data-tooltip="Value stored by default in HASSEMS and Home Assistant.">?</button>
-              </span>
-              <input v-model="updateForm.default_value" type="text" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Component
-                <button type="button" class="help-icon" data-tooltip="MQTT discovery platform.">?</button>
-              </span>
-              <select v-model="updateForm.component">
-                <option v-for="option in componentOptions" :key="`update-component-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                State class
-                <button type="button" class="help-icon" data-tooltip="Controls Home Assistant statistics handling.">?</button>
-              </span>
-              <select v-model="updateForm.state_class">
-                <option v-for="option in stateClassOptions" :key="`update-state-${option.value}`" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Unique ID
-                <button type="button" class="help-icon" data-tooltip="Identifier tracked by Home Assistant.">?</button>
-              </span>
-              <input v-model="updateForm.unique_id" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Object ID
-                <button type="button" class="help-icon" data-tooltip="Final segment of the discovery topic.">?</button>
-              </span>
-              <input v-model="updateForm.object_id" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device ID
-                <button type="button" class="help-icon" data-tooltip="Slug used to group entities from the same device.">?</button>
-              </span>
-              <input v-model="updateForm.device_id" type="text" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Node ID
-                <button type="button" class="help-icon" data-tooltip="Optional discovery topic folder.">?</button>
-              </span>
-              <input v-model="updateForm.node_id" type="text" placeholder="hassems" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                State topic
-                <button type="button" class="help-icon" data-tooltip="Topic where values are published.">?</button>
-              </span>
-              <input v-model="updateForm.state_topic" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Availability topic
-                <button type="button" class="help-icon" data-tooltip="Topic reflecting device availability.">?</button>
-              </span>
-              <input v-model="updateForm.availability_topic" type="text" required />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device manufacturer
-                <button type="button" class="help-icon" data-tooltip="Manufacturer metadata for the device.">?</button>
-              </span>
-              <input v-model="updateForm.device_manufacturer" type="text" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device model
-                <button type="button" class="help-icon" data-tooltip="Model identifier used by Home Assistant.">?</button>
-              </span>
-              <input v-model="updateForm.device_model" type="text" />
-            </label>
-            <label class="form-field">
-              <span class="label-text">
-                Device firmware
-                <button type="button" class="help-icon" data-tooltip="Software or firmware version string.">?</button>
-              </span>
-              <input v-model="updateForm.device_sw_version" type="text" />
-            </label>
-            <label class="form-field full-width">
-              <span class="label-text">
-                Device identifiers
-                <button type="button" class="help-icon" data-tooltip="Comma-separated identifiers for the parent device. Defaults to node_id:unique_id when left blank.">?</button>
-              </span>
-              <input v-model="updateForm.device_identifiers" type="text" />
-            </label>
-            <label class="form-checkbox">
-              <input v-model="updateForm.force_update" type="checkbox" />
-              <span class="label-text">
-                Force update
-                <button type="button" class="help-icon" data-tooltip="Emit state_changed events even when the value is unchanged.">?</button>
-              </span>
-            </label>
-          </div>
-
-          <div class="form-actions">
-            <button class="btn primary" type="submit">Save changes</button>
-          </div>
-        </form>
+        <div class="entity-summary">
+          <dl class="detail-list" aria-labelledby="detail-title">
+            <div
+              v-for="field in detailFields"
+              :key="field.key"
+              class="detail-list__item"
+            >
+              <dt>{{ field.label }}</dt>
+              <dd
+                :class="[
+                  'detail-list__value',
+                  {
+                    'detail-list__value--empty': field.isEmpty,
+                    'detail-list__value--wrap': field.wrap,
+                  },
+                ]"
+              >
+                {{ field.value }}
+              </dd>
+            </div>
+          </dl>
+        </div>
 
         <div class="helper-status">
-          <div class="helper-meta">
-            <p><strong>Component:</strong> <span id="detail-component">{{ selectedHelper?.component || '—' }}</span></p>
-            <p><strong>Discovery topic:</strong> <span id="detail-discovery-topic">{{ selectedDiscoveryTopic }}</span></p>
-            <p><strong>State topic:</strong> <span id="detail-state-topic">{{ selectedHelper?.state_topic || '—' }}</span></p>
-            <p><strong>Availability topic:</strong> <span id="detail-availability-topic">{{ selectedHelper?.availability_topic || '—' }}</span></p>
-          </div>
           <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedHelper?.last_value ?? '—' }}</span></p>
           <p><strong>Measured at:</strong> <span id="detail-measured-at">{{ selectedMeasuredAt }}</span></p>
           <p><strong>Recorded:</strong> <span id="detail-updated">{{ selectedUpdatedAt }}</span></p>
@@ -402,7 +238,21 @@
         <div class="divider"></div>
 
         <section class="history">
-          <h3>Recent values</h3>
+          <div class="history__header">
+            <h3>Recent values</h3>
+            <button
+              class="icon-button"
+              type="button"
+              @click="openHistoryDialog"
+              aria-label="Edit history entries"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M16.862 3.487a1.75 1.75 0 0 1 2.475 0l1.176 1.176a1.75 1.75 0 0 1 0 2.475l-9.9 9.9a1.75 1.75 0 0 1-.74.434l-4.01 1.147a.75.75 0 0 1-.92-.92l1.147-4.01a1.75 1.75 0 0 1 .434-.74l9.9-9.9Zm-2.475 2.475-9.9 9.9a.25.25 0 0 0-.062.106l-.84 2.934 2.934-.84a.25.25 0 0 0 .106-.062l9.9-9.9-2.138-2.138Zm3.243-1.06a.25.25 0 0 0-.354 0l-1.06 1.06 2.138 2.138 1.06-1.06a.25.25 0 0 0 0-.354l-1.176-1.176a.25.25 0 0 0-.354 0Z"
+                />
+              </svg>
+            </button>
+          </div>
           <canvas
             v-show="historyMode === 'chart'"
             id="history-chart"
@@ -452,7 +302,7 @@
                 <input v-model="valueForm.measured_time" type="time" name="measured_time" step="60" />
               </div>
             </label>
-            <button class="btn primary" type="submit">Publish to MQTT</button>
+            <button class="btn primary" type="submit">{{ valueSubmitLabel }}</button>
           </form>
         </section>
       </section>
@@ -485,6 +335,27 @@
         <form class="modal__form" id="create-helper-form" @submit.prevent="createHelper">
           <div class="modal__body">
             <div class="form-grid form-grid--base">
+              <fieldset class="form-field full-width entity-type-field">
+                <legend class="label-text">
+                  Entity type
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Choose MQTT to sync with Home Assistant via the broker or HASSEMS to store values locally."
+                  >?
+                  </button>
+                </legend>
+                <div class="entity-type-toggle">
+                  <label :class="['toggle-button', { active: createForm.entity_type === 'mqtt' }]">
+                    <input v-model="createForm.entity_type" type="radio" value="mqtt" />
+                    MQTT
+                  </label>
+                  <label :class="['toggle-button', { active: createForm.entity_type === 'hassems' }]">
+                    <input v-model="createForm.entity_type" type="radio" value="hassems" />
+                    HASSEMS
+                  </label>
+                </div>
+              </fieldset>
               <label class="form-field">
                 <span class="label-text">
                   Device name
@@ -603,18 +474,6 @@
                   placeholder="input_number.child_metrics_height"
                   @input="createAutoFlags.entityId = false"
                 />
-              </label>
-              <label class="form-checkbox">
-                <input v-model="createForm.force_update" type="checkbox" />
-                <span class="label-text">
-                  Force update
-                  <button
-                    type="button"
-                    class="help-icon"
-                    data-tooltip="Emit state_changed events even when the value is unchanged. Useful for clean charts."
-                  >?
-                  </button>
-                </span>
               </label>
             </div>
 
@@ -738,7 +597,7 @@
                     @blur="handleCreateDeviceIdBlur"
                   />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     Node ID
                     <button
@@ -755,7 +614,7 @@
                     @blur="handleCreateNodeBlur"
                   />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     State topic
                     <button
@@ -768,12 +627,11 @@
                   <input
                     v-model="createForm.state_topic"
                     type="text"
-                    required
                     placeholder="hassems/child_metrics/input_number.child_metrics_height/state"
                     @input="createAutoFlags.stateTopic = false"
                   />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     Availability topic
                     <button
@@ -786,12 +644,11 @@
                   <input
                     v-model="createForm.availability_topic"
                     type="text"
-                    required
                     placeholder="hassems/child_metrics/input_number.child_metrics_height/availability"
                     @input="createAutoFlags.availabilityTopic = false"
                   />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     Device manufacturer
                     <button
@@ -803,7 +660,7 @@
                   </span>
                   <input v-model="createForm.device_manufacturer" type="text" placeholder="HASSEMS" />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     Device model
                     <button
@@ -815,7 +672,7 @@
                   </span>
                   <input v-model="createForm.device_model" type="text" placeholder="Input Number" />
                 </label>
-                <label class="form-field">
+                <label v-if="isCreateMqtt" class="form-field">
                   <span class="label-text">
                     Device firmware
                     <button
@@ -827,7 +684,7 @@
                   </span>
                   <input v-model="createForm.device_sw_version" type="text" placeholder="1.0.0" />
                 </label>
-                <label class="form-field full-width">
+                <label v-if="isCreateMqtt" class="form-field full-width">
                   <span class="label-text">
                     Device identifiers
                     <button
@@ -844,14 +701,372 @@
                   />
                 </label>
               </div>
+              <label v-if="isCreateMqtt" class="form-checkbox">
+                <input v-model="createForm.force_update" type="checkbox" />
+                <span class="label-text">
+                  Force update
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Emit state_changed events even when the value is unchanged. Useful for clean charts."
+                  >?</button>
+                </span>
+              </label>
             </details>
           </div>
           <div class="modal__actions">
             <button class="btn primary" type="submit">Create entity</button>
-            <button class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
+            <button v-if="isCreateMqtt" class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
           </div>
         </form>
       </div>
+    </dialog>
+
+    <dialog
+      ref="editDialog"
+      class="modal"
+      @cancel.prevent="closeEditDialog"
+      @close="onEditDialogClose"
+    >
+      <template v-if="selectedHelper">
+        <div class="modal__container">
+          <div class="modal__header">
+            <h3>Edit entity</h3>
+            <button
+              type="button"
+              class="modal__close"
+              @click="closeEditDialog"
+              aria-label="Close edit entity dialog"
+            >
+              ×
+            </button>
+          </div>
+          <form class="modal__form" id="update-helper-form" @submit.prevent="updateHelper">
+            <div class="modal__body">
+              <div class="form-grid form-grid--base">
+                <label class="form-field">
+                  <span class="label-text">
+                    Device name
+                    <button type="button" class="help-icon" data-tooltip="Parent device name in Home Assistant.">?</button>
+                  </span>
+                  <input v-model="updateForm.device_name" type="text" required />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Entity name
+                    <button type="button" class="help-icon" data-tooltip="Update the friendly name shown in Home Assistant.">?</button>
+                  </span>
+                  <input v-model="updateForm.name" type="text" required />
+                </label>
+                <label class="form-field full-width">
+                  <span class="label-text">
+                    Description
+                    <button type="button" class="help-icon" data-tooltip="Reference notes about the entity.">?</button>
+                  </span>
+                  <textarea v-model="updateForm.description" rows="3"></textarea>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Type
+                    <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited.">?</button>
+                  </span>
+                  <input :value="selectedTypeLabel" type="text" readonly />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Entity type
+                    <button type="button" class="help-icon" data-tooltip="Indicates whether the entity syncs over MQTT or is stored within HASSEMS.">?</button>
+                  </span>
+                  <input :value="selectedEntityTypeLabel" type="text" readonly />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Device class
+                    <button type="button" class="help-icon" data-tooltip="Home Assistant device class.">?</button>
+                  </span>
+                  <select v-model="updateForm.device_class">
+                    <option v-for="option in deviceClassOptions" :key="`update-device-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Unit of measurement
+                    <button type="button" class="help-icon" data-tooltip="Measurement unit reported to Home Assistant.">?</button>
+                  </span>
+                  <select v-model="updateForm.unit_of_measurement">
+                    <option v-for="option in unitOptions" :key="`update-unit-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Icon
+                    <button type="button" class="help-icon" data-tooltip="Material Design Icon reference used in the UI.">?</button>
+                  </span>
+                  <select v-model="updateForm.icon">
+                    <option v-for="option in iconOptions" :key="`update-icon-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Entity ID
+                    <button type="button" class="help-icon" data-tooltip="Home Assistant helper entity ID (domain.object_id).">?</button>
+                  </span>
+                  <input v-model="updateForm.entity_id" type="text" required />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Default value
+                    <button type="button" class="help-icon" data-tooltip="Value stored by default in HASSEMS and Home Assistant.">?</button>
+                  </span>
+                  <input v-model="updateForm.default_value" type="text" />
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    Component
+                    <button type="button" class="help-icon" data-tooltip="MQTT discovery platform.">?</button>
+                  </span>
+                  <select v-model="updateForm.component">
+                    <option v-for="option in componentOptions" :key="`update-component-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span class="label-text">
+                    State class
+                    <button type="button" class="help-icon" data-tooltip="Controls Home Assistant statistics handling.">?</button>
+                  </span>
+                  <select v-model="updateForm.state_class">
+                    <option v-for="option in stateClassOptions" :key="`update-state-${option.value}`" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label
+                  v-if="selectedHelper?.type === 'input_select'"
+                  class="form-field full-width"
+                >
+                  <span class="label-text">
+                    Options (comma separated)
+                    <button type="button" class="help-icon" data-tooltip="Comma-delimited options for input_select helpers.">?</button>
+                  </span>
+                  <input v-model="updateForm.options" type="text" placeholder="short,average,tall" />
+                </label>
+              </div>
+
+              <details class="form-advanced">
+                <summary>Advanced configuration</summary>
+                <div class="form-grid">
+                  <label class="form-field">
+                    <span class="label-text">
+                      Unique ID
+                      <button type="button" class="help-icon" data-tooltip="Identifier tracked by Home Assistant.">?</button>
+                    </span>
+                    <input v-model="updateForm.unique_id" type="text" required />
+                  </label>
+                  <label class="form-field">
+                    <span class="label-text">
+                      Object ID
+                      <button type="button" class="help-icon" data-tooltip="Final segment of the discovery topic.">?</button>
+                    </span>
+                    <input v-model="updateForm.object_id" type="text" required />
+                  </label>
+                  <label class="form-field">
+                    <span class="label-text">
+                      Device ID
+                      <button type="button" class="help-icon" data-tooltip="Slug used to group entities from the same device.">?</button>
+                    </span>
+                    <input v-model="updateForm.device_id" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      Node ID
+                      <button type="button" class="help-icon" data-tooltip="Optional discovery topic folder.">?</button>
+                    </span>
+                    <input v-model="updateForm.node_id" type="text" placeholder="hassems" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      State topic
+                      <button type="button" class="help-icon" data-tooltip="Topic where values are published.">?</button>
+                    </span>
+                    <input v-model="updateForm.state_topic" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      Availability topic
+                      <button type="button" class="help-icon" data-tooltip="Topic reflecting device availability.">?</button>
+                    </span>
+                    <input v-model="updateForm.availability_topic" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      Device manufacturer
+                      <button type="button" class="help-icon" data-tooltip="Manufacturer metadata for the device.">?</button>
+                    </span>
+                    <input v-model="updateForm.device_manufacturer" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      Device model
+                      <button type="button" class="help-icon" data-tooltip="Model identifier used by Home Assistant.">?</button>
+                    </span>
+                    <input v-model="updateForm.device_model" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field"
+                  >
+                    <span class="label-text">
+                      Device firmware
+                      <button type="button" class="help-icon" data-tooltip="Software or firmware version string.">?</button>
+                    </span>
+                    <input v-model="updateForm.device_sw_version" type="text" />
+                  </label>
+                  <label
+                    v-if="isUpdateMqtt"
+                    class="form-field full-width"
+                  >
+                    <span class="label-text">
+                      Device identifiers
+                      <button type="button" class="help-icon" data-tooltip="Comma-separated identifiers for the parent device.">?</button>
+                    </span>
+                    <input v-model="updateForm.device_identifiers" type="text" />
+                  </label>
+                </div>
+                <label v-if="isUpdateMqtt" class="form-checkbox">
+                  <input v-model="updateForm.force_update" type="checkbox" />
+                  <span class="label-text">
+                    Force update
+                    <button type="button" class="help-icon" data-tooltip="Emit state_changed events even when the value is unchanged.">?</button>
+                  </span>
+                </label>
+              </details>
+            </div>
+
+            <div class="modal__actions">
+              <button class="btn primary" type="submit">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </template>
+    </dialog>
+
+    <dialog
+      ref="historyDialog"
+      class="modal"
+      @cancel.prevent="closeHistoryDialog"
+      @close="onHistoryDialogClose"
+    >
+      <template v-if="selectedHelper">
+        <div class="modal__container">
+          <div class="modal__header">
+            <h3>Edit history entries</h3>
+            <button
+              type="button"
+              class="modal__close"
+              @click="closeHistoryDialog"
+              aria-label="Close history editor"
+            >
+              ×
+            </button>
+          </div>
+          <div class="modal__body history-editor-body">
+            <p class="modal__subtitle">
+              Adjust recorded values for <strong>{{ selectedHelper.name }}</strong> or remove entries you no longer need.
+            </p>
+            <div v-if="historyEditorRows.length" class="history-editor-wrapper">
+              <table class="history-editor-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Measured at</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Recorded</th>
+                    <th scope="col" class="history-editor-actions-header">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in historyEditorRows" :key="row.id">
+                    <td data-label="Measured at">
+                      <input type="datetime-local" v-model="row.measuredInput" />
+                    </td>
+                    <td data-label="Value">
+                      <template v-if="valueInputType === 'boolean'">
+                        <select v-model="row.valueInput">
+                          <option value="false">Off</option>
+                          <option value="true">On</option>
+                        </select>
+                      </template>
+                      <template v-else-if="valueInputType === 'number'">
+                        <input type="number" v-model="row.valueInput" />
+                      </template>
+                      <template v-else-if="valueInputType === 'select'">
+                        <select v-model="row.valueInput">
+                          <option v-for="option in valueOptions" :key="option" :value="option">
+                            {{ option }}
+                          </option>
+                        </select>
+                      </template>
+                      <template v-else>
+                        <input type="text" v-model="row.valueInput" />
+                      </template>
+                    </td>
+                    <td data-label="Recorded">
+                      <span>{{ row.recordedDisplay }}</span>
+                    </td>
+                    <td data-label="Actions">
+                      <div class="history-editor-actions">
+                        <button
+                          class="btn small"
+                          type="button"
+                          @click="saveHistoryRow(row)"
+                          :disabled="row.saving || row.deleting"
+                        >
+                          {{ row.saving ? 'Saving…' : 'Save' }}
+                        </button>
+                        <button
+                          class="btn danger small"
+                          type="button"
+                          @click="deleteHistoryRow(row)"
+                          :disabled="row.saving || row.deleting"
+                        >
+                          {{ row.deleting ? 'Deleting…' : 'Delete' }}
+                        </button>
+                      </div>
+                      <p v-if="row.error" class="history-editor-error">{{ row.error }}</p>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="modal__subtitle">No history has been recorded for this entity yet.</p>
+          </div>
+          <div class="modal__actions">
+            <button type="button" class="btn" @click="closeHistoryDialog">Close</button>
+          </div>
+        </div>
+      </template>
     </dialog>
 
     <dialog ref="discoveryDialog" class="modal" @cancel.prevent="closeDiscoveryPreview" @close="onDiscoveryDialogClose">
@@ -937,6 +1152,11 @@ const helperTypeMap = {
   input_number: 'Input number',
   input_boolean: 'Input boolean',
   input_select: 'Input select',
+};
+
+const entityTransportLabels = {
+  mqtt: 'MQTT',
+  hassems: 'HASSEMS',
 };
 
 const deviceClassOptions = [
@@ -1150,15 +1370,20 @@ const historyMode = ref('empty');
 const historyList = ref([]);
 const historyCanvas = ref(null);
 const chartInstance = ref(null);
+const historyDialog = ref(null);
+const historyDialogVisible = ref(false);
+const historyEditorRows = ref([]);
 
 const discoveryPreview = ref(null);
 const discoveryDialog = ref(null);
 const createDialog = ref(null);
+const editDialog = ref(null);
 const apiDialog = ref(null);
 const apiOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
 
 function createCreateDefaults() {
   return {
+    entity_type: 'mqtt',
     device_name: '',
     name: '',
     description: '',
@@ -1231,6 +1456,11 @@ const selectedTypeLabel = computed(() => {
   const helper = selectedHelper.value;
   return helper ? helperTypeMap[helper.type] || helper.type : '';
 });
+const selectedEntityTypeLabel = computed(() => {
+  const helper = selectedHelper.value;
+  if (!helper) return '';
+  return entityTransportLabels[helper.entity_type] || helper.entity_type;
+});
 const selectedMeasuredAt = computed(() => {
   const helper = selectedHelper.value;
   return helper?.last_measured_at ? formatTimestamp(helper.last_measured_at) : '—';
@@ -1239,9 +1469,60 @@ const selectedUpdatedAt = computed(() => {
   const helper = selectedHelper.value;
   return helper?.updated_at ? formatTimestamp(helper.updated_at) : '—';
 });
-const selectedDiscoveryTopic = computed(() => {
+const isUpdateMqtt = computed(() => selectedHelper.value?.entity_type === 'mqtt');
+const detailFields = computed(() => {
   const helper = selectedHelper.value;
-  return helper ? computeDiscoveryTopic(helper) : '—';
+  if (!helper) {
+    return [];
+  }
+  const description = (helper.description || '').trim();
+  const typeLabel = selectedTypeLabel.value || helper.type || '';
+  const deviceClass = helper.device_class || '';
+  const unit = helper.unit_of_measurement || '';
+  return [
+    {
+      key: 'device_name',
+      label: 'Device name',
+      value: helper.device_name || '—',
+      isEmpty: !helper.device_name,
+      wrap: false,
+    },
+    {
+      key: 'entity_name',
+      label: 'Entity name',
+      value: helper.name || '—',
+      isEmpty: !helper.name,
+      wrap: false,
+    },
+    {
+      key: 'description',
+      label: 'Description',
+      value: description || '—',
+      isEmpty: !description,
+      wrap: true,
+    },
+    {
+      key: 'type',
+      label: 'Type',
+      value: typeLabel || '—',
+      isEmpty: !typeLabel,
+      wrap: false,
+    },
+    {
+      key: 'device_class',
+      label: 'Device class',
+      value: deviceClass || '—',
+      isEmpty: !deviceClass,
+      wrap: false,
+    },
+    {
+      key: 'unit',
+      label: 'Unit of measurement',
+      value: unit || '—',
+      isEmpty: !unit,
+      wrap: false,
+    },
+  ];
 });
 const selectedApiPath = computed(() => {
   const helper = selectedHelper.value;
@@ -1296,11 +1577,38 @@ const valuePlaceholder = computed(() => {
   }
   return '';
 });
+const valueSubmitLabel = computed(() => {
+  const helper = selectedHelper.value;
+  return helper?.entity_type === 'hassems' ? 'Record value' : 'Publish to MQTT';
+});
 const createOptionsDisabled = computed(() => createForm.type !== 'input_select');
+const isCreateMqtt = computed(() => createForm.entity_type === 'mqtt');
 
 watch(
   () => [createForm.name, createForm.device_name, createForm.type, createForm.node_id],
   () => {
+    syncCreateAutofill();
+  },
+);
+
+watch(
+  () => createForm.entity_type,
+  (entityType) => {
+    if (entityType === 'mqtt') {
+      createForm.force_update = true;
+      if (!createForm.node_id) {
+        createForm.node_id = 'hassems';
+      }
+    } else {
+      createForm.force_update = false;
+      createForm.node_id = '';
+      createForm.state_topic = '';
+      createForm.availability_topic = '';
+      createForm.device_manufacturer = '';
+      createForm.device_model = '';
+      createForm.device_sw_version = '';
+      createForm.device_identifiers = '';
+    }
     syncCreateAutofill();
   },
 );
@@ -1334,23 +1642,28 @@ watch(discoveryPreview, (preview) => {
 });
 
 watch(selectedHelper, async (helper, previous) => {
+  closeHistoryDialog();
   if (helper) {
     populateUpdateForm(helper);
     populateValueForm(helper);
     await loadHistory(helper.slug);
   } else {
+    closeEditDialog();
     resetUpdateForm();
     clearValueForm();
     historyRecords.value = [];
     historyList.value = [];
     historyMode.value = 'empty';
     closeApiDialog();
+    historyEditorRows.value = [];
   }
 });
 
 watch(activePage, (page) => {
   if (page !== 'entities') {
     closeApiDialog();
+    closeEditDialog();
+    closeHistoryDialog();
   }
 });
 
@@ -1497,6 +1810,65 @@ function onCreateDialogClose() {
   resetCreateForm();
 }
 
+function openEditDialog() {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity to edit.', 'error');
+    return;
+  }
+  populateUpdateForm(helper);
+  const dialog = editDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeEditDialog() {
+  const dialog = editDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+}
+
+function onEditDialogClose() {
+  if (!selectedHelper.value) {
+    resetUpdateForm();
+  }
+}
+
+function openHistoryDialog() {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity to edit history.', 'error');
+    return;
+  }
+  syncHistoryEditorRows();
+  const dialog = historyDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  historyDialogVisible.value = true;
+}
+
+function closeHistoryDialog() {
+  const dialog = historyDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
+  historyDialogVisible.value = false;
+}
+
+function onHistoryDialogClose() {
+  historyDialogVisible.value = false;
+  syncHistoryEditorRows();
+}
+
 function openApiDialog() {
   const helper = selectedHelper.value;
   if (!helper) {
@@ -1558,6 +1930,7 @@ function syncCreateAutofill() {
   const typeValue = createForm.type ?? '';
   const deviceNameValue = createForm.device_name ?? '';
   const deviceSlug = slugifyIdentifier(deviceNameValue);
+  const isMqtt = createForm.entity_type === 'mqtt';
 
   if (createAutoFlags.deviceId) {
     createForm.device_id = deviceSlug;
@@ -1588,6 +1961,16 @@ function syncCreateAutofill() {
     } else {
       createForm.entity_id = '';
     }
+  }
+
+  if (!isMqtt) {
+    if (createAutoFlags.stateTopic) {
+      createForm.state_topic = '';
+    }
+    if (createAutoFlags.availabilityTopic) {
+      createForm.availability_topic = '';
+    }
+    return;
   }
 
   if (!createForm.node_id) {
@@ -1644,20 +2027,25 @@ async function createHelper() {
 
 function buildCreatePayload() {
   const type = createForm.type;
+  const isMqtt = createForm.entity_type === 'mqtt';
   const payload = {
     name: createForm.name?.trim(),
     entity_id: createForm.entity_id?.trim(),
     type,
+    entity_type: createForm.entity_type,
     component: createForm.component?.trim() || 'sensor',
     unique_id: slugifyIdentifier(createForm.unique_id?.trim() || ''),
     object_id: slugifyIdentifier(createForm.object_id?.trim() || ''),
-    node_id: slugifyIdentifier(createForm.node_id?.trim() || '') || null,
-    state_topic: createForm.state_topic?.trim(),
-    availability_topic: createForm.availability_topic?.trim(),
-    force_update: Boolean(createForm.force_update),
     device_name: createForm.device_name?.trim(),
     device_id: slugifyIdentifier(createForm.device_id?.trim() || '') || null,
   };
+
+  if (isMqtt) {
+    payload.node_id = slugifyIdentifier(createForm.node_id?.trim() || '') || null;
+    payload.state_topic = createForm.state_topic?.trim();
+    payload.availability_topic = createForm.availability_topic?.trim();
+    payload.force_update = Boolean(createForm.force_update);
+  }
 
   if (createForm.description?.trim()) {
     payload.description = createForm.description.trim();
@@ -1674,13 +2062,13 @@ function buildCreatePayload() {
   if (createForm.icon?.trim()) {
     payload.icon = createForm.icon.trim();
   }
-  if (createForm.device_manufacturer?.trim()) {
+  if (isMqtt && createForm.device_manufacturer?.trim()) {
     payload.device_manufacturer = createForm.device_manufacturer.trim();
   }
-  if (createForm.device_model?.trim()) {
+  if (isMqtt && createForm.device_model?.trim()) {
     payload.device_model = createForm.device_model.trim();
   }
-  if (createForm.device_sw_version?.trim()) {
+  if (isMqtt && createForm.device_sw_version?.trim()) {
     payload.device_sw_version = createForm.device_sw_version.trim();
   }
 
@@ -1697,7 +2085,7 @@ function buildCreatePayload() {
   }
 
   const identifiers = parseCsv(createForm.device_identifiers);
-  if (identifiers.length) {
+  if (isMqtt && identifiers.length) {
     payload.device_identifiers = identifiers;
   }
 
@@ -1705,6 +2093,10 @@ function buildCreatePayload() {
 }
 
 function previewDiscovery() {
+  if (!isCreateMqtt.value) {
+    showToast('Discovery preview is only available for MQTT entities.', 'info');
+    return;
+  }
   try {
     const helperDraft = buildHelperDraft();
     const topic = computeDiscoveryTopic(helperDraft);
@@ -1837,6 +2229,7 @@ function onDiscoveryDialogClose() {
 }
 
 function populateUpdateForm(helper) {
+  const isMqtt = helper.entity_type === 'mqtt';
   Object.assign(updateForm, {
     device_name: helper.device_name ?? '',
     name: helper.name ?? '',
@@ -1852,14 +2245,14 @@ function populateUpdateForm(helper) {
     unique_id: helper.unique_id ?? '',
     object_id: helper.object_id ?? '',
     device_id: helper.device_id ?? slugifyIdentifier(helper.device_name ?? ''),
-    node_id: helper.node_id ?? 'hassems',
-    state_topic: helper.state_topic ?? '',
-    availability_topic: helper.availability_topic ?? '',
-    device_manufacturer: helper.device_manufacturer ?? '',
-    device_model: helper.device_model ?? '',
-    device_sw_version: helper.device_sw_version ?? '',
-    device_identifiers: (helper.device_identifiers || []).join(', '),
-    force_update: helper.force_update !== false,
+    node_id: isMqtt ? helper.node_id ?? 'hassems' : '',
+    state_topic: isMqtt ? helper.state_topic ?? '' : '',
+    availability_topic: isMqtt ? helper.availability_topic ?? '' : '',
+    device_manufacturer: isMqtt ? helper.device_manufacturer ?? '' : '',
+    device_model: isMqtt ? helper.device_model ?? '' : '',
+    device_sw_version: isMqtt ? helper.device_sw_version ?? '' : '',
+    device_identifiers: isMqtt ? (helper.device_identifiers || []).join(', ') : '',
+    force_update: isMqtt ? helper.force_update !== false : false,
   });
 }
 
@@ -1879,14 +2272,14 @@ function resetUpdateForm() {
     unique_id: '',
     object_id: '',
     device_id: '',
-    node_id: 'hassems',
+    node_id: '',
     state_topic: '',
     availability_topic: '',
     device_manufacturer: '',
     device_model: '',
     device_sw_version: '',
     device_identifiers: '',
-    force_update: true,
+    force_update: false,
   });
 }
 
@@ -1905,12 +2298,15 @@ async function updateHelper() {
     showToast('Entity updated.', 'success');
     helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
+    closeEditDialog();
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
   }
 }
 
 function buildUpdatePayload(helperType) {
+  const helper = selectedHelper.value;
+  const isMqtt = helper?.entity_type === 'mqtt';
   const payload = {
     name: updateForm.name?.trim(),
     entity_id: updateForm.entity_id?.trim(),
@@ -1919,20 +2315,23 @@ function buildUpdatePayload(helperType) {
     component: updateForm.component?.trim() || null,
     unique_id: slugifyIdentifier(updateForm.unique_id?.trim() || '') || null,
     object_id: slugifyIdentifier(updateForm.object_id?.trim() || '') || null,
-    node_id: slugifyIdentifier(updateForm.node_id?.trim() || '') || null,
-    state_topic: updateForm.state_topic?.trim(),
-    availability_topic: updateForm.availability_topic?.trim(),
     icon: updateForm.icon?.trim() || null,
     device_class: updateForm.device_class?.trim() || null,
     unit_of_measurement: updateForm.unit_of_measurement?.trim() || null,
     state_class: updateForm.state_class?.trim() || null,
-    force_update: Boolean(updateForm.force_update),
     device_name: updateForm.device_name?.trim(),
     device_id: slugifyIdentifier(updateForm.device_id?.trim() || '') || null,
-    device_manufacturer: updateForm.device_manufacturer?.trim() || null,
-    device_model: updateForm.device_model?.trim() || null,
-    device_sw_version: updateForm.device_sw_version?.trim() || null,
   };
+
+  if (isMqtt) {
+    payload.node_id = slugifyIdentifier(updateForm.node_id?.trim() || '') || null;
+    payload.state_topic = updateForm.state_topic?.trim() || null;
+    payload.availability_topic = updateForm.availability_topic?.trim() || null;
+    payload.force_update = Boolean(updateForm.force_update);
+    payload.device_manufacturer = updateForm.device_manufacturer?.trim() || null;
+    payload.device_model = updateForm.device_model?.trim() || null;
+    payload.device_sw_version = updateForm.device_sw_version?.trim() || null;
+  }
 
   const defaultRaw = updateForm.default_value?.trim();
   if (defaultRaw) {
@@ -1948,7 +2347,9 @@ function buildUpdatePayload(helperType) {
 
   const identifiersRaw = updateForm.device_identifiers ?? '';
   const trimmed = identifiersRaw.trim();
-  payload.device_identifiers = trimmed ? parseCsv(trimmed) : [];
+  if (isMqtt) {
+    payload.device_identifiers = trimmed ? parseCsv(trimmed) : [];
+  }
 
   return removeUndefined(payload);
 }
@@ -2064,7 +2465,8 @@ async function submitValue() {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    showToast('Value sent to MQTT.', 'success');
+    const successMessage = helper.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
+    showToast(successMessage, 'success');
     helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
     await loadHistory(updated.slug);
@@ -2073,24 +2475,165 @@ async function submitValue() {
   }
 }
 
+function getHistoryTimestamp(entry) {
+  if (!entry) {
+    return 0;
+  }
+  const source = entry.measured_at || entry.recorded_at;
+  if (!source) {
+    return 0;
+  }
+  const timestamp = new Date(source).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function sortHistoryRecords(records) {
+  if (!Array.isArray(records)) {
+    return [];
+  }
+  return [...records].sort((a, b) => getHistoryTimestamp(a) - getHistoryTimestamp(b));
+}
+
+function formatHistoryValueForInput(helperType, value) {
+  if (helperType === 'input_boolean') {
+    const normalized = String(value).toLowerCase();
+    if (['true', 'on', '1', 'yes'].includes(normalized)) {
+      return 'true';
+    }
+    return 'false';
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value);
+}
+
+function toDateTimeLocalString(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const pad = (input) => String(input).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function buildHistoryEditorRows(records) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    return [];
+  }
+  const helperType = helper.type;
+  return records.map((entry) => ({
+    id: entry.id,
+    valueInput: formatHistoryValueForInput(helperType, entry.value),
+    measuredInput: toDateTimeLocalString(entry.measured_at || entry.recorded_at),
+    recordedDisplay: formatTimestamp(entry.recorded_at),
+    saving: false,
+    deleting: false,
+    error: '',
+  }));
+}
+
+function syncHistoryEditorRows() {
+  historyEditorRows.value = buildHistoryEditorRows(historyRecords.value);
+}
+
 async function loadHistory(slug) {
   try {
     const history = await requestJson(`/inputs/${slug}/history`);
-    historyRecords.value = Array.isArray(history) ? history : [];
+    const records = Array.isArray(history) ? history : [];
+    historyRecords.value = sortHistoryRecords(records);
+    syncHistoryEditorRows();
   } catch (error) {
     showToast(`Failed to load history: ${error instanceof Error ? error.message : String(error)}`, 'error');
   }
 }
 
+async function saveHistoryRow(row) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity before editing history.', 'error');
+    return;
+  }
+  let measuredAtIso = null;
+  if (row.measuredInput) {
+    const measuredDate = new Date(row.measuredInput);
+    if (Number.isNaN(measuredDate.getTime())) {
+      row.error = 'Enter a valid measurement time.';
+      return;
+    }
+    measuredAtIso = measuredDate.toISOString();
+  }
+  let value;
+  try {
+    value = coerceValue(helper.type, row.valueInput);
+  } catch (error) {
+    row.error = error instanceof Error ? error.message : String(error);
+    return;
+  }
+  row.error = '';
+  row.saving = true;
+  try {
+    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        value,
+        measured_at: measuredAtIso,
+      }),
+    });
+    showToast('History entry updated.', 'success');
+    await loadHistory(helper.slug);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    row.saving = false;
+  }
+}
+
+async function deleteHistoryRow(row) {
+  const helper = selectedHelper.value;
+  if (!helper) {
+    showToast('Select an entity before editing history.', 'error');
+    return;
+  }
+  const confirmed =
+    typeof window === 'undefined' || window.confirm('Delete this history entry? This cannot be undone.');
+  if (!confirmed) {
+    return;
+  }
+  row.error = '';
+  row.deleting = true;
+  try {
+    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+      method: 'DELETE',
+    });
+    showToast('History entry deleted.', 'success');
+    await loadHistory(helper.slug);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    row.deleting = false;
+  }
+}
+
 function renderHistory(helper, history) {
   destroyChart();
-  if (!history || !history.length) {
+  const sorted = sortHistoryRecords(history);
+  if (!sorted.length) {
     historyMode.value = 'empty';
     historyList.value = [];
     return;
   }
-  const labels = history.map((item) => formatTimestamp(item.measured_at));
-  const numericValues = history.map((item) => normalizeHistoryValue(helper.type, item.value));
+  const labels = sorted.map((item) => formatTimestamp(item.measured_at));
+  const numericValues = sorted.map((item) => normalizeHistoryValue(helper.type, item.value));
   const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
   if (allNumeric && historyCanvas.value) {
     historyMode.value = 'chart';
@@ -2136,7 +2679,7 @@ function renderHistory(helper, history) {
     return;
   }
   historyMode.value = 'list';
-  historyList.value = history.map((item) => ({
+  historyList.value = sorted.map((item) => ({
     measured_at: formatTimestamp(item.measured_at),
     value: String(item.value ?? '—'),
   }));

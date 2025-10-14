@@ -9,7 +9,9 @@ from threading import Lock
 from typing import Iterator, List, Optional
 
 from .models import (
+    EntityTransportType,
     HistoryPoint,
+    HistoryPointUpdate,
     InputHelper,
     InputHelperCreate,
     InputHelperRecord,
@@ -98,6 +100,7 @@ class InputHelperStore:
                     name TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
                     helper_type TEXT NOT NULL,
+                    entity_type TEXT NOT NULL DEFAULT 'mqtt',
                     description TEXT,
                     default_value TEXT,
                     options TEXT,
@@ -159,6 +162,7 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "node_id", "TEXT")
             self._ensure_column(conn, "helpers", "state_topic", "TEXT")
             self._ensure_column(conn, "helpers", "availability_topic", "TEXT")
+            self._ensure_column(conn, "helpers", "entity_type", "TEXT NOT NULL DEFAULT 'mqtt'")
             self._ensure_column(conn, "helpers", "icon", "TEXT")
             self._ensure_column(conn, "helpers", "state_class", "TEXT")
             self._ensure_column(conn, "helpers", "force_update", "INTEGER NOT NULL DEFAULT 1")
@@ -204,19 +208,20 @@ class InputHelperStore:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO helpers (
-                        slug, name, entity_id, helper_type, description, default_value,
+                        slug, name, entity_id, helper_type, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
                     helper.name,
                     helper.entity_id,
                     helper.type.value,
+                    helper.entity_type.value,
                     helper.description,
                     _serialize_value(helper.default_value),
                     _serialize_options(helper.options),
@@ -245,40 +250,69 @@ class InputHelperStore:
             )
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
-        keys = set(row.keys())
+        mapping = dict(row)
+        keys = set(mapping.keys())
+        entity_type_value = mapping.get("entity_type", "mqtt")
+        try:
+            entity_type = EntityTransportType(entity_type_value or "mqtt")
+        except ValueError:
+            entity_type = EntityTransportType.MQTT
+        is_mqtt = entity_type == EntityTransportType.MQTT
+        node_id = mapping.get("node_id") if is_mqtt else None
+        slug = mapping["slug"]
+        state_topic_value = (
+            (mapping.get("state_topic") or "").strip() if is_mqtt else None
+        )
+        availability_topic_value = (
+            (mapping.get("availability_topic") or "").strip() if is_mqtt else None
+        )
+        if is_mqtt:
+            if not state_topic_value:
+                state_topic_value = f"{slug}/state"
+            if not availability_topic_value:
+                availability_topic_value = f"{slug}/availability"
+        force_update_value = bool(mapping.get("force_update", 1)) if is_mqtt else False
+        device_manufacturer = mapping.get("device_manufacturer") if is_mqtt else None
+        device_model = mapping.get("device_model") if is_mqtt else None
+        device_sw_version = mapping.get("device_sw_version") if is_mqtt else None
+        identifiers = (
+            _deserialize_identifiers(mapping.get("device_identifiers"))
+            if is_mqtt
+            else []
+        )
+
         return InputHelper(
-            slug=row["slug"],
-            name=row["name"],
-            entity_id=row["entity_id"],
-            type=row["helper_type"],
-            description=row["description"],
-            default_value=_deserialize_value(row["default_value"]),
-            options=_deserialize_options(row["options"]),
-            last_value=_deserialize_value(row["last_value"]),
-            last_measured_at=datetime.fromisoformat(row["last_measured_at"])
-            if "last_measured_at" in keys and row["last_measured_at"]
+            slug=mapping["slug"],
+            name=mapping["name"],
+            entity_id=mapping["entity_id"],
+            type=mapping["helper_type"],
+            entity_type=entity_type,
+            description=mapping["description"],
+            default_value=_deserialize_value(mapping["default_value"]),
+            options=_deserialize_options(mapping["options"]),
+            last_value=_deserialize_value(mapping["last_value"]),
+            last_measured_at=datetime.fromisoformat(mapping["last_measured_at"])
+            if "last_measured_at" in keys and mapping["last_measured_at"]
             else None,
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-            device_class=row["device_class"],
-            unit_of_measurement=row["unit_of_measurement"],
-            component=row.get("component", "sensor"),
-            unique_id=row.get("unique_id", row["slug"]),
-            object_id=row.get("object_id", row["slug"]),
-            node_id=row.get("node_id"),
-            state_topic=row.get("state_topic", f"{row['slug']}/state"),
-            availability_topic=row.get(
-                "availability_topic", f"{row['slug']}/availability"
-            ),
-            icon=row.get("icon"),
-            state_class=row.get("state_class"),
-            force_update=bool(row.get("force_update", 1)),
-            device_name=row.get("device_name", row["name"]),
-            device_id=row.get("device_id", slugify_identifier(row.get("device_name", ""))),
-            device_manufacturer=row.get("device_manufacturer"),
-            device_model=row.get("device_model"),
-            device_sw_version=row.get("device_sw_version"),
-            device_identifiers=_deserialize_identifiers(row.get("device_identifiers")),
+            created_at=datetime.fromisoformat(mapping["created_at"]),
+            updated_at=datetime.fromisoformat(mapping["updated_at"]),
+            device_class=mapping["device_class"],
+            unit_of_measurement=mapping["unit_of_measurement"],
+            component=mapping.get("component", "sensor"),
+            unique_id=mapping.get("unique_id", mapping["slug"]),
+            object_id=mapping.get("object_id", mapping["slug"]),
+            node_id=node_id,
+            state_topic=state_topic_value,
+            availability_topic=availability_topic_value,
+            icon=mapping.get("icon"),
+            state_class=mapping.get("state_class"),
+            force_update=force_update_value,
+            device_name=mapping.get("device_name", mapping["name"]),
+            device_id=mapping.get("device_id", slugify_identifier(mapping.get("device_name", ""))),
+            device_manufacturer=device_manufacturer,
+            device_model=device_model,
+            device_sw_version=device_sw_version,
+            device_identifiers=identifiers,
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -309,19 +343,20 @@ class InputHelperStore:
                 conn.execute(
                     """
                     INSERT INTO helpers (
-                        slug, name, entity_id, helper_type, description, default_value,
+                        slug, name, entity_id, helper_type, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
                         helper.name,
                         helper.entity_id,
                         helper.type.value,
+                        helper.entity_type.value,
                         helper.description,
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
@@ -335,8 +370,8 @@ class InputHelperStore:
                         helper.unique_id,
                         helper.object_id,
                         helper.node_id,
-                        helper.state_topic,
-                        helper.availability_topic,
+                        helper.state_topic or "",
+                        helper.availability_topic or "",
                         helper.icon,
                         helper.state_class,
                         int(helper.force_update),
@@ -363,6 +398,7 @@ class InputHelperStore:
                     UPDATE helpers
                        SET name = ?,
                            entity_id = ?,
+                           entity_type = ?,
                            description = ?,
                            default_value = ?,
                            options = ?,
@@ -391,6 +427,7 @@ class InputHelperStore:
                     (
                         helper.name,
                         helper.entity_id,
+                        helper.entity_type.value,
                         helper.description,
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
@@ -403,8 +440,8 @@ class InputHelperStore:
                         helper.unique_id,
                         helper.object_id,
                         helper.node_id,
-                        helper.state_topic,
-                        helper.availability_topic,
+                        helper.state_topic or "",
+                        helper.availability_topic or "",
                         helper.icon,
                         helper.state_class,
                         int(helper.force_update),
@@ -466,7 +503,7 @@ class InputHelperStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT value, measured_at, created_at
+                SELECT id, value, measured_at, created_at
                   FROM history
                  WHERE helper_slug = ?
               ORDER BY datetime(created_at) ASC
@@ -476,20 +513,123 @@ class InputHelperStore:
             ).fetchall()
         history: List[HistoryPoint] = []
         for row in rows:
-            recorded_at = datetime.fromisoformat(row["created_at"])
-            value = _deserialize_value(row["value"])
-            if value is None:
-                continue
-            measured_source = row["measured_at"] or row["created_at"]
-            measured_at = datetime.fromisoformat(measured_source)
-            history.append(
-                HistoryPoint(
-                    measured_at=measured_at,
-                    recorded_at=recorded_at,
-                    value=value,
-                )
-            )
+            point = self._row_to_history_point(row)
+            if point is not None:
+                history.append(point)
         return history
+
+    def update_history_point(
+        self,
+        slug: str,
+        history_id: int,
+        payload: HistoryPointUpdate,
+    ) -> HistoryPoint:
+        measured_iso = (
+            payload.measured_at.astimezone(timezone.utc).isoformat()
+            if payload.measured_at is not None
+            else None
+        )
+        serialized_value = _serialize_value(payload.value)
+        if serialized_value is None:
+            raise ValueError("History value cannot be null.")
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE history
+                       SET value = ?,
+                           measured_at = ?
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (serialized_value, measured_iso, history_id, slug),
+                )
+                if cursor.rowcount == 0:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                row = conn.execute(
+                    """
+                    SELECT id, value, measured_at, created_at
+                      FROM history
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (history_id, slug),
+                ).fetchone()
+                self._sync_helper_last_value(conn, slug)
+        if row is None:
+            raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+        point = self._row_to_history_point(row)
+        if point is None:
+            raise ValueError("History value could not be deserialized.")
+        return point
+
+    def delete_history_point(self, slug: str, history_id: int) -> None:
+        with self._lock:
+            with self._connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM history WHERE id = ? AND helper_slug = ?",
+                    (history_id, slug),
+                )
+                if cursor.rowcount == 0:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                self._sync_helper_last_value(conn, slug)
+
+    def _row_to_history_point(self, row: sqlite3.Row) -> Optional[HistoryPoint]:
+        if row is None:
+            return None
+        value = _deserialize_value(row["value"])
+        if value is None:
+            return None
+        recorded_at = datetime.fromisoformat(row["created_at"])
+        measured_source = row["measured_at"] or row["created_at"]
+        measured_at = datetime.fromisoformat(measured_source)
+        return HistoryPoint(
+            id=row["id"],
+            measured_at=measured_at,
+            recorded_at=recorded_at,
+            value=value,
+        )
+
+    def _sync_helper_last_value(self, conn: sqlite3.Connection, slug: str) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        latest = conn.execute(
+            """
+            SELECT value, measured_at, created_at
+              FROM history
+             WHERE helper_slug = ?
+          ORDER BY datetime(created_at) DESC
+             LIMIT 1
+            """,
+            (slug,),
+        ).fetchone()
+        if latest is None:
+            conn.execute(
+                """
+                UPDATE helpers
+                   SET last_value = NULL,
+                       last_measured_at = NULL,
+                       updated_at = ?
+                 WHERE slug = ?
+                """,
+                (now_iso, slug),
+            )
+            return
+        measured_source = latest["measured_at"] or latest["created_at"]
+        conn.execute(
+            """
+            UPDATE helpers
+               SET last_value = ?,
+                   last_measured_at = ?,
+                   updated_at = ?
+             WHERE slug = ?
+            """,
+            (
+                latest["value"],
+                measured_source,
+                now_iso,
+                slug,
+            ),
+        )
 
     def get_mqtt_config(self) -> Optional[MQTTConfig]:
         with self._connection() as conn:

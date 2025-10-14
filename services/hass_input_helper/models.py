@@ -14,6 +14,11 @@ class SetValueRequest(BaseModel):
     measured_at: Optional[datetime] = None
 
 
+class EntityTransportType(str, Enum):
+    MQTT = "mqtt"
+    HASSEMS = "hassems"
+
+
 class HelperType(str, Enum):
     INPUT_TEXT = "input_text"
     INPUT_NUMBER = "input_number"
@@ -119,6 +124,7 @@ class InputHelperBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     entity_id: str
     type: HelperType
+    entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -127,15 +133,15 @@ class InputHelperBase(BaseModel):
     component: str = Field(default="sensor", min_length=1, max_length=64)
     unique_id: str = Field(..., min_length=1, max_length=120)
     object_id: str = Field(..., min_length=1, max_length=120)
-    node_id: Optional[str] = Field(default="hassems", max_length=120)
-    state_topic: str = Field(..., min_length=1, max_length=255)
-    availability_topic: str = Field(..., min_length=1, max_length=255)
+    node_id: Optional[str] = Field(default=None, max_length=120)
+    state_topic: Optional[str] = Field(default=None, max_length=255)
+    availability_topic: Optional[str] = Field(default=None, max_length=255)
     icon: Optional[str] = Field(default=None, max_length=120)
     state_class: Optional[str] = Field(default=None, max_length=64)
     force_update: bool = True
     device_name: str = Field(..., min_length=1, max_length=120)
     device_id: str = Field(..., min_length=1, max_length=120)
-    device_manufacturer: Optional[str] = Field(default="HASSEMS", max_length=120)
+    device_manufacturer: Optional[str] = Field(default=None, max_length=120)
     device_model: Optional[str] = Field(default=None, max_length=120)
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
     device_identifiers: List[str] = Field(default_factory=list)
@@ -179,8 +185,15 @@ class InputHelperBase(BaseModel):
 
     @field_validator("state_topic", "availability_topic")
     @classmethod
-    def validate_topics(cls, v: str) -> str:
-        return clean_topic_path(v)
+    def validate_topics(
+        cls, v: Optional[str], info: Field.ValidationInfo
+    ) -> Optional[str]:  # type: ignore[name-defined]
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            return None
+        return clean_topic_path(cleaned)
 
     @field_validator("icon", "device_manufacturer", "device_model", "device_sw_version")
     @classmethod
@@ -230,6 +243,47 @@ class InputHelperBase(BaseModel):
         if v is None or helper_type is None:
             return v
         return coerce_helper_value(helper_type, v, options)
+
+    @model_validator(mode="after")
+    def enforce_transport_requirements(self) -> "InputHelperBase":
+        try:
+            entity_type = (
+                self.entity_type
+                if isinstance(self.entity_type, EntityTransportType)
+                else EntityTransportType(str(self.entity_type))
+            )
+        except ValueError:
+            entity_type = EntityTransportType.MQTT
+
+        if entity_type == EntityTransportType.MQTT:
+            if not self.state_topic:
+                raise ValueError("MQTT helpers require a state topic.")
+            if not self.availability_topic:
+                raise ValueError("MQTT helpers require an availability topic.")
+            self.node_id = self.node_id or "hassems"
+            self.force_update = bool(self.force_update)
+            if not self.device_manufacturer:
+                self.device_manufacturer = "HASSEMS"
+            identifiers = [
+                str(item).strip()
+                for item in (self.device_identifiers or [])
+                if str(item).strip()
+            ]
+            if not identifiers and self.unique_id:
+                base_identifier = f"{self.node_id or 'hassems'}:{self.unique_id}"
+                identifiers = [base_identifier]
+            self.device_identifiers = identifiers
+        else:
+            self.node_id = None
+            self.state_topic = None
+            self.availability_topic = None
+            self.force_update = False
+            self.device_manufacturer = None
+            self.device_model = None
+            self.device_sw_version = None
+            self.device_identifiers = []
+
+        return self
 
 
 class InputHelperCreate(InputHelperBase):
@@ -294,28 +348,48 @@ class InputHelperCreate(InputHelperBase):
                     data["entity_id"] = entity_id
 
         entity_id_value = str(data.get("entity_id") or "").strip()
-        node_id_input = data.get("node_id")
-        node_segment = slugify_identifier(str(node_id_input)) if node_id_input else None
-        if node_segment:
+        entity_type_value = data.get("entity_type") or EntityTransportType.MQTT
+        try:
+            entity_type = (
+                entity_type_value
+                if isinstance(entity_type_value, EntityTransportType)
+                else EntityTransportType(str(entity_type_value))
+            )
+        except ValueError:
+            entity_type = EntityTransportType.MQTT
+
+        if entity_type == EntityTransportType.MQTT:
+            node_id_input = data.get("node_id")
+            node_segment = (
+                slugify_identifier(str(node_id_input)) if node_id_input else "hassems"
+            )
             data["node_id"] = node_segment
+
+            topic_segment: Optional[str] = name_slug
+            if not topic_segment and entity_id_value:
+                entity_suffix = entity_id_value.split(".", 1)[-1]
+                topic_segment = slugify_identifier(entity_suffix)
+
+            if device_id and topic_segment:
+                base_topic = f"{node_segment}/{device_id}/{topic_segment}"
+                if not str(data.get("state_topic") or "").strip():
+                    data["state_topic"] = f"{base_topic}/state"
+                if not str(data.get("availability_topic") or "").strip():
+                    data["availability_topic"] = f"{base_topic}/availability"
+
+            identifiers = data.get("device_identifiers")
+            if not identifiers and device_id and unique_id:
+                data["device_identifiers"] = [f"{node_segment}:{unique_id}"]
+            data["force_update"] = bool(data.get("force_update", True))
         else:
-            node_segment = "hassems"
-
-        topic_segment: Optional[str] = name_slug
-        if not topic_segment and entity_id_value:
-            entity_suffix = entity_id_value.split(".", 1)[-1]
-            topic_segment = slugify_identifier(entity_suffix)
-
-        if device_id and topic_segment:
-            base_topic = f"{node_segment}/{device_id}/{topic_segment}"
-            if not str(data.get("state_topic") or "").strip():
-                data["state_topic"] = f"{base_topic}/state"
-            if not str(data.get("availability_topic") or "").strip():
-                data["availability_topic"] = f"{base_topic}/availability"
-
-        identifiers = data.get("device_identifiers")
-        if not identifiers and device_id and unique_id:
-            data["device_identifiers"] = [f"{node_segment}:{unique_id}"]
+            data["node_id"] = None
+            data["state_topic"] = None
+            data["availability_topic"] = None
+            data["force_update"] = False
+            data["device_identifiers"] = []
+            data["device_manufacturer"] = None
+            data["device_model"] = None
+            data["device_sw_version"] = None
 
         return data
 
@@ -428,6 +502,7 @@ class InputHelper(BaseModel):
     name: str
     entity_id: str
     type: HelperType
+    entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = None
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -441,8 +516,8 @@ class InputHelper(BaseModel):
     unique_id: str
     object_id: str
     node_id: Optional[str] = None
-    state_topic: str
-    availability_topic: str
+    state_topic: Optional[str] = None
+    availability_topic: Optional[str] = None
     icon: Optional[str] = None
     state_class: Optional[str] = None
     force_update: bool
@@ -460,9 +535,15 @@ class InputHelper(BaseModel):
 
 
 class HistoryPoint(BaseModel):
+    id: int
     measured_at: datetime
     recorded_at: datetime
     value: InputValue
+
+
+class HistoryPointUpdate(BaseModel):
+    value: InputValue
+    measured_at: Optional[datetime] = None
 
 
 class MQTTConfig(BaseModel):
@@ -487,18 +568,29 @@ class InputHelperRecord:
     @classmethod
     def create(cls, payload: InputHelperCreate) -> "InputHelperRecord":
         now = datetime.now(timezone.utc)
-        node_id = payload.node_id or "hassems"
+        is_mqtt = payload.entity_type == EntityTransportType.MQTT
+        node_id = payload.node_id or ("hassems" if is_mqtt else None)
         object_id = payload.object_id or slugify_identifier(payload.unique_id)
         device_id = payload.device_id or slugify_identifier(payload.device_name)
         identifiers = payload.device_identifiers or []
-        if not identifiers:
-            base_identifier = f"{node_id or 'hassems'}:{payload.unique_id}"
-            identifiers = [base_identifier]
+        if is_mqtt:
+            if not identifiers:
+                base_identifier = f"{node_id or 'hassems'}:{payload.unique_id}"
+                identifiers = [base_identifier]
+        else:
+            identifiers = []
+        state_topic = payload.state_topic if is_mqtt else None
+        availability_topic = payload.availability_topic if is_mqtt else None
+        force_update = bool(payload.force_update) if is_mqtt else False
+        device_manufacturer = payload.device_manufacturer if is_mqtt else None
+        device_model = payload.device_model if is_mqtt else None
+        device_sw_version = payload.device_sw_version if is_mqtt else None
         helper = InputHelper(
             slug=slugify(payload.unique_id),
             name=payload.name,
             entity_id=payload.entity_id,
             type=payload.type,
+            entity_type=payload.entity_type,
             description=payload.description,
             default_value=payload.default_value,
             options=payload.options,
@@ -512,16 +604,16 @@ class InputHelperRecord:
             unique_id=payload.unique_id,
             object_id=object_id,
             node_id=node_id,
-            state_topic=payload.state_topic,
-            availability_topic=payload.availability_topic,
+            state_topic=state_topic,
+            availability_topic=availability_topic,
             icon=payload.icon,
             state_class=payload.state_class,
-            force_update=payload.force_update,
+            force_update=force_update,
             device_name=payload.device_name,
             device_id=device_id,
-            device_manufacturer=payload.device_manufacturer,
-            device_model=payload.device_model,
-            device_sw_version=payload.device_sw_version,
+            device_manufacturer=device_manufacturer,
+            device_model=device_model,
+            device_sw_version=device_sw_version,
             device_identifiers=identifiers,
         )
         return cls(helper=helper)
@@ -531,6 +623,8 @@ class InputHelperRecord:
         helper_type = self.helper.type
         options = self.helper.options
         update_data = payload.model_dump(exclude_unset=True)
+        data["entity_type"] = self.helper.entity_type
+        is_mqtt = self.helper.entity_type == EntityTransportType.MQTT
 
         if "options" in update_data:
             if helper_type != HelperType.INPUT_SELECT:
@@ -565,29 +659,29 @@ class InputHelperRecord:
             data["unique_id"] = slugify_identifier(payload.unique_id)
         if "object_id" in update_data and payload.object_id:
             data["object_id"] = slugify_identifier(payload.object_id)
-        if "node_id" in update_data:
+        if is_mqtt and "node_id" in update_data:
             data["node_id"] = payload.node_id
-        if "state_topic" in update_data and payload.state_topic:
+        if is_mqtt and "state_topic" in update_data and payload.state_topic:
             data["state_topic"] = payload.state_topic
-        if "availability_topic" in update_data and payload.availability_topic:
+        if is_mqtt and "availability_topic" in update_data and payload.availability_topic:
             data["availability_topic"] = payload.availability_topic
         if "icon" in update_data:
             data["icon"] = payload.icon
         if "state_class" in update_data:
             data["state_class"] = payload.state_class
-        if "force_update" in update_data and payload.force_update is not None:
+        if is_mqtt and "force_update" in update_data and payload.force_update is not None:
             data["force_update"] = bool(payload.force_update)
         if "device_name" in update_data and payload.device_name:
             data["device_name"] = payload.device_name
         if "device_id" in update_data and payload.device_id:
             data["device_id"] = slugify_identifier(payload.device_id)
-        if "device_manufacturer" in update_data:
+        if is_mqtt and "device_manufacturer" in update_data:
             data["device_manufacturer"] = payload.device_manufacturer
-        if "device_model" in update_data:
+        if is_mqtt and "device_model" in update_data:
             data["device_model"] = payload.device_model
-        if "device_sw_version" in update_data:
+        if is_mqtt and "device_sw_version" in update_data:
             data["device_sw_version"] = payload.device_sw_version
-        if "device_identifiers" in update_data and payload.device_identifiers is not None:
+        if is_mqtt and "device_identifiers" in update_data and payload.device_identifiers is not None:
             cleaned_identifiers = [
                 ident for ident in payload.device_identifiers if ident.strip()
             ]
@@ -599,6 +693,16 @@ class InputHelperRecord:
             data["options"] = options
         data["last_value"] = data.get("last_value")
         data["updated_at"] = datetime.now(timezone.utc)
+
+        if not is_mqtt:
+            data["node_id"] = None
+            data["state_topic"] = None
+            data["availability_topic"] = None
+            data["force_update"] = False
+            data["device_manufacturer"] = None
+            data["device_model"] = None
+            data["device_sw_version"] = None
+            data["device_identifiers"] = []
 
         self.helper = InputHelper(**data)
 
@@ -627,12 +731,14 @@ class HelperState(BaseModel):
 __all__ = [
     "HelperState",
     "HelperType",
+    "EntityTransportType",
     "InputHelper",
     "InputHelperCreate",
     "InputHelperRecord",
     "InputHelperUpdate",
     "InputValue",
     "HistoryPoint",
+    "HistoryPointUpdate",
     "MQTTConfig",
     "MQTTTestResponse",
     "SetValueRequest",

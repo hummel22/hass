@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -14,7 +14,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .hass_client import HomeAssistantClient
 from .models import (
+    EntityTransportType,
     HistoryPoint,
+    HistoryPointUpdate,
     HelperState,
     InputHelper,
     InputHelperCreate,
@@ -123,8 +125,8 @@ async def create_input_helper(
     payload: InputHelperCreate,
     store: InputHelperStore = Depends(get_store),
 ) -> InputHelper:
-    config = store.get_mqtt_config()
-    if config is None:
+    config = store.get_mqtt_config() if payload.entity_type == EntityTransportType.MQTT else None
+    if payload.entity_type == EntityTransportType.MQTT and config is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="MQTT configuration not provided. Save broker settings before creating helpers.",
@@ -135,23 +137,24 @@ async def create_input_helper(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    try:
-        await asyncio.to_thread(publish_discovery_config, config, helper)
-        await asyncio.to_thread(publish_availability, config, helper, True)
-    except MQTTError as exc:
-        logger.warning("Failed to publish MQTT discovery payload during helper creation: %s", exc)
+    if helper.entity_type == EntityTransportType.MQTT and config is not None:
         try:
-            store.delete_helper(helper.slug)
-        except Exception:  # noqa: BLE001
-            logger.exception("Unable to roll back helper creation after MQTT failure")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error publishing MQTT discovery payload during helper creation")
-        try:
-            store.delete_helper(helper.slug)
-        except Exception:  # noqa: BLE001
-            logger.exception("Unable to roll back helper creation after unexpected MQTT failure")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+            await asyncio.to_thread(publish_discovery_config, config, helper)
+            await asyncio.to_thread(publish_availability, config, helper, True)
+        except MQTTError as exc:
+            logger.warning("Failed to publish MQTT discovery payload during helper creation: %s", exc)
+            try:
+                store.delete_helper(helper.slug)
+            except Exception:  # noqa: BLE001
+                logger.exception("Unable to roll back helper creation after MQTT failure")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected error publishing MQTT discovery payload during helper creation")
+            try:
+                store.delete_helper(helper.slug)
+            except Exception:  # noqa: BLE001
+                logger.exception("Unable to roll back helper creation after unexpected MQTT failure")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return helper
 @api_router.put("/inputs/{slug}", response_model=InputHelper)
@@ -173,22 +176,23 @@ async def update_input_helper(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    config = store.get_mqtt_config()
-    if config is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT configuration not provided. Save broker settings before updating helpers.",
-        )
+    if helper.entity_type == EntityTransportType.MQTT:
+        config = store.get_mqtt_config()
+        if config is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="MQTT configuration not provided. Save broker settings before updating helpers.",
+            )
 
-    try:
-        await asyncio.to_thread(publish_discovery_config, config, helper)
-        await asyncio.to_thread(publish_availability, config, helper, True)
-    except MQTTError as exc:
-        logger.warning("Failed to publish MQTT discovery payload during helper update: %s", exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error publishing MQTT discovery payload during helper update")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        try:
+            await asyncio.to_thread(publish_discovery_config, config, helper)
+            await asyncio.to_thread(publish_availability, config, helper, True)
+        except MQTTError as exc:
+            logger.warning("Failed to publish MQTT discovery payload during helper update: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected error publishing MQTT discovery payload during helper update")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return helper
 @api_router.delete(
@@ -202,6 +206,9 @@ async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_s
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
 
     store.delete_helper(slug)
+
+    if record.helper.entity_type != EntityTransportType.MQTT:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     config = store.get_mqtt_config()
     if config is None:
@@ -224,6 +231,57 @@ def get_helper_history(slug: str, store: InputHelperStore = Depends(get_store)) 
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
     return store.list_history(slug)
+
+
+@api_router.put("/inputs/{slug}/history/{history_id}", response_model=HistoryPoint)
+def update_helper_history_point(
+    slug: str,
+    history_id: int,
+    request: HistoryPointUpdate,
+    store: InputHelperStore = Depends(get_store),
+) -> HistoryPoint:
+    record = store.get_helper(slug)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+
+    helper = record.helper
+    try:
+        coerced = coerce_helper_value(helper.type, request.value, helper.options)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    measured_at = request.measured_at
+    if measured_at is not None:
+        if measured_at.tzinfo is None:
+            measured_at = measured_at.replace(tzinfo=timezone.utc)
+        else:
+            measured_at = measured_at.astimezone(timezone.utc)
+
+    try:
+        return store.update_history_point(
+            slug,
+            history_id,
+            HistoryPointUpdate(value=coerced, measured_at=measured_at),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
+
+
+@api_router.delete("/inputs/{slug}/history/{history_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_helper_history_point(
+    slug: str,
+    history_id: int,
+    store: InputHelperStore = Depends(get_store),
+) -> Response:
+    record = store.get_helper(slug)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+
+    try:
+        store.delete_history_point(slug, history_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 @api_router.post("/inputs/{slug}/set", response_model=InputHelper)
 async def set_helper_value(
     slug: str,
@@ -244,26 +302,27 @@ async def set_helper_value(
     if measured_at.tzinfo is None:
         measured_at = measured_at.replace(tzinfo=timezone.utc)
 
-    if client is not None:
+    if client is not None and record.helper.entity_type == EntityTransportType.MQTT:
         try:
             await client.set_helper_value(record.helper, coerced)
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text or exc.response.reason_phrase
             raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
 
-    mqtt_config = store.get_mqtt_config()
-    if mqtt_config is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT configuration not provided. Save broker settings before publishing values.",
-        )
+    if record.helper.entity_type == EntityTransportType.MQTT:
+        mqtt_config = store.get_mqtt_config()
+        if mqtt_config is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="MQTT configuration not provided. Save broker settings before publishing values.",
+            )
 
-    try:
-        await asyncio.to_thread(publish_value, mqtt_config, record.helper, coerced, measured_at)
-    except MQTTError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        try:
+            await asyncio.to_thread(publish_value, mqtt_config, record.helper, coerced, measured_at)
+        except MQTTError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return store.set_last_value(slug, coerced, measured_at=measured_at)
 
@@ -278,8 +337,26 @@ async def get_helper_state(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
 
+    helper = record.helper
+    if helper.entity_type != EntityTransportType.MQTT:
+        attributes: Dict[str, Any] = {
+            "entity_type": helper.entity_type.value,
+        }
+        if helper.unit_of_measurement:
+            attributes["unit_of_measurement"] = helper.unit_of_measurement
+        if helper.device_class:
+            attributes["device_class"] = helper.device_class
+        state_value = helper.last_value
+        return HelperState(
+            entity_id=helper.entity_id,
+            state="" if state_value is None else str(state_value),
+            last_changed=helper.last_measured_at,
+            last_updated=helper.updated_at,
+            attributes=attributes,
+        )
+
     try:
-        state = await client.get_state(record.helper.entity_id)
+        state = await client.get_state(helper.entity_id)
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text or exc.response.reason_phrase
         raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
