@@ -62,6 +62,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self._helpers: Dict[str, Dict[str, Any]] = {}
         self._history: Dict[str, List[Dict[str, Any]]] = {}
         self._recorded_measurements: Dict[str, OrderedDict[str, None]] = {}
+        self._entity_ids: Dict[str, str] = {}
         self._pending_discoveries: Set[str] = set()
         self._included: Set[str] = set(entry.options.get(CONF_INCLUDED_HELPERS, []))
         self._ignored: Set[str] = set(entry.options.get(CONF_IGNORED_HELPERS, []))
@@ -246,6 +247,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 new_data.pop(slug, None)
                 self._history.pop(slug, None)
                 self._recorded_measurements.pop(slug, None)
+                self._entity_ids.pop(slug, None)
                 self.async_set_updated_data(new_data)
                 async_dispatcher_send(self.hass, self.signal_remove, slug)
             return
@@ -304,13 +306,21 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     def helper_history(self, slug: str) -> List[Dict[str, Any]]:
         return list(self._history.get(slug, []))
 
+    def register_entity(self, slug: str, entity_id: str | None) -> None:
+        if not entity_id:
+            return
+        self._entity_ids[slug] = entity_id
+
+    def unregister_entity(self, slug: str) -> None:
+        self._entity_ids.pop(slug, None)
+
     async def _async_store_measurements(
         self, slug: str, measurements: List[Dict[str, Any]]
     ) -> None:
         helper = self._helpers.get(slug)
         if not helper:
             return
-        entity_id = helper.get("entity_id")
+        entity_id = self._entity_ids.get(slug) or helper.get("entity_id")
         if not entity_id:
             return
         try:
