@@ -155,7 +155,13 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             options[CONF_INCLUDED_HELPERS] = sorted(included)
             options[CONF_IGNORED_HELPERS] = sorted(ignored)
             self.hass.config_entries.async_update_entry(entry, options=options)
-            coordinator: HASSEMSCoordinator = self.hass.data[DOMAIN][entry.entry_id]["coordinator"]  # type: ignore[assignment]
+            domain_data = self.hass.data.get(DOMAIN, {})
+            entry_data = domain_data.get(entry.entry_id)
+            coordinator: HASSEMSCoordinator | None = None
+            if entry_data:
+                coordinator = entry_data.get("coordinator")
+            if coordinator is None:
+                return self.async_abort(reason="not_ready")
             coordinator.update_filters(included=included, ignored=ignored)
             coordinator.reapply_filters()
             await coordinator.async_request_refresh()
@@ -230,7 +236,13 @@ class HASSEMSOptionsFlow(config_entries.OptionsFlow):
         self.config_entry = entry
 
     async def async_step_init(self, user_input: Dict[str, Any] | None = None):
-        coordinator: HASSEMSCoordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
+        domain_data = self.hass.data.get(DOMAIN, {})
+        entry_data = domain_data.get(self.config_entry.entry_id)
+        coordinator: HASSEMSCoordinator | None = None
+        if entry_data:
+            coordinator = entry_data.get("coordinator")
+        if coordinator is None:
+            return self.async_abort(reason="not_ready")
         helpers = coordinator._helpers  # type: ignore[attr-defined]
         helper_options = {
             slug: helper.get("name", slug)
