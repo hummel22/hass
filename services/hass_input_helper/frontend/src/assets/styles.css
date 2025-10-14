@@ -1,13 +1,14 @@
 :root {
   color-scheme: light dark;
   --surface: #ffffff;
-  --surface-muted: #f4f5f7;
+  --surface-muted: #f3f4f6;
   --border: #d9dee5;
-  --accent: #2563eb;
-  --accent-strong: #1d4ed8;
+  --accent: #7c3aed;
+  --accent-strong: #5b21b6;
+  --accent-alt: #0f766e;
   --danger: #dc2626;
   --text: #111827;
-  --text-muted: #4b5563;
+  --text-muted: #475569;
   --card-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
@@ -18,7 +19,7 @@
 
 body {
   margin: 0;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background: #ffffff;
   color: var(--text);
 }
 
@@ -186,9 +187,9 @@ body {
 }
 
 .entity-type-toggle .toggle-button.active {
-  background: rgba(37, 99, 235, 0.12);
-  color: var(--accent);
-  border-color: rgba(37, 99, 235, 0.4);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(15, 118, 110, 0.16));
+  color: var(--accent-strong);
+  border-color: rgba(124, 58, 237, 0.45);
 }
 
 .entity-type-toggle .toggle-button:focus-within {
@@ -226,7 +227,7 @@ body {
 
 .help-icon:hover,
 .help-icon:focus-visible {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-alt) 100%);
   color: #fff;
 }
 
@@ -292,7 +293,7 @@ body {
 .form-field select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.18);
 }
 
 .form-checkbox {
@@ -326,13 +327,13 @@ body {
 }
 
 .btn.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-alt) 100%);
   color: #fff;
 }
 
 .btn.primary:hover,
 .btn.primary:focus-visible {
-  background: var(--accent-strong);
+  background: linear-gradient(135deg, var(--accent-strong) 0%, #115e59 100%);
 }
 
 .btn.danger {
@@ -371,7 +372,7 @@ body {
 .entity-item:hover,
 .entity-item:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.18);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.18);
 }
 
 .entity-table-wrapper {
@@ -409,7 +410,7 @@ body {
 }
 
 .entity-table tbody tr.active {
-  background: rgba(37, 99, 235, 0.12);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(15, 118, 110, 0.12));
 }
 
 .entity-table tbody tr.active td {
@@ -497,6 +498,9 @@ body {
   padding: 0;
   max-width: min(720px, 90vw);
   width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
 }
 
 .modal::backdrop {
@@ -508,12 +512,23 @@ body {
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.75rem;
+  background: var(--surface);
+  border-radius: 18px;
 }
 
 .modal__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.12);
+}
+
+.modal__header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--accent-strong);
 }
 
 .modal__form {
@@ -551,6 +566,13 @@ body {
   border: none;
   font-size: 1.5rem;
   cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s ease;
+}
+
+.modal__close:hover,
+.modal__close:focus-visible {
+  color: var(--accent);
 }
 
 .modal__topic {
@@ -604,7 +626,7 @@ body {
 }
 
 .toast.info {
-  background: #2563eb;
+  background: var(--accent);
 }
 
 @media (max-width: 768px) {
