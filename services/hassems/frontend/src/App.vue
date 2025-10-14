@@ -3275,7 +3275,11 @@ function destroyChart() {
     return;
   }
   try {
-    chartInstance.value.destroy();
+    const chart = chartInstance.value;
+    if (typeof chart.stop === 'function') {
+      chart.stop();
+    }
+    chart.destroy();
   } catch (error) {
     console.warn('Failed to destroy chart instance', error);
   } finally {
