@@ -5,6 +5,26 @@ collects entity and device metadata filtered by configured domains, and stores t
 as JSON files. A lightweight web UI is bundled to manage domains, blacklists, and whitelists, and
 to trigger ingestion runs.
 
+## Installation
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+ (only required if you plan to rebuild the bundled web assets)
+
+### Steps
+
+```bash
+# from the repository root
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r services/hass_helper/requirements.txt
+```
+
+Alternatively you can rely on the helper script (`services/hass_helper/start.sh`) which provisions
+the virtual environment automatically before launching the app.
+
 ## Configuration
 
 Set the following environment variables before starting the service. The application will
