@@ -68,6 +68,7 @@ class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self.coordinator.register_entity(self._slug, self.entity_id)
         try:
             await self.coordinator.async_get_history(self._slug)
         except HomeAssistantError:
@@ -80,6 +81,11 @@ class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
             )
         )
 
+    async def async_will_remove_from_hass(self) -> None:
+        self.coordinator.unregister_entity(self._slug)
+        await super().async_will_remove_from_hass()
+
     async def _async_handle_removed(self, slug: str) -> None:
         if slug == self._slug:
+            self.coordinator.unregister_entity(self._slug)
             await self.async_remove(force_remove=True)
