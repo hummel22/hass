@@ -157,6 +157,7 @@
                 <th scope="col">Name</th>
                 <th scope="col">Entity ID</th>
                 <th scope="col">Type</th>
+                <th scope="col">Entity type</th>
                 <th scope="col">Last value</th>
                 <th scope="col">Updated</th>
               </tr>
@@ -180,6 +181,7 @@
                 </td>
                 <td><code>{{ helper.entity_id }}</code></td>
                 <td>{{ helperTypeMap[helper.type] || helper.type }}</td>
+                <td>{{ entityTransportLabels[helper.entity_type] || helper.entity_type }}</td>
                 <td>{{ helper.last_value ?? '—' }}</td>
                 <td>{{ helper.updated_at ? formatTimestamp(helper.updated_at) : '—' }}</td>
               </tr>
@@ -233,6 +235,13 @@
                 <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited.">?</button>
               </span>
               <input :value="selectedTypeLabel" type="text" readonly />
+            </label>
+            <label class="form-field">
+              <span class="label-text">
+                Entity type
+                <button type="button" class="help-icon" data-tooltip="Indicates whether the entity syncs over MQTT or is stored within HASSEMS.">?</button>
+              </span>
+              <input :value="selectedEntityTypeLabel" type="text" readonly />
             </label>
             <label class="form-field">
               <span class="label-text">
@@ -389,10 +398,11 @@
 
         <div class="helper-status">
           <div class="helper-meta">
+            <p><strong>Entity type:</strong> <span id="detail-entity-type">{{ selectedEntityTypeLabel || '—' }}</span></p>
             <p><strong>Component:</strong> <span id="detail-component">{{ selectedHelper?.component || '—' }}</span></p>
             <p><strong>Discovery topic:</strong> <span id="detail-discovery-topic">{{ selectedDiscoveryTopic }}</span></p>
-            <p><strong>State topic:</strong> <span id="detail-state-topic">{{ selectedHelper?.state_topic || '—' }}</span></p>
-            <p><strong>Availability topic:</strong> <span id="detail-availability-topic">{{ selectedHelper?.availability_topic || '—' }}</span></p>
+            <p><strong>State topic:</strong> <span id="detail-state-topic">{{ selectedStateTopic }}</span></p>
+            <p><strong>Availability topic:</strong> <span id="detail-availability-topic">{{ selectedAvailabilityTopic }}</span></p>
           </div>
           <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedHelper?.last_value ?? '—' }}</span></p>
           <p><strong>Measured at:</strong> <span id="detail-measured-at">{{ selectedMeasuredAt }}</span></p>
@@ -452,7 +462,7 @@
                 <input v-model="valueForm.measured_time" type="time" name="measured_time" step="60" />
               </div>
             </label>
-            <button class="btn primary" type="submit">Publish to MQTT</button>
+            <button class="btn primary" type="submit">{{ valueSubmitLabel }}</button>
           </form>
         </section>
       </section>
@@ -485,6 +495,27 @@
         <form class="modal__form" id="create-helper-form" @submit.prevent="createHelper">
           <div class="modal__body">
             <div class="form-grid form-grid--base">
+              <fieldset class="form-field full-width entity-type-field">
+                <legend class="label-text">
+                  Entity type
+                  <button
+                    type="button"
+                    class="help-icon"
+                    data-tooltip="Choose MQTT to sync with Home Assistant via the broker or HASSEMS to store values locally."
+                  >?
+                  </button>
+                </legend>
+                <div class="entity-type-toggle">
+                  <label :class="['toggle-button', { active: createForm.entity_type === 'mqtt' }]">
+                    <input v-model="createForm.entity_type" type="radio" value="mqtt" />
+                    MQTT
+                  </label>
+                  <label :class="['toggle-button', { active: createForm.entity_type === 'hassems' }]">
+                    <input v-model="createForm.entity_type" type="radio" value="hassems" />
+                    HASSEMS
+                  </label>
+                </div>
+              </fieldset>
               <label class="form-field">
                 <span class="label-text">
                   Device name
@@ -618,7 +649,7 @@
               </label>
             </div>
 
-            <details class="form-advanced">
+            <details v-if="isCreateMqtt" class="form-advanced">
               <summary>Advanced configuration</summary>
               <div class="form-grid">
                 <label class="form-field">
@@ -848,7 +879,7 @@
           </div>
           <div class="modal__actions">
             <button class="btn primary" type="submit">Create entity</button>
-            <button class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
+            <button v-if="isCreateMqtt" class="btn" type="button" @click="previewDiscovery">Preview discovery</button>
           </div>
         </form>
       </div>
@@ -937,6 +968,11 @@ const helperTypeMap = {
   input_number: 'Input number',
   input_boolean: 'Input boolean',
   input_select: 'Input select',
+};
+
+const entityTransportLabels = {
+  mqtt: 'MQTT',
+  hassems: 'HASSEMS',
 };
 
 const deviceClassOptions = [
@@ -1159,6 +1195,7 @@ const apiOrigin = typeof window !== 'undefined' && window.location ? window.loca
 
 function createCreateDefaults() {
   return {
+    entity_type: 'mqtt',
     device_name: '',
     name: '',
     description: '',
@@ -1231,6 +1268,11 @@ const selectedTypeLabel = computed(() => {
   const helper = selectedHelper.value;
   return helper ? helperTypeMap[helper.type] || helper.type : '';
 });
+const selectedEntityTypeLabel = computed(() => {
+  const helper = selectedHelper.value;
+  if (!helper) return '';
+  return entityTransportLabels[helper.entity_type] || helper.entity_type;
+});
 const selectedMeasuredAt = computed(() => {
   const helper = selectedHelper.value;
   return helper?.last_measured_at ? formatTimestamp(helper.last_measured_at) : '—';
@@ -1241,7 +1283,24 @@ const selectedUpdatedAt = computed(() => {
 });
 const selectedDiscoveryTopic = computed(() => {
   const helper = selectedHelper.value;
-  return helper ? computeDiscoveryTopic(helper) : '—';
+  if (!helper || helper.entity_type !== 'mqtt') {
+    return '—';
+  }
+  return computeDiscoveryTopic(helper);
+});
+const selectedStateTopic = computed(() => {
+  const helper = selectedHelper.value;
+  if (!helper || helper.entity_type !== 'mqtt') {
+    return '—';
+  }
+  return helper.state_topic || '—';
+});
+const selectedAvailabilityTopic = computed(() => {
+  const helper = selectedHelper.value;
+  if (!helper || helper.entity_type !== 'mqtt') {
+    return '—';
+  }
+  return helper.availability_topic || '—';
 });
 const selectedApiPath = computed(() => {
   const helper = selectedHelper.value;
@@ -1296,7 +1355,12 @@ const valuePlaceholder = computed(() => {
   }
   return '';
 });
+const valueSubmitLabel = computed(() => {
+  const helper = selectedHelper.value;
+  return helper?.entity_type === 'hassems' ? 'Record value' : 'Publish to MQTT';
+});
 const createOptionsDisabled = computed(() => createForm.type !== 'input_select');
+const isCreateMqtt = computed(() => createForm.entity_type === 'mqtt');
 
 watch(
   () => [createForm.name, createForm.device_name, createForm.type, createForm.node_id],
@@ -1648,6 +1712,7 @@ function buildCreatePayload() {
     name: createForm.name?.trim(),
     entity_id: createForm.entity_id?.trim(),
     type,
+    entity_type: createForm.entity_type,
     component: createForm.component?.trim() || 'sensor',
     unique_id: slugifyIdentifier(createForm.unique_id?.trim() || ''),
     object_id: slugifyIdentifier(createForm.object_id?.trim() || ''),
@@ -1705,6 +1770,10 @@ function buildCreatePayload() {
 }
 
 function previewDiscovery() {
+  if (!isCreateMqtt.value) {
+    showToast('Discovery preview is only available for MQTT entities.', 'info');
+    return;
+  }
   try {
     const helperDraft = buildHelperDraft();
     const topic = computeDiscoveryTopic(helperDraft);
@@ -2064,7 +2133,8 @@ async function submitValue() {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    showToast('Value sent to MQTT.', 'success');
+    const successMessage = helper.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
+    showToast(successMessage, 'success');
     helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
     await loadHistory(updated.slug);

@@ -14,6 +14,11 @@ class SetValueRequest(BaseModel):
     measured_at: Optional[datetime] = None
 
 
+class EntityTransportType(str, Enum):
+    MQTT = "mqtt"
+    HASSEMS = "hassems"
+
+
 class HelperType(str, Enum):
     INPUT_TEXT = "input_text"
     INPUT_NUMBER = "input_number"
@@ -119,6 +124,7 @@ class InputHelperBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     entity_id: str
     type: HelperType
+    entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -428,6 +434,7 @@ class InputHelper(BaseModel):
     name: str
     entity_id: str
     type: HelperType
+    entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = None
     default_value: Optional[InputValue] = None
     options: Optional[List[str]] = None
@@ -499,6 +506,7 @@ class InputHelperRecord:
             name=payload.name,
             entity_id=payload.entity_id,
             type=payload.type,
+            entity_type=payload.entity_type,
             description=payload.description,
             default_value=payload.default_value,
             options=payload.options,
@@ -531,6 +539,7 @@ class InputHelperRecord:
         helper_type = self.helper.type
         options = self.helper.options
         update_data = payload.model_dump(exclude_unset=True)
+        data["entity_type"] = self.helper.entity_type
 
         if "options" in update_data:
             if helper_type != HelperType.INPUT_SELECT:
@@ -627,6 +636,7 @@ class HelperState(BaseModel):
 __all__ = [
     "HelperState",
     "HelperType",
+    "EntityTransportType",
     "InputHelper",
     "InputHelperCreate",
     "InputHelperRecord",

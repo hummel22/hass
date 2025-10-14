@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Iterator, List, Optional
 
 from .models import (
+    EntityTransportType,
     HistoryPoint,
     InputHelper,
     InputHelperCreate,
@@ -98,6 +99,7 @@ class InputHelperStore:
                     name TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
                     helper_type TEXT NOT NULL,
+                    entity_type TEXT NOT NULL DEFAULT 'mqtt',
                     description TEXT,
                     default_value TEXT,
                     options TEXT,
@@ -159,6 +161,7 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "node_id", "TEXT")
             self._ensure_column(conn, "helpers", "state_topic", "TEXT")
             self._ensure_column(conn, "helpers", "availability_topic", "TEXT")
+            self._ensure_column(conn, "helpers", "entity_type", "TEXT NOT NULL DEFAULT 'mqtt'")
             self._ensure_column(conn, "helpers", "icon", "TEXT")
             self._ensure_column(conn, "helpers", "state_class", "TEXT")
             self._ensure_column(conn, "helpers", "force_update", "INTEGER NOT NULL DEFAULT 1")
@@ -204,19 +207,20 @@ class InputHelperStore:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO helpers (
-                        slug, name, entity_id, helper_type, description, default_value,
+                        slug, name, entity_id, helper_type, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
                     helper.name,
                     helper.entity_id,
                     helper.type.value,
+                    helper.entity_type.value,
                     helper.description,
                     _serialize_value(helper.default_value),
                     _serialize_options(helper.options),
@@ -245,40 +249,47 @@ class InputHelperStore:
             )
 
     def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
-        keys = set(row.keys())
+        mapping = dict(row)
+        keys = set(mapping.keys())
+        entity_type_value = mapping.get("entity_type", "mqtt")
+        try:
+            entity_type = EntityTransportType(entity_type_value or "mqtt")
+        except ValueError:
+            entity_type = EntityTransportType.MQTT
         return InputHelper(
-            slug=row["slug"],
-            name=row["name"],
-            entity_id=row["entity_id"],
-            type=row["helper_type"],
-            description=row["description"],
-            default_value=_deserialize_value(row["default_value"]),
-            options=_deserialize_options(row["options"]),
-            last_value=_deserialize_value(row["last_value"]),
-            last_measured_at=datetime.fromisoformat(row["last_measured_at"])
-            if "last_measured_at" in keys and row["last_measured_at"]
+            slug=mapping["slug"],
+            name=mapping["name"],
+            entity_id=mapping["entity_id"],
+            type=mapping["helper_type"],
+            entity_type=entity_type,
+            description=mapping["description"],
+            default_value=_deserialize_value(mapping["default_value"]),
+            options=_deserialize_options(mapping["options"]),
+            last_value=_deserialize_value(mapping["last_value"]),
+            last_measured_at=datetime.fromisoformat(mapping["last_measured_at"])
+            if "last_measured_at" in keys and mapping["last_measured_at"]
             else None,
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-            device_class=row["device_class"],
-            unit_of_measurement=row["unit_of_measurement"],
-            component=row.get("component", "sensor"),
-            unique_id=row.get("unique_id", row["slug"]),
-            object_id=row.get("object_id", row["slug"]),
-            node_id=row.get("node_id"),
-            state_topic=row.get("state_topic", f"{row['slug']}/state"),
-            availability_topic=row.get(
-                "availability_topic", f"{row['slug']}/availability"
+            created_at=datetime.fromisoformat(mapping["created_at"]),
+            updated_at=datetime.fromisoformat(mapping["updated_at"]),
+            device_class=mapping["device_class"],
+            unit_of_measurement=mapping["unit_of_measurement"],
+            component=mapping.get("component", "sensor"),
+            unique_id=mapping.get("unique_id", mapping["slug"]),
+            object_id=mapping.get("object_id", mapping["slug"]),
+            node_id=mapping.get("node_id"),
+            state_topic=mapping.get("state_topic", f"{mapping['slug']}/state"),
+            availability_topic=mapping.get(
+                "availability_topic", f"{mapping['slug']}/availability"
             ),
-            icon=row.get("icon"),
-            state_class=row.get("state_class"),
-            force_update=bool(row.get("force_update", 1)),
-            device_name=row.get("device_name", row["name"]),
-            device_id=row.get("device_id", slugify_identifier(row.get("device_name", ""))),
-            device_manufacturer=row.get("device_manufacturer"),
-            device_model=row.get("device_model"),
-            device_sw_version=row.get("device_sw_version"),
-            device_identifiers=_deserialize_identifiers(row.get("device_identifiers")),
+            icon=mapping.get("icon"),
+            state_class=mapping.get("state_class"),
+            force_update=bool(mapping.get("force_update", 1)),
+            device_name=mapping.get("device_name", mapping["name"]),
+            device_id=mapping.get("device_id", slugify_identifier(mapping.get("device_name", ""))),
+            device_manufacturer=mapping.get("device_manufacturer"),
+            device_model=mapping.get("device_model"),
+            device_sw_version=mapping.get("device_sw_version"),
+            device_identifiers=_deserialize_identifiers(mapping.get("device_identifiers")),
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -309,19 +320,20 @@ class InputHelperStore:
                 conn.execute(
                     """
                     INSERT INTO helpers (
-                        slug, name, entity_id, helper_type, description, default_value,
+                        slug, name, entity_id, helper_type, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
                         device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
                         helper.name,
                         helper.entity_id,
                         helper.type.value,
+                        helper.entity_type.value,
                         helper.description,
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
@@ -363,6 +375,7 @@ class InputHelperStore:
                     UPDATE helpers
                        SET name = ?,
                            entity_id = ?,
+                           entity_type = ?,
                            description = ?,
                            default_value = ?,
                            options = ?,
@@ -391,6 +404,7 @@ class InputHelperStore:
                     (
                         helper.name,
                         helper.entity_id,
+                        helper.entity_type.value,
                         helper.description,
                         _serialize_value(helper.default_value),
                         _serialize_options(helper.options),
