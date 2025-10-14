@@ -22,4 +22,4 @@ COPY --from=frontend-builder /app/static ./static
 
 EXPOSE 8100
 
-CMD ["uvicorn", "services.hass_input_helper.app:app", "--host", "0.0.0.0", "--port", "8100"]
+CMD ["uvicorn", "services.hassems.app:app", "--host", "0.0.0.0", "--port", "8100"]

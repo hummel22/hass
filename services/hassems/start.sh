@@ -34,4 +34,4 @@ fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
-exec uvicorn services.hass_input_helper.app:app --host 0.0.0.0 --port 8100 --reload
+exec uvicorn services.hassems.app:app --host 0.0.0.0 --port 8100 --reload

@@ -60,7 +60,7 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-services/hass_input_helper/data/*.db
+services/hassems/data/*.db
 
 # Flask stuff:
 instance/
@@ -170,10 +170,10 @@ dmypy.json
 cython_debug/
 
 # Frontend build artifacts
-services/hass_input_helper/frontend/node_modules/
-services/hass_input_helper/frontend/.vite/
-services/hass_input_helper/frontend/dist/
-services/hass_input_helper/static/
+services/hassems/frontend/node_modules/
+services/hassems/frontend/.vite/
+services/hassems/frontend/dist/
+services/hassems/static/
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

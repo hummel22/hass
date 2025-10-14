@@ -34,7 +34,7 @@ Assistant HTTP API will return `503`.
 Create a virtual environment and launch the API using the included helper script:
 
 ```bash
-services/hass_input_helper/start.sh
+services/hassems/start.sh
 ```
 
 The server listens on `http://127.0.0.1:8100`. Visiting the root renders the HASSEMS console where
@@ -105,7 +105,7 @@ from the JSON body. The same publish updates the entity's `measured_at` attribut
 
 - [`MQTT_README.md`](./MQTT_README.md) – Expanded guide covering MQTT discovery patterns, example
   payloads, and supported device classes/state classes.
-- `services/hass_input_helper/mqtt_service.py` – Implementation of discovery/state publishing if you
+- `services/hassems/mqtt_service.py` – Implementation of discovery/state publishing if you
   need to integrate HASSEMS concepts into other tooling.
 
 Enjoy building and managing MQTT-discovered helpers without editing YAML!
