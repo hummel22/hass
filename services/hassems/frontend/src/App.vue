@@ -1417,6 +1417,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
+import 'chartjs-adapter-luxon';
 
 function debugLog(message, payload = undefined) {
   const prefix = '[HASSEMS dashboard]';
@@ -3226,29 +3227,46 @@ function renderHistory(helper, history) {
     debugLog('No history entries to render', { helper: helper.slug });
     return;
   }
-  const labels = sorted.map((item) =>
-    formatHistoryDate(item.measured_at || item.recorded_at),
-  );
-  const numericValues = sorted.map((item) => normalizeHistoryValue(helper.type, item.value));
-  const allNumeric = numericValues.every((value) => value !== null && !Number.isNaN(value));
+  const datasetPoints = [];
+  const skippedEntries = [];
+  for (const item of sorted) {
+    const timestampSource = item.measured_at || item.recorded_at;
+    const timestampDate = timestampSource ? new Date(timestampSource) : null;
+    const timestampValid = timestampDate instanceof Date && !Number.isNaN(timestampDate?.getTime?.());
+    const normalizedValue = normalizeHistoryValue(helper.type, item.value);
+    const numericValue = normalizedValue === null ? null : Number(normalizedValue);
+    if (!timestampValid || numericValue === null || Number.isNaN(numericValue)) {
+      skippedEntries.push({
+        timestamp: timestampSource ?? null,
+        value: item.value,
+        normalizedValue,
+        timestampValid,
+      });
+      continue;
+    }
+    datasetPoints.push({ x: timestampDate, y: numericValue });
+  }
   debugLog('Prepared history dataset', {
     helper: helper.slug,
-    labels,
-    numericValues,
-    allNumeric,
+    points: datasetPoints.length,
+    skippedEntries: skippedEntries.length,
   });
-  if (allNumeric) {
+  if (skippedEntries.length) {
+    debugLog('Skipped history entries that could not be charted', {
+      helper: helper.slug,
+      skippedEntries,
+    });
+  }
+  if (datasetPoints.length) {
     const canvasEl = historyCanvas.value;
     if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
       const context = canvasEl.getContext('2d');
       if (context) {
         historyMode.value = 'chart';
-        const datasetValues = numericValues.map((value) => Number(value));
-        const timestamps = sorted.map((item) => item.measured_at || item.recorded_at);
+        historyList.value = [];
         debugLog('Rendering chart dataset', {
           helper: helper.slug,
-          datasetValues,
-          timestamps,
+          datasetPoints,
         });
         const yScaleOptions = helper.type === 'input_boolean'
           ? {
@@ -3264,11 +3282,10 @@ function renderHistory(helper, history) {
           chartInstance.value = new Chart(canvasEl, {
             type: 'line',
             data: {
-              labels,
               datasets: [
                 {
                   label: helper.name,
-                  data: datasetValues,
+                  data: datasetPoints,
                   fill: false,
                   borderColor: '#2563eb',
                   backgroundColor: 'rgba(37, 99, 235, 0.15)',
@@ -3277,8 +3294,25 @@ function renderHistory(helper, history) {
               ],
             },
             options: {
+              parsing: false,
               responsive: true,
               scales: {
+                x: {
+                  type: 'time',
+                  time: {
+                    tooltipFormat: 'yyyy-LL-dd HH:mm:ss',
+                    displayFormats: {
+                      minute: 'HH:mm',
+                      hour: 'HH:mm',
+                      day: 'MMM d',
+                    },
+                  },
+                  ticks: {
+                    source: 'auto',
+                    autoSkip: true,
+                    maxRotation: 0,
+                  },
+                },
                 y: {
                   beginAtZero: helper.type !== 'input_number',
                   ...yScaleOptions,
@@ -3289,9 +3323,20 @@ function renderHistory(helper, history) {
                 tooltip: {
                   callbacks: {
                     title: (items) => {
-                      const index = items?.[0]?.dataIndex ?? 0;
-                      const timestamp = timestamps[index];
-                      return timestamp ? formatTimestamp(timestamp) : items?.[0]?.label ?? '';
+                      const timestamp = items?.[0]?.parsed?.x ?? null;
+                      return timestamp ? formatTimestamp(timestamp) : '';
+                    },
+                    label: (item) => {
+                      const value = item?.parsed?.y;
+                      if (value === undefined || value === null) {
+                        return '';
+                      }
+                      if (helper.type === 'input_boolean') {
+                        return value === 1 ? 'On' : 'Off';
+                      }
+                      const formatted = typeof value === 'number' ? value.toLocaleString() : String(value);
+                      const unit = helper.unit_of_measurement || '';
+                      return unit ? `${formatted} ${unit}` : formatted;
                     },
                   },
                 },
@@ -3301,7 +3346,7 @@ function renderHistory(helper, history) {
           debugLog('Chart rendered successfully', { helper: helper.slug });
           return;
         } catch (error) {
-          console.error('Failed to render history chart', error, { helper, datasetValues, timestamps });
+          console.error('Failed to render history chart', error, { helper, datasetPoints });
         }
       } else {
         debugLog('Canvas context unavailable, cannot render chart', { helper: helper.slug });
@@ -3406,21 +3451,6 @@ function formatTimestamp(value) {
       return String(value);
     }
     return date.toLocaleString();
-  } catch (error) {
-    return String(value);
-  }
-}
-
-function formatHistoryDate(value) {
-  try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return String(value);
-    }
-    const month = date.toLocaleString('en-US', { month: 'short' });
-    const day = String(date.getDate()).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${month} ${day} ${year}`;
   } catch (error) {
     return String(value);
   }
