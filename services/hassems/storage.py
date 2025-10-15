@@ -1462,7 +1462,7 @@ class InputHelperStore:
             SELECT value, measured_at, created_at
               FROM history
              WHERE helper_slug = ?
-          ORDER BY datetime(created_at) DESC
+          ORDER BY datetime(COALESCE(measured_at, created_at)) DESC
              LIMIT 1
             """,
             (slug,),
