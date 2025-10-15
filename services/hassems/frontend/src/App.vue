@@ -358,12 +358,21 @@
               </svg>
             </button>
           </div>
-          <canvas
-            v-show="historyMode === 'chart'"
-            id="history-chart"
-            height="220"
-            ref="historyCanvas"
-          ></canvas>
+          <div v-show="historyMode === 'chart'" class="history__chart-wrapper">
+            <button
+              type="button"
+              class="icon-button history__debug-button"
+              @click="openHistoryDebugDialog"
+              aria-label="View chart dataset"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M11 2a1 1 0 0 1 1 1v1.055a7.002 7.002 0 0 1 5.945 5.945H19a1 1 0 1 1 0 2h-1.055a7.002 7.002 0 0 1-5.945 5.945V21a1 1 0 1 1-2 0v-1.055A7.002 7.002 0 0 1 4.055 12H3a1 1 0 1 1 0-2h1.055A7.002 7.002 0 0 1 11 4.055V3a1 1 0 0 1 1-1Zm0 5a5 5 0 1 0 0 10a5 5 0 0 0 0-10Zm0 3a1 1 0 0 1 1 1v2.382l.724.724a1 1 0 0 1-1.448 1.382l-1-1A1 1 0 0 1 10 14v-3a1 1 0 0 1 1-1Z"
+                />
+              </svg>
+            </button>
+            <canvas id="history-chart" height="220" ref="historyCanvas"></canvas>
+          </div>
           <ul v-if="historyMode === 'list'" id="history-list" class="history-list">
             <li v-for="item in historyList" :key="item.measured_at">
               <span>{{ item.measured_at }}</span>
@@ -1335,6 +1344,35 @@
       </template>
     </dialog>
 
+    <dialog
+      ref="historyDebugDialog"
+      class="modal"
+      @cancel.prevent="closeHistoryDebugDialog"
+    >
+      <div class="modal__container">
+        <div class="modal__header">
+          <h3>Chart dataset</h3>
+          <button
+            type="button"
+            class="modal__close"
+            @click="closeHistoryDebugDialog"
+            aria-label="Close chart dataset dialog"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <p class="modal__subtitle">
+            JSON payload representing the exact data currently rendered in the chart.
+          </p>
+          <pre class="debug-json" aria-live="polite">{{ historyDebugJson }}</pre>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn" @click="closeHistoryDebugDialog">Close</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog ref="discoveryDialog" class="modal" @cancel.prevent="closeDiscoveryPreview" @close="onDiscoveryDialogClose">
       <template v-if="discoveryPreview">
         <div class="modal__container">
@@ -1736,6 +1774,9 @@ const chartInstance = ref(null);
 const historyDialog = ref(null);
 const historyDialogVisible = ref(false);
 const historyEditorRows = ref([]);
+const historyDebugDialog = ref(null);
+const historyChartDataset = ref([]);
+const historyDebugJson = computed(() => JSON.stringify(historyChartDataset.value, null, 2));
 
 const formattedIncludedHelpers = computed(() =>
   formatHelperList(connectionDetail.value?.included_helpers),
@@ -2121,6 +2162,12 @@ watch(
   },
   { deep: true },
 );
+
+watch(historyMode, (mode) => {
+  if (mode !== 'chart') {
+    closeHistoryDebugDialog();
+  }
+});
 
 async function loadMqttConfig() {
   debugLog('Loading MQTT config');
@@ -2562,6 +2609,27 @@ function closeHistoryDialog() {
 function onHistoryDialogClose() {
   historyDialogVisible.value = false;
   syncHistoryEditorRows();
+}
+
+function openHistoryDebugDialog() {
+  if (!historyChartDataset.value.length) {
+    showToast('No chart data available to display.', 'info');
+    return;
+  }
+  const dialog = historyDebugDialog.value;
+  if (!dialog || typeof dialog.showModal !== 'function') {
+    return;
+  }
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeHistoryDebugDialog() {
+  const dialog = historyDebugDialog.value;
+  if (dialog?.open) {
+    dialog.close();
+  }
 }
 
 function openApiDialog() {
@@ -3337,6 +3405,7 @@ async function deleteHistoryRow(row) {
 
 function renderHistory(helper, history) {
   destroyChart();
+  historyChartDataset.value = [];
   const sorted = sortHistoryRecords(history);
   debugLog('Rendering history', {
     helper: helper.slug,
@@ -3380,6 +3449,10 @@ function renderHistory(helper, history) {
     });
   }
   if (datasetPoints.length) {
+    historyChartDataset.value = datasetPoints.map((point) => ({
+      x: point.x instanceof Date ? point.x.toISOString() : point.x,
+      y: point.y,
+    }));
     const canvasEl = historyCanvas.value;
     if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
       const context = canvasEl.getContext('2d');
@@ -3390,6 +3463,15 @@ function renderHistory(helper, history) {
           helper: helper.slug,
           datasetPoints,
         });
+        const firstPoint = datasetPoints[0];
+        const lastPoint = datasetPoints[datasetPoints.length - 1];
+        const xScaleBounds = {};
+        if (firstPoint?.x instanceof Date) {
+          xScaleBounds.min = firstPoint.x;
+        }
+        if (lastPoint?.x instanceof Date) {
+          xScaleBounds.max = lastPoint.x;
+        }
         const yScaleOptions = helper.type === 'input_boolean'
           ? {
               ticks: {
@@ -3429,6 +3511,7 @@ function renderHistory(helper, history) {
                       day: 'MMM d',
                     },
                   },
+                  ...xScaleBounds,
                   ticks: {
                     source: 'auto',
                     autoSkip: true,
@@ -3441,6 +3524,7 @@ function renderHistory(helper, history) {
                 },
               },
               plugins: {
+                decimation: { enabled: false },
                 legend: { display: false },
                 tooltip: {
                   callbacks: {
@@ -3476,6 +3560,7 @@ function renderHistory(helper, history) {
     }
   }
   debugLog('Falling back to history list view', { helper: helper.slug });
+  historyChartDataset.value = [];
   historyMode.value = 'list';
   historyList.value = sorted.map((item) => ({
     measured_at: formatTimestamp(item.measured_at || item.recorded_at),
