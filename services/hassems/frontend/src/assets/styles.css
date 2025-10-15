@@ -368,6 +368,20 @@ body {
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.18);
 }
 
+.token-input {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.token-input input {
+  flex: 1;
+}
+
+.token-input .btn {
+  white-space: nowrap;
+}
+
 .form-checkbox {
   display: flex;
   align-items: center;

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -169,6 +169,12 @@ def create_api_user(payload: ApiUserCreate, store: InputHelperStore = Depends(ge
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@api_router.post("/users/generate-token")
+def generate_api_token() -> Dict[str, str]:
+    token = secrets.token_urlsafe(32)
+    return {"token": token}
+
+
 @api_router.put("/users/{user_id}", response_model=ApiUser)
 def update_api_user(
     user_id: int,
@@ -192,20 +198,6 @@ def delete_api_user(user_id: int, store: InputHelperStore = Depends(get_store)) 
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@api_router.post("/integrations/home-assistant/tokens")
-def integration_generate_token(
-    store: InputHelperStore = Depends(get_store),
-) -> Dict[str, Any]:
-    random_token = secrets.token_urlsafe(32)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    name = f"Home Assistant {timestamp}"
-    try:
-        user = store.create_api_user(ApiUserCreate(name=name, token=random_token))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return {"token": user.token, "user_id": user.id, "name": user.name}
 
 
 @api_router.get("/inputs", response_model=List[InputHelper])
@@ -453,13 +445,15 @@ def integration_get_helper(
 )
 def integration_get_history(
     slug: str,
+    full: bool = Query(default=False),
     store: InputHelperStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
 ) -> List[HistoryPoint]:
     record = store.get_helper(slug)
     if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
-    return store.list_history(slug)
+    limit = 0 if full else 200
+    return store.list_history(slug, limit=limit)
 
 
 @api_router.post(

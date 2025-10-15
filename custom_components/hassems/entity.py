@@ -9,7 +9,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import HASSEMSCoordinator
-from .const import ATTR_HISTORY, ATTR_LAST_MEASURED, DOMAIN
+from .const import ATTR_HISTORY, ATTR_LAST_MEASURED, ATTR_STATISTICS_MODE, DOMAIN
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +61,9 @@ class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
             measured_at = helper.get("last_measured_at")
             if measured_at:
                 attributes[ATTR_LAST_MEASURED] = measured_at
+            statistics_mode = helper.get(ATTR_STATISTICS_MODE)
+            if statistics_mode:
+                attributes[ATTR_STATISTICS_MODE] = statistics_mode
         history = self.coordinator.helper_history(self._slug)
         if history:
             attributes[ATTR_HISTORY] = history[-50:]

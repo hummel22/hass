@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -24,6 +25,11 @@ class HelperType(str, Enum):
     INPUT_NUMBER = "input_number"
     INPUT_BOOLEAN = "input_boolean"
     INPUT_SELECT = "input_select"
+
+
+class HASSEMSStatisticsMode(str, Enum):
+    LINEAR = "linear"
+    STEP = "step"
 
 
 InputValue = Union[str, float, bool]
@@ -145,6 +151,9 @@ class InputHelperBase(BaseModel):
     device_model: Optional[str] = Field(default=None, max_length=120)
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
     device_identifiers: List[str] = Field(default_factory=list)
+    statistics_mode: Optional[HASSEMSStatisticsMode] = Field(
+        default=HASSEMSStatisticsMode.LINEAR
+    )
 
     @field_validator("entity_id")
     @classmethod
@@ -222,6 +231,20 @@ class InputHelperBase(BaseModel):
             cleaned.append(text)
         return cleaned
 
+    @field_validator("statistics_mode")
+    @classmethod
+    def validate_statistics_mode(
+        cls, v: Optional[HASSEMSStatisticsMode] | str | None
+    ) -> Optional[HASSEMSStatisticsMode]:
+        if v in (None, ""):
+            return None
+        if isinstance(v, HASSEMSStatisticsMode):
+            return v
+        try:
+            return HASSEMSStatisticsMode(str(v))
+        except ValueError as exc:
+            raise ValueError("Statistics mode must be 'linear' or 'step'.") from exc
+
     @field_validator("options")
     @classmethod
     def clean_options(cls, v: Optional[List[str]], info: Field.ValidationInfo) -> Optional[List[str]]:  # type: ignore[name-defined]
@@ -273,6 +296,7 @@ class InputHelperBase(BaseModel):
                 base_identifier = f"{self.node_id or 'hassems'}:{self.unique_id}"
                 identifiers = [base_identifier]
             self.device_identifiers = identifiers
+            self.statistics_mode = None
         else:
             self.node_id = None
             self.state_topic = None
@@ -282,6 +306,8 @@ class InputHelperBase(BaseModel):
             self.device_model = None
             self.device_sw_version = None
             self.device_identifiers = []
+            if not self.statistics_mode:
+                self.statistics_mode = HASSEMSStatisticsMode.LINEAR
 
         return self
 
@@ -417,6 +443,7 @@ class InputHelperUpdate(BaseModel):
     device_model: Optional[str] = Field(default=None, max_length=120)
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
     device_identifiers: Optional[List[str]] = None
+    statistics_mode: Optional[HASSEMSStatisticsMode] = None
 
     model_config = {"extra": "forbid"}
 
@@ -480,6 +507,20 @@ class InputHelperUpdate(BaseModel):
         cleaned = v.strip()
         return cleaned or None
 
+    @field_validator("statistics_mode")
+    @classmethod
+    def validate_statistics_mode_update(
+        cls, v: Optional[HASSEMSStatisticsMode] | str | None
+    ) -> Optional[HASSEMSStatisticsMode]:
+        if v in (None, ""):
+            return None
+        if isinstance(v, HASSEMSStatisticsMode):
+            return v
+        try:
+            return HASSEMSStatisticsMode(str(v))
+        except ValueError as exc:
+            raise ValueError("Statistics mode must be 'linear' or 'step'.") from exc
+
     @field_validator("state_class")
     @classmethod
     def strip_state_class(cls, v: Optional[str]) -> Optional[str]:
@@ -527,6 +568,9 @@ class InputHelper(BaseModel):
     device_model: Optional[str] = None
     device_sw_version: Optional[str] = None
     device_identifiers: List[str] = Field(default_factory=list)
+    statistics_mode: Optional[HASSEMSStatisticsMode] = None
+    history_cursor: Optional[str] = None
+    history_changed_at: Optional[datetime] = None
 
     model_config = {
         "from_attributes": True,
@@ -753,6 +797,17 @@ class InputHelperRecord:
         device_manufacturer = payload.device_manufacturer if is_mqtt else None
         device_model = payload.device_model if is_mqtt else None
         device_sw_version = payload.device_sw_version if is_mqtt else None
+        statistics_mode = (
+            payload.statistics_mode
+            if payload.entity_type == EntityTransportType.HASSEMS
+            else None
+        )
+        history_cursor = (
+            secrets.token_hex(16)
+            if payload.entity_type == EntityTransportType.HASSEMS
+            else None
+        )
+
         helper = InputHelper(
             slug=slugify(payload.unique_id),
             name=payload.name,
@@ -783,6 +838,9 @@ class InputHelperRecord:
             device_model=device_model,
             device_sw_version=device_sw_version,
             device_identifiers=identifiers,
+            statistics_mode=statistics_mode,
+            history_cursor=history_cursor,
+            history_changed_at=None,
         )
         return cls(helper=helper)
 
@@ -857,6 +915,11 @@ class InputHelperRecord:
                 data["device_identifiers"] = cleaned_identifiers
             else:
                 data["device_identifiers"] = data.get("device_identifiers", [])
+        if "statistics_mode" in update_data:
+            if self.helper.entity_type != EntityTransportType.HASSEMS:
+                raise ValueError("Statistics mode is only available for HASSEMS helpers.")
+            mode = payload.statistics_mode or HASSEMSStatisticsMode.LINEAR
+            data["statistics_mode"] = mode
         if helper_type == HelperType.INPUT_SELECT:
             data["options"] = options
         data["last_value"] = data.get("last_value")
@@ -871,6 +934,7 @@ class InputHelperRecord:
             data["device_model"] = None
             data["device_sw_version"] = None
             data["device_identifiers"] = []
+            data["statistics_mode"] = data.get("statistics_mode") or HASSEMSStatisticsMode.LINEAR
 
         self.helper = InputHelper(**data)
 
@@ -900,6 +964,7 @@ __all__ = [
     "HelperState",
     "HelperType",
     "EntityTransportType",
+    "HASSEMSStatisticsMode",
     "InputHelper",
     "InputHelperCreate",
     "InputHelperRecord",

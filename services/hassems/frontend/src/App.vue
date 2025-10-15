@@ -769,6 +769,26 @@
                     </option>
                   </select>
                 </label>
+                <label v-if="createForm.entity_type === 'hassems'" class="form-field">
+                  <span class="label-text">
+                    Statistics mode
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Controls how HASSEMS calculates hourly statistics when syncing with Home Assistant."
+                    >?
+                    </button>
+                  </span>
+                  <select v-model="createForm.statistics_mode">
+                    <option
+                      v-for="option in statisticsModeOptions"
+                      :key="`create-statistics-${option.value}`"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
                 <label class="form-field">
                   <span class="label-text">
                     Unique ID
@@ -1077,6 +1097,24 @@
                   </select>
                 </label>
                 <label
+                  v-if="selectedHelper?.entity_type === 'hassems'"
+                  class="form-field"
+                >
+                  <span class="label-text">
+                    Statistics mode
+                    <button type="button" class="help-icon" data-tooltip="Controls how HASSEMS calculates hourly statistics when syncing with Home Assistant.">?</button>
+                  </span>
+                  <select v-model="updateForm.statistics_mode">
+                    <option
+                      v-for="option in statisticsModeOptions"
+                      :key="`update-statistics-${option.value}`"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label
                   v-if="selectedHelper?.type === 'input_select'"
                   class="form-field full-width"
                 >
@@ -1380,12 +1418,26 @@
                 >?
                 </button>
               </span>
-              <input
-                v-model="userForm.token"
-                type="text"
-                :required="userDialogMode === 'create'"
-                :disabled="userForm.is_superuser && userDialogMode === 'edit'"
-              />
+              <div class="token-input">
+                <input
+                  v-model="userForm.token"
+                  type="text"
+                  :required="userDialogMode === 'create'"
+                  :disabled="userForm.is_superuser && userDialogMode === 'edit'"
+                />
+                <button
+                  type="button"
+                  class="btn"
+                  @click="generateUserToken"
+                  :disabled="
+                    userTokenGenerating ||
+                    userSaving ||
+                    (userForm.is_superuser && userDialogMode === 'edit')
+                  "
+                >
+                  {{ userTokenGenerating ? 'Generating…' : 'Generate token' }}
+                </button>
+              </div>
             </label>
             <p v-if="userForm.is_superuser" class="form-helper">
               The superuser token is fixed and cannot be modified or deleted.
@@ -1600,6 +1652,15 @@ const stateClassOptions = [
   { value: 'total_increasing', label: 'Total increasing' },
 ];
 
+const statisticsModeOptions = [
+  { value: 'linear', label: 'Linear interpolation' },
+  { value: 'step', label: 'Step (hold last value)' },
+];
+
+const statisticsModeLabels = Object.fromEntries(
+  statisticsModeOptions.map((option) => [option.value, option.label]),
+);
+
 const iconOptions = [
   { value: '', label: 'Auto (based on device class)' },
   { value: 'mdi:account', label: 'Person (mdi:account)' },
@@ -1647,6 +1708,7 @@ const mqttSaving = ref(false);
 const apiUsers = ref([]);
 const userDialog = ref(null);
 const userDialogMode = ref('create');
+const userTokenGenerating = ref(false);
 const userSaving = ref(false);
 const userForm = reactive({
   id: null,
@@ -1736,6 +1798,7 @@ function createCreateDefaults() {
     default_value: '',
     component: 'sensor',
     state_class: 'measurement',
+    statistics_mode: 'linear',
     unique_id: '',
     object_id: '',
     device_id: '',
@@ -1771,6 +1834,7 @@ const updateForm = reactive({
   unit_of_measurement: '',
   icon: '',
   state_class: '',
+  statistics_mode: 'linear',
   unique_id: '',
   object_id: '',
   device_id: '',
@@ -1818,7 +1882,8 @@ const detailFields = computed(() => {
   const typeLabel = selectedTypeLabel.value || helper.type || '';
   const deviceClass = helper.device_class || '';
   const unit = helper.unit_of_measurement || '';
-  return [
+  const stateClass = helper.state_class || '';
+  const fields = [
     {
       key: 'device_name',
       label: 'Device name',
@@ -1861,7 +1926,26 @@ const detailFields = computed(() => {
       isEmpty: !unit,
       wrap: false,
     },
+    {
+      key: 'state_class',
+      label: 'State class',
+      value: stateClass || '—',
+      isEmpty: !stateClass,
+      wrap: false,
+    },
   ];
+  if (helper.entity_type === 'hassems') {
+    const statsValue = helper.statistics_mode || 'linear';
+    const statsLabel = statisticsModeLabels[statsValue] || statsValue || '';
+    fields.push({
+      key: 'statistics_mode',
+      label: 'Statistics mode',
+      value: statsLabel || '—',
+      isEmpty: !statsLabel,
+      wrap: false,
+    });
+  }
+  return fields;
 });
 const selectedApiPath = computed(() => {
   const helper = selectedHelper.value;
@@ -1938,6 +2022,7 @@ watch(
       if (!createForm.node_id) {
         createForm.node_id = 'hassems';
       }
+      createForm.statistics_mode = 'linear';
     } else {
       createForm.force_update = false;
       createForm.node_id = '';
@@ -1947,6 +2032,7 @@ watch(
       createForm.device_model = '';
       createForm.device_sw_version = '';
       createForm.device_identifiers = '';
+      createForm.statistics_mode = createForm.statistics_mode || 'linear';
     }
     syncCreateAutofill();
   },
@@ -2176,6 +2262,7 @@ function resetUserForm() {
   userForm.name = '';
   userForm.token = '';
   userForm.is_superuser = false;
+  userTokenGenerating.value = false;
 }
 
 function openUserDialog(user = null) {
@@ -2208,6 +2295,29 @@ function closeUserDialog() {
 function onUserDialogClose() {
   resetUserForm();
   userDialogMode.value = 'create';
+}
+
+async function generateUserToken() {
+  if (userTokenGenerating.value) {
+    return;
+  }
+  if (userForm.is_superuser && userDialogMode.value === 'edit') {
+    return;
+  }
+  try {
+    userTokenGenerating.value = true;
+    const data = await requestJson('/users/generate-token', { method: 'POST' });
+    const token = data && typeof data.token === 'string' ? data.token : '';
+    if (!token) {
+      throw new Error('Server did not return a token.');
+    }
+    userForm.token = token;
+    showToast('Generated a new API token. Save the user to store it.', 'success');
+  } catch (error) {
+    showToast(`Failed to generate API token: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  } finally {
+    userTokenGenerating.value = false;
+  }
 }
 
 async function submitUserForm() {
@@ -2630,6 +2740,9 @@ function buildCreatePayload() {
     payload.state_topic = createForm.state_topic?.trim();
     payload.availability_topic = createForm.availability_topic?.trim();
     payload.force_update = Boolean(createForm.force_update);
+  } else {
+    payload.statistics_mode =
+      createForm.statistics_mode === 'step' ? 'step' : 'linear';
   }
 
   if (createForm.description?.trim()) {
@@ -2827,6 +2940,10 @@ function populateUpdateForm(helper) {
     unit_of_measurement: helper.unit_of_measurement ?? '',
     icon: helper.icon ?? '',
     state_class: helper.state_class ?? (helper.type === 'input_number' ? 'measurement' : ''),
+    statistics_mode:
+      helper.entity_type === 'hassems'
+        ? helper.statistics_mode ?? 'linear'
+        : 'linear',
     unique_id: helper.unique_id ?? '',
     object_id: helper.object_id ?? '',
     device_id: helper.device_id ?? slugifyIdentifier(helper.device_name ?? ''),
@@ -2854,6 +2971,7 @@ function resetUpdateForm() {
     unit_of_measurement: '',
     icon: '',
     state_class: '',
+    statistics_mode: 'linear',
     unique_id: '',
     object_id: '',
     device_id: '',
@@ -2934,6 +3052,10 @@ function buildUpdatePayload(helperType) {
   const trimmed = identifiersRaw.trim();
   if (isMqtt) {
     payload.device_identifiers = trimmed ? parseCsv(trimmed) : [];
+  }
+
+  if (!isMqtt) {
+    payload.statistics_mode = updateForm.statistics_mode === 'step' ? 'step' : 'linear';
   }
 
   return removeUndefined(payload);

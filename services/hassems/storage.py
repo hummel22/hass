@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterator, List, Optional
@@ -14,6 +15,7 @@ from .models import (
     ApiUserCreate,
     ApiUserUpdate,
     EntityTransportType,
+    HASSEMSStatisticsMode,
     HistoryPoint,
     HistoryPointUpdate,
     InputHelper,
@@ -114,6 +116,21 @@ class WebhookTarget:
     updated_at: datetime
 
 
+HISTORICAL_THRESHOLD = timedelta(days=10)
+
+
+def _generate_history_cursor() -> str:
+    return secrets.token_hex(16)
+
+
+def _is_historical_timestamp(measured_at: Optional[datetime]) -> bool:
+    if measured_at is None:
+        return False
+    now = datetime.now(timezone.utc)
+    target = measured_at.astimezone(timezone.utc)
+    return (now - target) >= HISTORICAL_THRESHOLD
+
+
 class InputHelperStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -166,7 +183,10 @@ class InputHelperStore:
                     device_manufacturer TEXT,
                     device_model TEXT,
                     device_sw_version TEXT,
-                    device_identifiers TEXT
+                    device_identifiers TEXT,
+                    statistics_mode TEXT DEFAULT 'linear',
+                    history_cursor TEXT,
+                    history_changed_at TEXT
                 )
                 """
             )
@@ -260,6 +280,11 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "device_model", "TEXT")
             self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
             self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
+            self._ensure_column(
+                conn, "helpers", "statistics_mode", "TEXT DEFAULT 'linear'"
+            )
+            self._ensure_column(conn, "helpers", "history_cursor", "TEXT")
+            self._ensure_column(conn, "helpers", "history_changed_at", "TEXT")
             self._ensure_column(conn, "history", "measured_at", "TEXT")
             self._ensure_column(conn, "api_users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "webhook_subscriptions", "metadata", "TEXT")
@@ -375,8 +400,8 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_sw_version, device_identifiers, statistics_mode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
@@ -408,6 +433,7 @@ class InputHelperStore:
                     helper.device_model,
                     helper.device_sw_version,
                     _serialize_identifiers(helper.device_identifiers),
+                    helper.statistics_mode.value if helper.statistics_mode else None,
                 ),
             )
 
@@ -867,6 +893,31 @@ class InputHelperStore:
             if is_mqtt
             else []
         )
+        statistics_mode_value = mapping.get("statistics_mode")
+        statistics_mode = None
+        if entity_type == EntityTransportType.HASSEMS:
+            try:
+                statistics_mode = HASSEMSStatisticsMode(
+                    statistics_mode_value or HASSEMSStatisticsMode.LINEAR
+                )
+            except ValueError:
+                statistics_mode = HASSEMSStatisticsMode.LINEAR
+
+        history_cursor = mapping.get("history_cursor") or None
+        if not history_cursor:
+            history_cursor = _generate_history_cursor()
+            with self._connection() as conn:
+                conn.execute(
+                    "UPDATE helpers SET history_cursor = ? WHERE slug = ?",
+                    (history_cursor, slug),
+                )
+        history_changed_at_raw = mapping.get("history_changed_at")
+        history_changed_at = None
+        if history_changed_at_raw:
+            try:
+                history_changed_at = datetime.fromisoformat(history_changed_at_raw)
+            except ValueError:
+                history_changed_at = None
 
         return InputHelper(
             slug=mapping["slug"],
@@ -900,6 +951,9 @@ class InputHelperStore:
             device_model=device_model,
             device_sw_version=device_sw_version,
             device_identifiers=identifiers,
+            statistics_mode=statistics_mode,
+            history_cursor=history_cursor,
+            history_changed_at=history_changed_at,
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -943,8 +997,11 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_sw_version, device_identifiers, statistics_mode, history_cursor,
+                        history_changed_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     (
                         helper.slug,
@@ -976,6 +1033,11 @@ class InputHelperStore:
                         helper.device_model,
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
+                        helper.statistics_mode.value if helper.statistics_mode else None,
+                        helper.history_cursor,
+                        helper.history_changed_at.isoformat()
+                        if helper.history_changed_at
+                        else None,
                     ),
                 )
         return helper
@@ -1016,7 +1078,8 @@ class InputHelperStore:
                            device_manufacturer = ?,
                            device_model = ?,
                            device_sw_version = ?,
-                           device_identifiers = ?
+                           device_identifiers = ?,
+                           statistics_mode = ?
                      WHERE slug = ?
                     """,
                     (
@@ -1046,6 +1109,7 @@ class InputHelperStore:
                         helper.device_model,
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
+                        helper.statistics_mode.value if helper.statistics_mode else None,
                         helper.slug,
                     ),
                 )
@@ -1065,6 +1129,7 @@ class InputHelperStore:
         timestamp = datetime.now(timezone.utc).isoformat()
         measured_iso = measured_at.astimezone(timezone.utc).isoformat()
         serialized_value = _serialize_value(value)
+        is_historical = _is_historical_timestamp(measured_at)
         with self._lock:
             with self._connection() as conn:
                 cursor = conn.execute(
@@ -1086,6 +1151,8 @@ class InputHelperStore:
                     """,
                     (slug, serialized_value, measured_iso, timestamp),
                 )
+                if is_historical:
+                    self._touch_history_cursor(conn, slug)
                 row = conn.execute(
                     "SELECT * FROM helpers WHERE slug = ?",
                     (slug,),
@@ -1095,17 +1162,21 @@ class InputHelperStore:
         return self._row_to_helper(row)
 
     def list_history(self, slug: str, limit: int = 200) -> List[HistoryPoint]:
+        query = (
+            """
+            SELECT id, value, measured_at, created_at
+              FROM history
+             WHERE helper_slug = ?
+          ORDER BY datetime(COALESCE(measured_at, created_at)) ASC,
+                   datetime(created_at) ASC
+            """
+        )
+        params: List[Any] = [slug]
+        if limit > 0:
+            query += " LIMIT ?"
+            params.append(limit)
         with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, value, measured_at, created_at
-                  FROM history
-                 WHERE helper_slug = ?
-              ORDER BY datetime(created_at) ASC
-                 LIMIT ?
-                """,
-                (slug, limit),
-            ).fetchall()
+            rows = conn.execute(query, tuple(params)).fetchall()
         history: List[HistoryPoint] = []
         for row in rows:
             point = self._row_to_history_point(row)
@@ -1129,6 +1200,24 @@ class InputHelperStore:
             raise ValueError("History value cannot be null.")
         with self._lock:
             with self._connection() as conn:
+                existing_row = conn.execute(
+                    """
+                    SELECT measured_at, created_at
+                      FROM history
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (history_id, slug),
+                ).fetchone()
+                if existing_row is None:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                try:
+                    previous_measured = existing_row["measured_at"] or existing_row["created_at"]
+                    previous_dt = datetime.fromisoformat(previous_measured)
+                except (TypeError, ValueError):
+                    previous_dt = None
+                new_dt = payload.measured_at or previous_dt
+
                 cursor = conn.execute(
                     """
                     UPDATE history
@@ -1151,6 +1240,8 @@ class InputHelperStore:
                     (history_id, slug),
                 ).fetchone()
                 self._sync_helper_last_value(conn, slug)
+                if _is_historical_timestamp(previous_dt) or _is_historical_timestamp(new_dt):
+                    self._touch_history_cursor(conn, slug)
         if row is None:
             raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
         point = self._row_to_history_point(row)
@@ -1161,6 +1252,22 @@ class InputHelperStore:
     def delete_history_point(self, slug: str, history_id: int) -> None:
         with self._lock:
             with self._connection() as conn:
+                existing_row = conn.execute(
+                    """
+                    SELECT measured_at, created_at
+                      FROM history
+                     WHERE id = ?
+                       AND helper_slug = ?
+                    """,
+                    (history_id, slug),
+                ).fetchone()
+                if existing_row is None:
+                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                try:
+                    previous_measured = existing_row["measured_at"] or existing_row["created_at"]
+                    previous_dt = datetime.fromisoformat(previous_measured)
+                except (TypeError, ValueError):
+                    previous_dt = None
                 cursor = conn.execute(
                     "DELETE FROM history WHERE id = ? AND helper_slug = ?",
                     (history_id, slug),
@@ -1168,6 +1275,8 @@ class InputHelperStore:
                 if cursor.rowcount == 0:
                     raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
                 self._sync_helper_last_value(conn, slug)
+                if _is_historical_timestamp(previous_dt):
+                    self._touch_history_cursor(conn, slug)
 
     def _row_to_history_point(self, row: sqlite3.Row) -> Optional[HistoryPoint]:
         if row is None:
@@ -1224,6 +1333,19 @@ class InputHelperStore:
                 now_iso,
                 slug,
             ),
+        )
+
+    def _touch_history_cursor(self, conn: sqlite3.Connection, slug: str) -> None:
+        new_cursor = _generate_history_cursor()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            UPDATE helpers
+               SET history_cursor = ?,
+                   history_changed_at = ?
+             WHERE slug = ?
+            """,
+            (new_cursor, timestamp, slug),
         )
 
     def get_mqtt_config(self) -> Optional[MQTTConfig]:
