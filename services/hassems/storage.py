@@ -14,6 +14,7 @@ from .models import (
     ApiUserCreate,
     ApiUserUpdate,
     EntityTransportType,
+    HASSEMSStatisticsMode,
     HistoryPoint,
     HistoryPointUpdate,
     InputHelper,
@@ -166,7 +167,8 @@ class InputHelperStore:
                     device_manufacturer TEXT,
                     device_model TEXT,
                     device_sw_version TEXT,
-                    device_identifiers TEXT
+                    device_identifiers TEXT,
+                    statistics_mode TEXT DEFAULT 'linear'
                 )
                 """
             )
@@ -260,6 +262,9 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "device_model", "TEXT")
             self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
             self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
+            self._ensure_column(
+                conn, "helpers", "statistics_mode", "TEXT DEFAULT 'linear'"
+            )
             self._ensure_column(conn, "history", "measured_at", "TEXT")
             self._ensure_column(conn, "api_users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "webhook_subscriptions", "metadata", "TEXT")
@@ -375,8 +380,8 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_sw_version, device_identifiers, statistics_mode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
@@ -408,6 +413,7 @@ class InputHelperStore:
                     helper.device_model,
                     helper.device_sw_version,
                     _serialize_identifiers(helper.device_identifiers),
+                    helper.statistics_mode.value if helper.statistics_mode else None,
                 ),
             )
 
@@ -867,6 +873,15 @@ class InputHelperStore:
             if is_mqtt
             else []
         )
+        statistics_mode_value = mapping.get("statistics_mode")
+        statistics_mode = None
+        if entity_type == EntityTransportType.HASSEMS:
+            try:
+                statistics_mode = HASSEMSStatisticsMode(
+                    statistics_mode_value or HASSEMSStatisticsMode.LINEAR
+                )
+            except ValueError:
+                statistics_mode = HASSEMSStatisticsMode.LINEAR
 
         return InputHelper(
             slug=mapping["slug"],
@@ -900,6 +915,7 @@ class InputHelperStore:
             device_model=device_model,
             device_sw_version=device_sw_version,
             device_identifiers=identifiers,
+            statistics_mode=statistics_mode,
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -943,8 +959,8 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_sw_version, device_identifiers, statistics_mode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         helper.slug,
@@ -976,6 +992,7 @@ class InputHelperStore:
                         helper.device_model,
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
+                        helper.statistics_mode.value if helper.statistics_mode else None,
                     ),
                 )
         return helper
@@ -1016,7 +1033,8 @@ class InputHelperStore:
                            device_manufacturer = ?,
                            device_model = ?,
                            device_sw_version = ?,
-                           device_identifiers = ?
+                           device_identifiers = ?,
+                           statistics_mode = ?
                      WHERE slug = ?
                     """,
                     (
@@ -1046,6 +1064,7 @@ class InputHelperStore:
                         helper.device_model,
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
+                        helper.statistics_mode.value if helper.statistics_mode else None,
                         helper.slug,
                     ),
                 )

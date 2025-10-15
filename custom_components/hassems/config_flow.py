@@ -11,7 +11,6 @@ from homeassistant.helpers import aiohttp_client, config_validation as cv
 from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
 from .const import (
     CONF_BASE_URL,
-    CONF_GENERATE_TOKEN,
     CONF_INCLUDED_HELPERS,
     CONF_IGNORED_HELPERS,
     CONF_TOKEN,
@@ -27,63 +26,39 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry: config_entries.ConfigEntry | None = None
         self._discovery_helper: Dict[str, Any] | None = None
         self._discovery_entry: config_entries.ConfigEntry | None = None
-        self._generated_token: str | None = None
-        self._generated_base_url: str | None = None
 
     async def async_step_user(self, user_input: Dict[str, Any] | None = None):
         errors: Dict[str, str] = {}
-        defaults_base_url = self._generated_base_url
-        defaults_token = self._generated_token
+        defaults_base_url: str | None = None
+        defaults_token: str | None = None
         if user_input is not None:
-            generate_token = bool(user_input.get(CONF_GENERATE_TOKEN))
             base_url = user_input.get(CONF_BASE_URL)
-            provided_token = user_input.get(CONF_TOKEN)
-            if generate_token:
-                if not base_url:
-                    errors[CONF_BASE_URL] = "required"
-                else:
-                    try:
-                        token = await self._async_generate_token(base_url)
-                    except (HASSEMSError, HASSEMSAuthError):
-                        errors["base"] = "token_generation_failed"
-                    else:
-                        self._generated_token = token
-                        self._generated_base_url = base_url
-                        defaults_base_url = base_url
-                        defaults_token = token
-                        return self.async_show_form(
-                            step_id="user",
-                            data_schema=self._user_schema(defaults_base_url, defaults_token),
-                            errors={"base": "token_generated"},
-                        )
+            token = user_input.get(CONF_TOKEN)
+            if base_url:
+                defaults_base_url = base_url
+            if token:
+                defaults_token = token
+            if not base_url:
+                errors[CONF_BASE_URL] = "required"
+            elif not token:
+                errors[CONF_TOKEN] = "required"
             else:
-                if base_url:
-                    defaults_base_url = base_url
-                token_to_use = provided_token or self._generated_token
-                if not base_url:
-                    errors[CONF_BASE_URL] = "required"
-                elif not token_to_use:
-                    errors[CONF_TOKEN] = "required"
+                try:
+                    await self._async_validate({CONF_BASE_URL: base_url, CONF_TOKEN: token})
+                except HASSEMSAuthError:
+                    errors["base"] = "invalid_auth"
+                except HASSEMSError:
+                    errors["base"] = "cannot_connect"
                 else:
-                    try:
-                        await self._async_validate(
-                            {CONF_BASE_URL: base_url, CONF_TOKEN: token_to_use}
-                        )
-                    except HASSEMSAuthError:
-                        errors["base"] = "invalid_auth"
-                    except HASSEMSError:
-                        errors["base"] = "cannot_connect"
-                    else:
-                        await self.async_set_unique_id(self._unique_id_from_url(base_url))
-                        self._abort_if_unique_id_configured()
-                        return self.async_create_entry(
-                            title=self._entry_title(base_url),
-                            data={
-                                CONF_BASE_URL: base_url,
-                                CONF_TOKEN: token_to_use,
-                            },
-                        )
-                defaults_token = token_to_use
+                    await self.async_set_unique_id(self._unique_id_from_url(base_url))
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(
+                        title=self._entry_title(base_url),
+                        data={
+                            CONF_BASE_URL: base_url,
+                            CONF_TOKEN: token,
+                        },
+                    )
 
         schema = self._user_schema(defaults_base_url, defaults_token)
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -192,19 +167,13 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         client = HASSEMSClient(session, user_input[CONF_BASE_URL], user_input[CONF_TOKEN])
         await client.async_list_helpers()
 
-    async def _async_generate_token(self, base_url: str) -> str:
-        session = aiohttp_client.async_get_clientsession(self.hass)
-        client = HASSEMSClient(session, base_url, "")
-        return await client.async_generate_token()
-
     def _user_schema(
         self, base_url: Optional[str], token: Optional[str]
     ) -> vol.Schema:
         return vol.Schema(
             {
                 vol.Required(CONF_BASE_URL, default=base_url or vol.UNDEFINED): str,
-                vol.Optional(CONF_TOKEN, default=token or vol.UNDEFINED): str,
-                vol.Optional(CONF_GENERATE_TOKEN, default=False): bool,
+                vol.Required(CONF_TOKEN, default=token or vol.UNDEFINED): str,
             }
         )
 

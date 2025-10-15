@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Set
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from aiohttp import web
 from homeassistant import config_entries
 from homeassistant.components import recorder
+from homeassistant.components.recorder.statistics import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+    async_add_external_statistics,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
@@ -405,3 +413,173 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
 
         for event in events:
             instance._queue.put_nowait(event)
+        await self._async_update_statistics(slug)
+
+    async def _async_update_statistics(self, slug: str) -> None:
+        helper = self._helpers.get(slug)
+        if not helper:
+            return
+        if helper.get("entity_type") != "hassems":
+            return
+        if helper.get("state_class") != "measurement":
+            return
+        entity_id = self._entity_ids.get(slug) or helper.get("entity_id")
+        if not entity_id:
+            return
+        history = self._history.get(slug)
+        if not history:
+            return
+        points = self._parse_measurement_points(history)
+        if not points:
+            return
+        mode = str(helper.get("statistics_mode") or "linear").strip().lower()
+        statistics = self._calculate_hourly_statistics(points, mode)
+        if not statistics:
+            return
+
+        metadata: StatisticMetaData = {
+            "statistic_id": entity_id,
+            "source": DOMAIN,
+            "name": helper.get("name"),
+            "unit_of_measurement": helper.get("unit_of_measurement"),
+            "has_sum": False,
+            "mean_type": StatisticMeanType.ARITHMETIC,
+            "unit_class": None,
+        }
+        async_add_external_statistics(self.hass, metadata, statistics)
+
+    def _parse_measurement_points(
+        self, history: List[Dict[str, Any]]
+    ) -> List[Tuple[datetime, float]]:
+        points: List[Tuple[datetime, float]] = []
+        for item in history:
+            measured_at = item.get("measured_at")
+            if not measured_at:
+                continue
+            dt_value = dt_util.parse_datetime(measured_at)
+            if dt_value is None:
+                continue
+            dt_value = dt_util.as_utc(dt_value)
+            value = item.get("value")
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isnan(numeric) or math.isinf(numeric):
+                continue
+            points.append((dt_value, numeric))
+        points.sort(key=lambda entry: entry[0])
+        deduped: List[Tuple[datetime, float]] = []
+        for dt_value, numeric in points:
+            if deduped and dt_value == deduped[-1][0]:
+                deduped[-1] = (dt_value, numeric)
+            else:
+                deduped.append((dt_value, numeric))
+        return deduped
+
+    def _calculate_hourly_statistics(
+        self, points: List[Tuple[datetime, float]], mode: str
+    ) -> List[StatisticData]:
+        if not points:
+            return []
+
+        processed = list(points)
+        normalized_mode = mode if mode in {"linear", "step"} else "linear"
+        if normalized_mode == "step" and processed:
+            now = dt_util.utcnow()
+            last_time = processed[-1][0]
+            if now > last_time:
+                processed.append((now, processed[-1][1]))
+        if len(processed) < 2:
+            return []
+        hour_stats: Dict[datetime, Dict[str, Any]] = {}
+        for index in range(len(processed) - 1):
+            start_time, start_value = processed[index]
+            end_time, end_value = processed[index + 1]
+            if end_time <= start_time:
+                continue
+            hour_cursor = start_time.replace(minute=0, second=0, microsecond=0)
+            while hour_cursor < end_time:
+                hour_end = hour_cursor + timedelta(hours=1)
+                overlap_start = max(start_time, hour_cursor)
+                overlap_end = min(end_time, hour_end)
+                if overlap_end <= overlap_start:
+                    hour_cursor = hour_end
+                    continue
+                value_start = self._value_at(
+                    normalized_mode, start_time, start_value, end_time, end_value, overlap_start
+                )
+                value_end = self._value_at(
+                    normalized_mode, start_time, start_value, end_time, end_value, overlap_end
+                )
+                duration = (overlap_end - overlap_start).total_seconds()
+                if duration <= 0:
+                    hour_cursor = hour_end
+                    continue
+                stats = hour_stats.setdefault(
+                    hour_cursor,
+                    {
+                        "duration": 0.0,
+                        "integral": 0.0,
+                        "min": None,
+                        "max": None,
+                        "state": value_end,
+                    },
+                )
+                average = (
+                    (value_start + value_end) / 2.0
+                    if normalized_mode == "linear"
+                    else value_start
+                )
+                stats["duration"] += duration
+                stats["integral"] += average * duration
+                for candidate in (value_start, value_end):
+                    if stats["min"] is None or candidate < stats["min"]:
+                        stats["min"] = candidate
+                    if stats["max"] is None or candidate > stats["max"]:
+                        stats["max"] = candidate
+                stats["state"] = value_end
+                hour_cursor = hour_end
+
+        statistics: List[StatisticData] = []
+        for hour_start in sorted(hour_stats):
+            stats = hour_stats[hour_start]
+            duration = stats["duration"]
+            if duration <= 0:
+                continue
+            min_value = stats["min"]
+            max_value = stats["max"]
+            state_value = stats["state"]
+            if min_value is None or max_value is None or state_value is None:
+                continue
+            mean_value = stats["integral"] / duration if duration else 0.0
+            statistics.append(
+                {
+                    "start": hour_start,
+                    "mean": mean_value,
+                    "min": min_value,
+                    "max": max_value,
+                    "state": state_value,
+                }
+            )
+        return statistics
+
+    @staticmethod
+    def _value_at(
+        mode: str,
+        start_time: datetime,
+        start_value: float,
+        end_time: datetime,
+        end_value: float,
+        point_time: datetime,
+    ) -> float:
+        if mode == "step":
+            if point_time >= end_time:
+                return float(end_value)
+            return float(start_value)
+        total = (end_time - start_time).total_seconds()
+        if total <= 0:
+            return float(end_value)
+        offset = (point_time - start_time).total_seconds()
+        ratio = max(0.0, min(1.0, offset / total))
+        return float(start_value + (end_value - start_value) * ratio)

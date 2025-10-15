@@ -108,14 +108,6 @@ class HASSEMSClient:
             f"/integrations/home-assistant/webhooks/{subscription_id}",
         )
 
-    async def async_generate_token(self) -> str:
-        data = await self._request("POST", "/integrations/home-assistant/tokens")
-        if isinstance(data, dict):
-            token = data.get("token")
-            if isinstance(token, str) and token:
-                return token
-        raise HASSEMSError("Unexpected response when generating token")
-
     async def async_upsert_connection(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         result = await self._request(
             "POST",
