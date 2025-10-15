@@ -424,7 +424,9 @@ def integration_list_helpers(
     store: InputHelperStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
 ) -> List[InputHelper]:
-    return store.list_helpers_by_type(EntityTransportType.HASSEMS)
+    return store.list_helpers_by_type(
+        EntityTransportType.HASSEMS, only_enabled=True
+    )
 
 
 @api_router.get("/integrations/home-assistant/helpers/{slug}", response_model=InputHelper)
@@ -434,7 +436,11 @@ def integration_get_helper(
     _: ApiUser = Depends(require_api_user),
 ) -> InputHelper:
     record = store.get_helper(slug)
-    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+    if (
+        record is None
+        or record.helper.entity_type != EntityTransportType.HASSEMS
+        or not record.helper.ha_enabled
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
     return record.helper
 
@@ -450,7 +456,11 @@ def integration_get_history(
     _: ApiUser = Depends(require_api_user),
 ) -> List[HistoryPoint]:
     record = store.get_helper(slug)
-    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+    if (
+        record is None
+        or record.helper.entity_type != EntityTransportType.HASSEMS
+        or not record.helper.ha_enabled
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
     limit = 0 if full else 200
     return store.list_history(slug, limit=limit)
@@ -468,7 +478,11 @@ async def integration_set_helper_value(
     client: Optional[HomeAssistantClient] = Depends(get_optional_client),
 ) -> InputHelper:
     record = store.get_helper(slug)
-    if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
+    if (
+        record is None
+        or record.helper.entity_type != EntityTransportType.HASSEMS
+        or not record.helper.ha_enabled
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
     return await set_helper_value(slug, request, store=store, client=client)
 

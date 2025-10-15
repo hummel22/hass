@@ -816,6 +816,18 @@
                     </option>
                   </select>
                 </label>
+                <label v-if="createForm.entity_type === 'hassems'" class="form-checkbox">
+                  <input v-model="createForm.ha_enabled" type="checkbox" />
+                  <span class="label-text">
+                    Enable in Home Assistant
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Expose this entity to the Home Assistant integration. Disable to stage data before discovery."
+                    >?
+                    </button>
+                  </span>
+                </label>
                 <label class="form-field">
                   <span class="label-text">
                     Unique ID
@@ -1140,6 +1152,21 @@
                       {{ option.label }}
                     </option>
                   </select>
+                </label>
+                <label
+                  v-if="selectedHelper?.entity_type === 'hassems'"
+                  class="form-checkbox"
+                >
+                  <input v-model="updateForm.ha_enabled" type="checkbox" />
+                  <span class="label-text">
+                    Enable in Home Assistant
+                    <button
+                      type="button"
+                      class="help-icon"
+                      data-tooltip="Expose this entity to the Home Assistant integration. Disable to hide it from discovery."
+                    >?
+                    </button>
+                  </span>
                 </label>
                 <label
                   v-if="selectedHelper?.type === 'input_select'"
@@ -1858,6 +1885,7 @@ function createCreateDefaults() {
     component: 'sensor',
     state_class: 'measurement',
     statistics_mode: 'linear',
+    ha_enabled: true,
     unique_id: '',
     object_id: '',
     device_id: '',
@@ -1894,6 +1922,7 @@ const updateForm = reactive({
   icon: '',
   state_class: '',
   statistics_mode: 'linear',
+  ha_enabled: true,
   unique_id: '',
   object_id: '',
   device_id: '',
@@ -2003,6 +2032,13 @@ const detailFields = computed(() => {
       isEmpty: !statsLabel,
       wrap: false,
     });
+    fields.push({
+      key: 'ha_enabled',
+      label: 'Home Assistant integration',
+      value: helper.ha_enabled !== false ? 'Enabled' : 'Hidden',
+      isEmpty: false,
+      wrap: false,
+    });
   }
   return fields;
 });
@@ -2082,6 +2118,7 @@ watch(
         createForm.node_id = 'hassems';
       }
       createForm.statistics_mode = 'linear';
+      createForm.ha_enabled = true;
     } else {
       createForm.force_update = false;
       createForm.node_id = '';
@@ -2092,6 +2129,9 @@ watch(
       createForm.device_sw_version = '';
       createForm.device_identifiers = '';
       createForm.statistics_mode = createForm.statistics_mode || 'linear';
+      if (createForm.ha_enabled === undefined || createForm.ha_enabled === null) {
+        createForm.ha_enabled = true;
+      }
     }
     syncCreateAutofill();
   },
@@ -2271,11 +2311,22 @@ async function testMqttConfig() {
   }
 }
 
+function normalizeHelper(helper) {
+  if (!helper || typeof helper !== 'object') {
+    return helper;
+  }
+  return {
+    ...helper,
+    ha_enabled: helper.ha_enabled !== false,
+  };
+}
+
 async function loadHelpers() {
   try {
     const data = await requestJson('/inputs');
     debugLog('Loaded helpers response', data);
-    helpers.value = Array.isArray(data) ? data : [];
+    const rawList = Array.isArray(data) ? data : [];
+    helpers.value = rawList.map((helper) => normalizeHelper(helper));
     if (selectedSlug.value) {
       const exists = helpers.value.some((helper) => helper.slug === selectedSlug.value);
       if (!exists) {
@@ -2829,6 +2880,7 @@ function buildCreatePayload() {
   } else {
     payload.statistics_mode =
       createForm.statistics_mode === 'step' ? 'step' : 'linear';
+    payload.ha_enabled = Boolean(createForm.ha_enabled);
   }
 
   if (createForm.description?.trim()) {
@@ -3030,6 +3082,10 @@ function populateUpdateForm(helper) {
       helper.entity_type === 'hassems'
         ? helper.statistics_mode ?? 'linear'
         : 'linear',
+    ha_enabled:
+      helper.entity_type === 'hassems'
+        ? helper.ha_enabled !== false
+        : true,
     unique_id: helper.unique_id ?? '',
     object_id: helper.object_id ?? '',
     device_id: helper.device_id ?? slugifyIdentifier(helper.device_name ?? ''),
@@ -3058,6 +3114,7 @@ function resetUpdateForm() {
     icon: '',
     state_class: '',
     statistics_mode: 'linear',
+    ha_enabled: true,
     unique_id: '',
     object_id: '',
     device_id: '',
@@ -3080,10 +3137,11 @@ async function updateHelper() {
   }
   try {
     const payload = buildUpdatePayload(helper.type);
-    const updated = await requestJson(`/inputs/${helper.slug}`, {
+    const response = await requestJson(`/inputs/${helper.slug}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    const updated = normalizeHelper(response);
     showToast('Entity updated.', 'success');
     helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
@@ -3142,6 +3200,7 @@ function buildUpdatePayload(helperType) {
 
   if (!isMqtt) {
     payload.statistics_mode = updateForm.statistics_mode === 'step' ? 'step' : 'linear';
+    payload.ha_enabled = Boolean(updateForm.ha_enabled);
   }
 
   return removeUndefined(payload);
@@ -3255,10 +3314,11 @@ async function submitValue() {
       setMeasuredInputsToNow();
     }
     debugLog('Submitting value payload', { helper: helper.slug, payload });
-    const updated = await requestJson(`/inputs/${helper.slug}/set`, {
+    const response = await requestJson(`/inputs/${helper.slug}/set`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    const updated = normalizeHelper(response);
     debugLog('Value submission response', { helper: helper.slug, updated });
     const successMessage = helper.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
     showToast(successMessage, 'success');

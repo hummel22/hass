@@ -154,6 +154,7 @@ class InputHelperBase(BaseModel):
     statistics_mode: Optional[HASSEMSStatisticsMode] = Field(
         default=HASSEMSStatisticsMode.LINEAR
     )
+    ha_enabled: bool = True
 
     @field_validator("entity_id")
     @classmethod
@@ -297,6 +298,7 @@ class InputHelperBase(BaseModel):
                 identifiers = [base_identifier]
             self.device_identifiers = identifiers
             self.statistics_mode = None
+            self.ha_enabled = True
         else:
             self.node_id = None
             self.state_topic = None
@@ -308,6 +310,7 @@ class InputHelperBase(BaseModel):
             self.device_identifiers = []
             if not self.statistics_mode:
                 self.statistics_mode = HASSEMSStatisticsMode.LINEAR
+            self.ha_enabled = True if self.ha_enabled is None else bool(self.ha_enabled)
 
         return self
 
@@ -444,6 +447,7 @@ class InputHelperUpdate(BaseModel):
     device_sw_version: Optional[str] = Field(default=None, max_length=64)
     device_identifiers: Optional[List[str]] = None
     statistics_mode: Optional[HASSEMSStatisticsMode] = None
+    ha_enabled: Optional[bool] = None
 
     model_config = {"extra": "forbid"}
 
@@ -571,6 +575,7 @@ class InputHelper(BaseModel):
     statistics_mode: Optional[HASSEMSStatisticsMode] = None
     history_cursor: Optional[str] = None
     history_changed_at: Optional[datetime] = None
+    ha_enabled: bool = True
 
     model_config = {
         "from_attributes": True,
@@ -808,6 +813,10 @@ class InputHelperRecord:
             if payload.entity_type == EntityTransportType.HASSEMS
             else None
         )
+        if payload.entity_type == EntityTransportType.HASSEMS:
+            ha_enabled = True if payload.ha_enabled is None else bool(payload.ha_enabled)
+        else:
+            ha_enabled = True
 
         helper = InputHelper(
             slug=slugify(payload.unique_id),
@@ -842,6 +851,7 @@ class InputHelperRecord:
             statistics_mode=statistics_mode,
             history_cursor=history_cursor,
             history_changed_at=None,
+            ha_enabled=ha_enabled,
         )
         return cls(helper=helper)
 
@@ -921,6 +931,14 @@ class InputHelperRecord:
                 raise ValueError("Statistics mode is only available for HASSEMS helpers.")
             mode = payload.statistics_mode or HASSEMSStatisticsMode.LINEAR
             data["statistics_mode"] = mode
+        if "ha_enabled" in update_data:
+            requested = update_data.get("ha_enabled")
+            if self.helper.entity_type != EntityTransportType.HASSEMS:
+                data["ha_enabled"] = True
+            elif requested is None:
+                data["ha_enabled"] = data.get("ha_enabled", True)
+            else:
+                data["ha_enabled"] = bool(requested)
         if helper_type == HelperType.INPUT_SELECT:
             data["options"] = options
         data["last_value"] = data.get("last_value")
