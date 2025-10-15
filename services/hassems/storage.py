@@ -185,6 +185,7 @@ class InputHelperStore:
                     device_sw_version TEXT,
                     device_identifiers TEXT,
                     statistics_mode TEXT DEFAULT 'linear',
+                    ha_enabled INTEGER NOT NULL DEFAULT 1,
                     history_cursor TEXT,
                     history_changed_at TEXT
                 )
@@ -301,6 +302,9 @@ class InputHelperStore:
             self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
             self._ensure_column(
                 conn, "helpers", "statistics_mode", "TEXT DEFAULT 'linear'"
+            )
+            self._ensure_column(
+                conn, "helpers", "ha_enabled", "INTEGER NOT NULL DEFAULT 1"
             )
             self._ensure_column(conn, "helpers", "history_cursor", "TEXT")
             self._ensure_column(conn, "helpers", "history_changed_at", "TEXT")
@@ -500,8 +504,8 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers, statistics_mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        device_sw_version, device_identifiers, statistics_mode, ha_enabled
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     helper.slug,
@@ -534,6 +538,7 @@ class InputHelperStore:
                     helper.device_sw_version,
                     _serialize_identifiers(helper.device_identifiers),
                     helper.statistics_mode.value if helper.statistics_mode else None,
+                    int(helper.ha_enabled),
                 ),
             )
 
@@ -1054,6 +1059,7 @@ class InputHelperStore:
             statistics_mode=statistics_mode,
             history_cursor=history_cursor,
             history_changed_at=history_changed_at,
+            ha_enabled=bool(mapping.get("ha_enabled", 1)),
         )
 
     def list_helpers(self) -> List[InputHelper]:
@@ -1063,12 +1069,16 @@ class InputHelperStore:
             ).fetchall()
         return [self._row_to_helper(row) for row in rows]
 
-    def list_helpers_by_type(self, entity_type: EntityTransportType) -> List[InputHelper]:
+    def list_helpers_by_type(
+        self, entity_type: EntityTransportType, *, only_enabled: bool = False
+    ) -> List[InputHelper]:
         with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM helpers WHERE entity_type = ? ORDER BY name COLLATE NOCASE",
-                (entity_type.value,),
-            ).fetchall()
+            query = "SELECT * FROM helpers WHERE entity_type = ?"
+            params: List[Any] = [entity_type.value]
+            if only_enabled:
+                query += " AND ha_enabled = 1"
+            query += " ORDER BY name COLLATE NOCASE"
+            rows = conn.execute(query, tuple(params)).fetchall()
         return [self._row_to_helper(row) for row in rows]
 
     def get_helper(self, slug: str) -> Optional[InputHelperRecord]:
@@ -1097,10 +1107,10 @@ class InputHelperStore:
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
                         force_update, device_name, device_id, device_manufacturer, device_model,
-                        device_sw_version, device_identifiers, statistics_mode, history_cursor,
+                        device_sw_version, device_identifiers, statistics_mode, ha_enabled, history_cursor,
                         history_changed_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1134,6 +1144,7 @@ class InputHelperStore:
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
                         helper.statistics_mode.value if helper.statistics_mode else None,
+                        int(helper.ha_enabled),
                         helper.history_cursor,
                         helper.history_changed_at.isoformat()
                         if helper.history_changed_at
@@ -1179,7 +1190,8 @@ class InputHelperStore:
                            device_model = ?,
                            device_sw_version = ?,
                            device_identifiers = ?,
-                           statistics_mode = ?
+                           statistics_mode = ?,
+                           ha_enabled = ?
                      WHERE slug = ?
                     """,
                     (
@@ -1210,6 +1222,7 @@ class InputHelperStore:
                         helper.device_sw_version,
                         _serialize_identifiers(helper.device_identifiers),
                         helper.statistics_mode.value if helper.statistics_mode else None,
+                        int(helper.ha_enabled),
                         helper.slug,
                     ),
                 )
