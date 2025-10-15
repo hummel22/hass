@@ -592,6 +592,16 @@ body {
   font-size: 0.95rem;
 }
 
+.helper-status__history-cursor code {
+  font-size: 0.85rem;
+}
+
+.helper-status__history-cursor-updated {
+  margin-left: 0.35rem;
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+}
+
 .helper-meta {
   display: grid;
   gap: 0.35rem;
@@ -702,10 +712,30 @@ body {
 
 .history-list li {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 0.35rem;
   padding: 0.6rem 0.75rem;
   border-radius: 12px;
   background: var(--surface-muted);
+}
+
+.history-list__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.history-list__timestamp {
+  font-weight: 600;
+}
+
+.history-list__cursor {
+  font-size: 0.85rem;
+  color: var(--text-subtle);
+}
+
+.history-list__cursor code {
+  font-size: 0.8rem;
 }
 
 .debug-json {

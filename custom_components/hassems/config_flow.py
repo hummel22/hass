@@ -200,9 +200,9 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         return HASSEMSOptionsFlow(config_entry)
 
 
-class HASSEMSOptionsFlow(config_entries.OptionsFlow):
+class HASSEMSOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = entry
+        super().__init__(entry)
 
     async def async_step_init(self, user_input: Dict[str, Any] | None = None):
         domain_data = self.hass.data.get(DOMAIN, {})

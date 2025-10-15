@@ -338,6 +338,16 @@
           <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedHelper?.last_value ?? '—' }}</span></p>
           <p><strong>Measured at:</strong> <span id="detail-measured-at">{{ selectedMeasuredAt }}</span></p>
           <p><strong>Recorded:</strong> <span id="detail-updated">{{ selectedUpdatedAt }}</span></p>
+          <p
+            v-if="selectedHelper?.entity_type === 'hassems' && selectedHelper?.history_cursor"
+            class="helper-status__history-cursor"
+          >
+            <strong>History cursor:</strong>
+            <code>{{ selectedHelper.history_cursor }}</code>
+            <span v-if="selectedHelper.history_changed_at" class="helper-status__history-cursor-updated">
+              (updated {{ formatTimestamp(selectedHelper.history_changed_at) }})
+            </span>
+          </p>
         </div>
 
         <div class="divider"></div>
@@ -374,9 +384,17 @@
             <canvas id="history-chart" height="220" ref="historyCanvas"></canvas>
           </div>
           <ul v-if="historyMode === 'list'" id="history-list" class="history-list">
-            <li v-for="item in historyList" :key="item.measured_at">
-              <span>{{ item.measured_at }}</span>
-              <span>{{ item.value }}</span>
+            <li v-for="item in historyList" :key="item.key">
+              <div class="history-list__row">
+                <span class="history-list__timestamp">{{ item.measured_at }}</span>
+                <span class="history-list__value">{{ item.value }}</span>
+              </div>
+              <span
+                v-if="item.historyChange && item.historyCursor"
+                class="history-list__cursor"
+              >
+                History cursor: <code>{{ item.historyCursor }}</code>
+              </span>
             </li>
           </ul>
           <p v-else-if="historyMode === 'empty'">No values yet</p>
@@ -3420,12 +3438,15 @@ function renderHistory(helper, history) {
   }
   const datasetPoints = [];
   const skippedEntries = [];
+  let lastHistoryCursor = null;
   for (const item of sorted) {
     const timestampSource = item.measured_at || item.recorded_at;
     const timestampDate = timestampSource ? new Date(timestampSource) : null;
     const timestampValid = timestampDate instanceof Date && !Number.isNaN(timestampDate?.getTime?.());
     const normalizedValue = normalizeHistoryValue(helper.type, item.value);
     const numericValue = normalizedValue === null ? null : Number(normalizedValue);
+    const historyCursor = item.history_cursor || null;
+    const historyChange = Boolean(historyCursor && historyCursor !== lastHistoryCursor);
     if (!timestampValid || numericValue === null || Number.isNaN(numericValue)) {
       skippedEntries.push({
         timestamp: timestampSource ?? null,
@@ -3435,7 +3456,15 @@ function renderHistory(helper, history) {
       });
       continue;
     }
-    datasetPoints.push({ x: timestampDate, y: numericValue });
+    datasetPoints.push({
+      x: timestampDate,
+      y: numericValue,
+      historyCursor,
+      historyChange,
+    });
+    if (historyCursor) {
+      lastHistoryCursor = historyCursor;
+    }
   }
   debugLog('Prepared history dataset', {
     helper: helper.slug,
@@ -3452,6 +3481,8 @@ function renderHistory(helper, history) {
     historyChartDataset.value = datasetPoints.map((point) => ({
       x: point.x instanceof Date ? point.x.toISOString() : point.x,
       y: point.y,
+      history_cursor: point.historyCursor ?? null,
+      history_change: Boolean(point.historyChange),
     }));
     const canvasEl = historyCanvas.value;
     if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
@@ -3544,6 +3575,13 @@ function renderHistory(helper, history) {
                       const unit = helper.unit_of_measurement || '';
                       return unit ? `${formatted} ${unit}` : formatted;
                     },
+                    afterLabel: (context) => {
+                      const rawPoint = context?.raw ?? {};
+                      if (!rawPoint.historyChange || !rawPoint.historyCursor) {
+                        return '';
+                      }
+                      return `History cursor: ${rawPoint.historyCursor}`;
+                    },
                   },
                 },
               },
@@ -3562,10 +3600,23 @@ function renderHistory(helper, history) {
   debugLog('Falling back to history list view', { helper: helper.slug });
   historyChartDataset.value = [];
   historyMode.value = 'list';
-  historyList.value = sorted.map((item) => ({
-    measured_at: formatTimestamp(item.measured_at || item.recorded_at),
-    value: String(item.value ?? '—'),
-  }));
+  const listEntries = [];
+  lastHistoryCursor = null;
+  for (const item of sorted) {
+    const historyCursor = item.history_cursor || null;
+    const historyChange = Boolean(historyCursor && historyCursor !== lastHistoryCursor);
+    if (historyCursor) {
+      lastHistoryCursor = historyCursor;
+    }
+    listEntries.push({
+      key: item.id ?? `${item.measured_at ?? item.recorded_at}-${item.value}`,
+      measured_at: formatTimestamp(item.measured_at || item.recorded_at),
+      value: String(item.value ?? '—'),
+      historyCursor,
+      historyChange,
+    });
+  }
+  historyList.value = listEntries;
 }
 
 function destroyChart() {

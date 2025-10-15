@@ -357,6 +357,17 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     def unregister_entity(self, slug: str) -> None:
         self._entity_ids.pop(slug, None)
 
+    def _sensor_entity_id(self, slug: str) -> str | None:
+        entity_id = self._entity_ids.get(slug)
+        if not entity_id:
+            return None
+        domain, sep, object_id = entity_id.partition(".")
+        if sep != "." or not domain or not object_id:
+            return None
+        if domain != "sensor":
+            return None
+        return entity_id
+
     def _mark_history_cursors_dirty(self) -> None:
         self._history_cursors_dirty = True
 
@@ -391,7 +402,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         helper = self._helpers.get(slug)
         if not helper:
             return
-        entity_id = self._entity_ids.get(slug) or helper.get("entity_id")
+        entity_id = self._sensor_entity_id(slug)
         if not entity_id:
             return
         try:
@@ -557,6 +568,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             dedup[key] = {
                 "measured_at": key,
                 "value": item.get("value"),
+                "history_cursor": item.get("history_cursor"),
             }
         ordered_keys = sorted(dedup)
         if len(ordered_keys) > MAX_HISTORY_POINTS:
@@ -577,7 +589,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
         if helper.get("state_class") != "measurement":
             return
-        entity_id = self._entity_ids.get(slug) or helper.get("entity_id")
+        entity_id = self._sensor_entity_id(slug)
         if not entity_id:
             return
         history = history_override if history_override is not None else self._history.get(slug)
