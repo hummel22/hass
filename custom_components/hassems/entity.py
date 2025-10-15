@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -13,6 +13,30 @@ from .const import ATTR_HISTORY, ATTR_LAST_MEASURED, ATTR_STATISTICS_MODE, DOMAI
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _format_history_for_diagnostics(
+    history: List[Dict[str, Any]], limit: int = 50
+) -> List[Dict[str, Any]]:
+    formatted: List[Dict[str, Any]] = []
+    for entry in history[-limit:]:
+        sanitized: Dict[str, Any] = {}
+        if "measured_at" in entry:
+            sanitized["measured_at"] = entry.get("measured_at")
+        if "value" in entry:
+            sanitized["value"] = entry.get("value")
+        if "historic" in entry:
+            sanitized["historic"] = bool(entry.get("historic"))
+        if "history_cursor" in entry:
+            history_cursor = entry.get("history_cursor")
+            if history_cursor is not None:
+                sanitized["history_cursor"] = str(history_cursor)
+        if "historic_cursor" in entry:
+            historic_cursor = entry.get("historic_cursor")
+            if historic_cursor is not None:
+                sanitized["historic_cursor"] = str(historic_cursor)
+        formatted.append(sanitized)
+    return formatted
 
 
 class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
@@ -66,7 +90,7 @@ class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
                 attributes[ATTR_STATISTICS_MODE] = statistics_mode
         history = self.coordinator.helper_history(self._slug)
         if history:
-            attributes[ATTR_HISTORY] = history[-50:]
+            attributes[ATTR_HISTORY] = _format_history_for_diagnostics(history)
         return attributes
 
     async def async_added_to_hass(self) -> None:

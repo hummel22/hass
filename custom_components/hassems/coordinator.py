@@ -296,13 +296,23 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self._pending_discoveries.discard(slug)
 
         if event == EVENT_HELPER_VALUE:
-            measurement = (payload.get("data") or {}).get("measured_at")
-            value = (payload.get("data") or {}).get("value")
+            data = payload.get("data") or {}
+            measurement = data.get("measured_at")
+            value = data.get("value")
             history = self._history.setdefault(slug, [])
-            history.append({
+            entry = {
                 "value": value,
                 "measured_at": measurement,
-            })
+            }
+            if "history_cursor" in data:
+                entry["history_cursor"] = data.get("history_cursor")
+            if "historic" in data:
+                historic_value = self._coerce_historic_flag(data.get("historic"))
+                if historic_value is not None:
+                    entry["historic"] = historic_value
+            if "historic_cursor" in data:
+                entry["historic_cursor"] = data.get("historic_cursor")
+            history.append(entry)
             if len(history) > MAX_HISTORY_POINTS:
                 del history[:-MAX_HISTORY_POINTS]
             if measurement:
@@ -347,7 +357,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         return None
 
     def helper_history(self, slug: str) -> List[Dict[str, Any]]:
-        return list(self._history.get(slug, []))
+        return [dict(entry) for entry in self._history.get(slug, [])]
 
     def register_entity(self, slug: str, entity_id: str | None) -> None:
         if not entity_id:
@@ -552,6 +562,20 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         )
         return True
 
+    @staticmethod
+    def _coerce_historic_flag(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return None
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        return bool(value)
+
     def _normalize_history_records(
         self, entries: List[Dict[str, Any]] | None
     ) -> List[Dict[str, Any]]:
@@ -565,11 +589,19 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if not measured_at:
                 continue
             key = str(measured_at)
-            dedup[key] = {
+            normalized: Dict[str, Any] = {
                 "measured_at": key,
                 "value": item.get("value"),
-                "history_cursor": item.get("history_cursor"),
             }
+            if "history_cursor" in item:
+                normalized["history_cursor"] = item.get("history_cursor")
+            if "historic" in item:
+                historic_value = self._coerce_historic_flag(item.get("historic"))
+                if historic_value is not None:
+                    normalized["historic"] = historic_value
+            if "historic_cursor" in item:
+                normalized["historic_cursor"] = item.get("historic_cursor")
+            dedup[key] = normalized
         ordered_keys = sorted(dedup)
         if len(ordered_keys) > MAX_HISTORY_POINTS:
             ordered_keys = ordered_keys[-MAX_HISTORY_POINTS:]
