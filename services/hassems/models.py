@@ -583,6 +583,7 @@ class HistoryPoint(BaseModel):
     measured_at: datetime
     recorded_at: datetime
     value: InputValue
+    history_cursor: Optional[str] = None
 
 
 class HistoryPointUpdate(BaseModel):
