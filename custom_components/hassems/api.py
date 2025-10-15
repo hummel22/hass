@@ -68,8 +68,11 @@ class HASSEMSClient:
     async def async_get_helper(self, slug: str) -> Dict[str, Any]:
         return await self._request("GET", f"/integrations/home-assistant/helpers/{slug}")
 
-    async def async_get_history(self, slug: str) -> List[Dict[str, Any]]:
-        data = await self._request("GET", f"/integrations/home-assistant/helpers/{slug}/history")
+    async def async_get_history(self, slug: str, *, full: bool = False) -> List[Dict[str, Any]]:
+        path = f"/integrations/home-assistant/helpers/{slug}/history"
+        if full:
+            path += "?full=1"
+        data = await self._request("GET", path)
         return data if isinstance(data, list) else []
 
     async def async_set_value(self, slug: str, value: Any) -> Dict[str, Any]:

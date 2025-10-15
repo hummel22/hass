@@ -18,6 +18,8 @@ CONF_WEBHOOK_ID = "webhook_id"
 CONF_SUBSCRIPTION_ID = "subscription_id"
 CONF_INCLUDED_HELPERS = "included_helpers"
 CONF_IGNORED_HELPERS = "ignored_helpers"
+DATA_HISTORY_CURSORS = "history_cursors"
+HISTORICAL_WINDOW_DAYS = 10
 DEFAULT_POLL_INTERVAL = timedelta(minutes=1)
 
 SIGNAL_HELPER_ADDED = "hassems_helper_added_{entry_id}"

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -445,13 +445,15 @@ def integration_get_helper(
 )
 def integration_get_history(
     slug: str,
+    full: bool = Query(default=False),
     store: InputHelperStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
 ) -> List[HistoryPoint]:
     record = store.get_helper(slug)
     if record is None or record.helper.entity_type != EntityTransportType.HASSEMS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
-    return store.list_history(slug)
+    limit = 0 if full else 200
+    return store.list_history(slug, limit=limit)
 
 
 @api_router.post(

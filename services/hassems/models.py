@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -568,6 +569,8 @@ class InputHelper(BaseModel):
     device_sw_version: Optional[str] = None
     device_identifiers: List[str] = Field(default_factory=list)
     statistics_mode: Optional[HASSEMSStatisticsMode] = None
+    history_cursor: Optional[str] = None
+    history_changed_at: Optional[datetime] = None
 
     model_config = {
         "from_attributes": True,
@@ -799,6 +802,11 @@ class InputHelperRecord:
             if payload.entity_type == EntityTransportType.HASSEMS
             else None
         )
+        history_cursor = (
+            secrets.token_hex(16)
+            if payload.entity_type == EntityTransportType.HASSEMS
+            else None
+        )
 
         helper = InputHelper(
             slug=slugify(payload.unique_id),
@@ -831,6 +839,8 @@ class InputHelperRecord:
             device_sw_version=device_sw_version,
             device_identifiers=identifiers,
             statistics_mode=statistics_mode,
+            history_cursor=history_cursor,
+            history_changed_at=None,
         )
         return cls(helper=helper)
 
