@@ -674,7 +674,40 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return []
 
         processed = list(points)
-        normalized_mode = mode if mode in {"linear", "step"} else "linear"
+        normalized_mode = mode if mode in {"linear", "step", "point"} else "linear"
+        if normalized_mode == "point":
+            hour_buckets: Dict[datetime, Dict[str, Any]] = {}
+            for timestamp, value in processed:
+                hour_start = timestamp.replace(minute=0, second=0, microsecond=0)
+                stats = hour_buckets.setdefault(
+                    hour_start,
+                    {
+                        "values": [],
+                        "state": None,
+                    },
+                )
+                stats["values"].append(value)
+                stats["state"] = value
+
+            statistics: List[StatisticData] = []
+            for hour_start in sorted(hour_buckets):
+                stats = hour_buckets[hour_start]
+                values = stats["values"]
+                if not values:
+                    continue
+                state_value = stats["state"]
+                if state_value is None:
+                    continue
+                statistics.append(
+                    {
+                        "start": hour_start,
+                        "mean": sum(values) / len(values),
+                        "min": min(values),
+                        "max": max(values),
+                        "state": state_value,
+                    }
+                )
+            return statistics
         if normalized_mode == "step" and processed:
             now = dt_util.utcnow()
             last_time = processed[-1][0]
