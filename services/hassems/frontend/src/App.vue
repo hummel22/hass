@@ -1738,11 +1738,19 @@ const stateClassOptions = [
 const statisticsModeOptions = [
   { value: 'linear', label: 'Linear interpolation' },
   { value: 'step', label: 'Step (hold last value)' },
+  { value: 'point', label: 'Point (recorded hours only)' },
 ];
+
+const statisticsModeValues = statisticsModeOptions.map((option) => option.value);
 
 const statisticsModeLabels = Object.fromEntries(
   statisticsModeOptions.map((option) => [option.value, option.label]),
 );
+
+function normalizeStatisticsModeValue(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return statisticsModeValues.includes(text) ? text : 'linear';
+}
 
 const iconOptions = [
   { value: '', label: 'Auto (based on device class)' },
@@ -2023,7 +2031,7 @@ const detailFields = computed(() => {
     },
   ];
   if (helper.entity_type === 'hassems') {
-    const statsValue = helper.statistics_mode || 'linear';
+    const statsValue = normalizeStatisticsModeValue(helper.statistics_mode || 'linear');
     const statsLabel = statisticsModeLabels[statsValue] || statsValue || '';
     fields.push({
       key: 'statistics_mode',
@@ -2128,7 +2136,7 @@ watch(
       createForm.device_model = '';
       createForm.device_sw_version = '';
       createForm.device_identifiers = '';
-      createForm.statistics_mode = createForm.statistics_mode || 'linear';
+      createForm.statistics_mode = normalizeStatisticsModeValue(createForm.statistics_mode);
       if (createForm.ha_enabled === undefined || createForm.ha_enabled === null) {
         createForm.ha_enabled = true;
       }
@@ -2878,8 +2886,7 @@ function buildCreatePayload() {
     payload.availability_topic = createForm.availability_topic?.trim();
     payload.force_update = Boolean(createForm.force_update);
   } else {
-    payload.statistics_mode =
-      createForm.statistics_mode === 'step' ? 'step' : 'linear';
+    payload.statistics_mode = normalizeStatisticsModeValue(createForm.statistics_mode);
     payload.ha_enabled = Boolean(createForm.ha_enabled);
   }
 
@@ -3080,7 +3087,7 @@ function populateUpdateForm(helper) {
     state_class: helper.state_class ?? (helper.type === 'input_number' ? 'measurement' : ''),
     statistics_mode:
       helper.entity_type === 'hassems'
-        ? helper.statistics_mode ?? 'linear'
+        ? normalizeStatisticsModeValue(helper.statistics_mode)
         : 'linear',
     ha_enabled:
       helper.entity_type === 'hassems'
@@ -3199,7 +3206,7 @@ function buildUpdatePayload(helperType) {
   }
 
   if (!isMqtt) {
-    payload.statistics_mode = updateForm.statistics_mode === 'step' ? 'step' : 'linear';
+    payload.statistics_mode = normalizeStatisticsModeValue(updateForm.statistics_mode);
     payload.ha_enabled = Boolean(updateForm.ha_enabled);
   }
 

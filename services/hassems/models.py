@@ -30,6 +30,7 @@ class HelperType(str, Enum):
 class HASSEMSStatisticsMode(str, Enum):
     LINEAR = "linear"
     STEP = "step"
+    POINT = "point"
 
 
 InputValue = Union[str, float, bool]
@@ -244,7 +245,9 @@ class InputHelperBase(BaseModel):
         try:
             return HASSEMSStatisticsMode(str(v))
         except ValueError as exc:
-            raise ValueError("Statistics mode must be 'linear' or 'step'.") from exc
+            raise ValueError(
+                "Statistics mode must be 'linear', 'point', or 'step'."
+            ) from exc
 
     @field_validator("options")
     @classmethod
@@ -523,7 +526,9 @@ class InputHelperUpdate(BaseModel):
         try:
             return HASSEMSStatisticsMode(str(v))
         except ValueError as exc:
-            raise ValueError("Statistics mode must be 'linear' or 'step'.") from exc
+            raise ValueError(
+                "Statistics mode must be 'linear', 'point', or 'step'."
+            ) from exc
 
     @field_validator("state_class")
     @classmethod
