@@ -99,6 +99,6 @@ class WebhookNotifier:
             headers["X-HASSEMS-Description"] = target.description
         if target.metadata:
             metadata_query = {key: str(value) for key, value in target.metadata.items()}
-            headers["X-HASSEMS-Metadata"] = httpx.QueryParams(metadata_query).to_str()
+            headers["X-HASSEMS-Metadata"] = str(httpx.QueryParams(metadata_query))
 
         await client.post(target.webhook_url, json=payload, headers=headers, follow_redirects=False)
