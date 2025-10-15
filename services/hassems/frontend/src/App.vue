@@ -337,7 +337,10 @@
         <div class="helper-status">
           <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedHelper?.last_value ?? '—' }}</span></p>
           <p><strong>Measured at:</strong> <span id="detail-measured-at">{{ selectedMeasuredAt }}</span></p>
-          <p><strong>Recorded:</strong> <span id="detail-updated">{{ selectedUpdatedAt }}</span></p>
+          <p>
+            <strong>Recorded (diagnostic only):</strong>
+            <span id="detail-updated">{{ selectedUpdatedAt }}</span>
+          </p>
           <p
             v-if="selectedHelper?.entity_type === 'hassems' && selectedHelper?.history_cursor"
             class="helper-status__history-cursor"
@@ -348,6 +351,22 @@
               (updated {{ formatTimestamp(selectedHelper.history_changed_at) }})
             </span>
           </p>
+        </div>
+
+        <div
+          v-if="selectedHelper?.history_cursor_events?.length"
+          class="helper-status__timeline"
+        >
+          <h4>Historic cursor timeline</h4>
+          <ul>
+            <li
+              v-for="event in selectedHelper.history_cursor_events"
+              :key="`${event.history_cursor}-${event.changed_at}`"
+            >
+              <code>{{ event.history_cursor }}</code>
+              <span>{{ formatTimestamp(event.changed_at) }}</span>
+            </li>
+          </ul>
         </div>
 
         <div class="divider"></div>
@@ -388,12 +407,13 @@
               <div class="history-list__row">
                 <span class="history-list__timestamp">{{ item.measured_at }}</span>
                 <span class="history-list__value">{{ item.value }}</span>
+                <span v-if="item.historic" class="history-list__badge">Historic</span>
               </div>
               <span
-                v-if="item.historyChange && item.historyCursor"
-                class="history-list__cursor"
+                v-if="item.historyCursor"
+                :class="['history-list__cursor', { 'history-list__cursor--change': item.historyChange }]"
               >
-                History cursor: <code>{{ item.historyCursor }}</code>
+                Historic cursor: <code>{{ item.historyCursor }}</code>
               </span>
             </li>
           </ul>
@@ -487,11 +507,23 @@
                   v-for="item in connectionHistory"
                   :key="`${item.helper_slug}-${item.recorded_at}`"
                 >
-                  <span>
-                    {{ item.helper_name }} ·
-                    {{ formatTimestamp(item.measured_at || item.recorded_at) }}
+                  <div class="history-list__row">
+                    <span class="history-list__timestamp">
+                      {{ item.helper_name }} ·
+                      {{ formatTimestamp(item.measured_at || item.recorded_at) }}
+                    </span>
+                    <span class="history-list__value">{{ item.value ?? '—' }}</span>
+                    <span v-if="item.historic" class="history-list__badge">Historic</span>
+                  </div>
+                  <span
+                    v-if="item.historic_cursor"
+                    class="history-list__cursor"
+                  >
+                    Historic cursor: <code>{{ item.historic_cursor }}</code>
                   </span>
-                  <span>{{ item.value ?? '—' }}</span>
+                  <span class="history-list__recorded-note">
+                    Recorded (diagnostic): {{ formatTimestamp(item.recorded_at) }}
+                  </span>
                 </li>
               </ul>
               <p v-else class="modal__subtitle">No history available for this integration.</p>
@@ -1322,7 +1354,9 @@
                   <tr>
                     <th scope="col">Measured at</th>
                     <th scope="col">Value</th>
-                    <th scope="col">Recorded</th>
+                    <th scope="col">Historic?</th>
+                    <th scope="col">Historic cursor</th>
+                    <th scope="col">Recorded (diagnostic)</th>
                     <th scope="col" class="history-editor-actions-header">Actions</th>
                   </tr>
                 </thead>
@@ -1352,7 +1386,16 @@
                         <input type="text" v-model="row.valueInput" />
                       </template>
                     </td>
-                    <td data-label="Recorded">
+                    <td data-label="Historic?">
+                      <span>{{ row.historic ? 'Yes' : 'No' }}</span>
+                    </td>
+                    <td data-label="Historic cursor">
+                      <template v-if="row.historicCursor">
+                        <code>{{ row.historicCursor }}</code>
+                      </template>
+                      <span v-else>—</span>
+                    </td>
+                    <td data-label="Recorded (diagnostic)">
                       <span>{{ row.recordedDisplay }}</span>
                     </td>
                     <td data-label="Actions">
@@ -1965,6 +2008,7 @@ const selectedMeasuredAt = computed(() => {
   return helper?.last_measured_at ? formatTimestamp(helper.last_measured_at) : '—';
 });
 const selectedUpdatedAt = computed(() => {
+  // recorded_at values are diagnostic only; surfaced here for troubleshooting.
   const helper = selectedHelper.value;
   return helper?.updated_at ? formatTimestamp(helper.updated_at) : '—';
 });
@@ -2326,6 +2370,9 @@ function normalizeHelper(helper) {
   return {
     ...helper,
     ha_enabled: helper.ha_enabled !== false,
+    history_cursor_events: Array.isArray(helper.history_cursor_events)
+      ? helper.history_cursor_events
+      : [],
   };
 }
 
@@ -2531,7 +2578,15 @@ async function fetchConnectionDetail(entryId, { fetchHistory = false, force = fa
       const history = await requestJson(
         `/integrations/home-assistant/connections/${entryId}/history`,
       );
-      connectionHistory.value = Array.isArray(history) ? history : [];
+      const items = Array.isArray(history) ? history : [];
+      connectionHistory.value = items.map((item) => ({
+        ...item,
+        historic: Boolean(item.historic),
+        historic_cursor: (() => {
+          const cursorValue = item.historic_cursor || item.history_cursor || null;
+          return cursorValue ? String(cursorValue) : null;
+        })(),
+      }));
     } catch (error) {
       connectionHistory.value = [];
       throw error;
@@ -3398,6 +3453,11 @@ function buildHistoryEditorRows(records) {
     valueInput: formatHistoryValueForInput(helperType, entry.value),
     measuredInput: toDateTimeLocalString(entry.measured_at || entry.recorded_at),
     recordedDisplay: formatTimestamp(entry.recorded_at),
+    historic: Boolean(entry.historic),
+    historicCursor: (() => {
+      const cursorValue = entry.historic_cursor || entry.history_cursor || null;
+      return cursorValue ? String(cursorValue) : null;
+    })(),
     saving: false,
     deleting: false,
     error: '',
@@ -3414,7 +3474,13 @@ async function loadHistory(slug) {
     const history = await requestJson(`/inputs/${slug}/history`);
     const records = Array.isArray(history) ? history : [];
     debugLog('History response', { slug, recordsCount: records.length, records });
-    historyRecords.value = sortHistoryRecords(records);
+    const normalizedRecords = records.map((entry) => ({
+      ...entry,
+      historic: Boolean(entry.historic),
+      historic_cursor: entry.historic_cursor || entry.history_cursor || null,
+      history_cursor: entry.history_cursor || entry.historic_cursor || null,
+    }));
+    historyRecords.value = sortHistoryRecords(normalizedRecords);
     syncHistoryEditorRows();
   } catch (error) {
     showToast(`Failed to load history: ${error instanceof Error ? error.message : String(error)}`, 'error');
@@ -3512,7 +3578,9 @@ function renderHistory(helper, history) {
     const timestampValid = timestampDate instanceof Date && !Number.isNaN(timestampDate?.getTime?.());
     const normalizedValue = normalizeHistoryValue(helper.type, item.value);
     const numericValue = normalizedValue === null ? null : Number(normalizedValue);
-    const historyCursor = item.history_cursor || null;
+    const cursorValue = item.historic_cursor || item.history_cursor || null;
+    const historyCursor = cursorValue ? String(cursorValue) : null;
+    const isHistoric = Boolean(item.historic);
     const historyChange = Boolean(historyCursor && historyCursor !== lastHistoryCursor);
     if (!timestampValid || numericValue === null || Number.isNaN(numericValue)) {
       skippedEntries.push({
@@ -3528,6 +3596,7 @@ function renderHistory(helper, history) {
       y: numericValue,
       historyCursor,
       historyChange,
+      historic: isHistoric,
     });
     if (historyCursor) {
       lastHistoryCursor = historyCursor;
@@ -3550,6 +3619,7 @@ function renderHistory(helper, history) {
       y: point.y,
       history_cursor: point.historyCursor ?? null,
       history_change: Boolean(point.historyChange),
+      historic: Boolean(point.historic),
     }));
     const canvasEl = historyCanvas.value;
     if (canvasEl instanceof HTMLCanvasElement && canvasEl.isConnected) {
@@ -3644,10 +3714,14 @@ function renderHistory(helper, history) {
                     },
                     afterLabel: (context) => {
                       const rawPoint = context?.raw ?? {};
-                      if (!rawPoint.historyChange || !rawPoint.historyCursor) {
-                        return '';
+                      const details = [];
+                      if (rawPoint.historic) {
+                        details.push('Historic point');
                       }
-                      return `History cursor: ${rawPoint.historyCursor}`;
+                      if (rawPoint.historyCursor) {
+                        details.push(`Historic cursor: ${rawPoint.historyCursor}`);
+                      }
+                      return details.join('\n');
                     },
                   },
                 },
@@ -3670,7 +3744,9 @@ function renderHistory(helper, history) {
   const listEntries = [];
   lastHistoryCursor = null;
   for (const item of sorted) {
-    const historyCursor = item.history_cursor || null;
+    const cursorValue = item.historic_cursor || item.history_cursor || null;
+    const historyCursor = cursorValue ? String(cursorValue) : null;
+    const isHistoric = Boolean(item.historic);
     const historyChange = Boolean(historyCursor && historyCursor !== lastHistoryCursor);
     if (historyCursor) {
       lastHistoryCursor = historyCursor;
@@ -3681,6 +3757,7 @@ function renderHistory(helper, history) {
       value: String(item.value ?? '—'),
       historyCursor,
       historyChange,
+      historic: isHistoric,
     });
   }
   historyList.value = listEntries;

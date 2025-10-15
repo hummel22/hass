@@ -602,6 +602,39 @@ body {
   font-size: 0.85rem;
 }
 
+.helper-status__timeline {
+  margin-top: 1.5rem;
+}
+
+.helper-status__timeline h4 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.helper-status__timeline ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.helper-status__timeline li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+  color: var(--text-subtle);
+}
+
+.helper-status__timeline code {
+  font-size: 0.85rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--primary);
+}
+
 .helper-meta {
   display: grid;
   gap: 0.35rem;
@@ -723,15 +756,42 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
+  align-items: center;
 }
 
 .history-list__timestamp {
   font-weight: 600;
 }
 
+.history-list__value {
+  font-weight: 500;
+}
+
+.history-list__badge {
+  align-self: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .history-list__cursor {
   font-size: 0.85rem;
   color: var(--text-subtle);
+}
+
+.history-list__cursor--change {
+  color: var(--primary);
+}
+
+.history-list__recorded-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  margin-top: 0.25rem;
 }
 
 .history-list__cursor code {

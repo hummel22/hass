@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .models import (
     ApiUser,
@@ -16,6 +16,7 @@ from .models import (
     ApiUserUpdate,
     EntityTransportType,
     HASSEMSStatisticsMode,
+    HistoryCursorEvent,
     HistoryPoint,
     HistoryPointUpdate,
     InputHelper,
@@ -131,6 +132,38 @@ def _is_historical_timestamp(measured_at: Optional[datetime]) -> bool:
     return (now - target) >= HISTORICAL_THRESHOLD
 
 
+SchemaMigration = Callable[[sqlite3.Connection], None]
+
+
+def _migration_add_history_is_historic(conn: sqlite3.Connection) -> None:
+    existing = {info["name"] for info in conn.execute("PRAGMA table_info(history)")}
+    if "is_historic" not in existing:
+        conn.execute(
+            "ALTER TABLE history ADD COLUMN is_historic INTEGER NOT NULL DEFAULT 0"
+        )
+
+    threshold = datetime.now(timezone.utc) - HISTORICAL_THRESHOLD
+    rows = conn.execute(
+        "SELECT id, measured_at, created_at FROM history"
+    ).fetchall()
+    for row in rows:
+        measured_raw = row["measured_at"] or row["created_at"]
+        try:
+            measured_dt = datetime.fromisoformat(measured_raw)
+        except (TypeError, ValueError):
+            continue
+        if measured_dt <= threshold:
+            conn.execute(
+                "UPDATE history SET is_historic = 1 WHERE id = ?",
+                (row["id"],),
+            )
+
+
+SCHEMA_MIGRATIONS: Sequence[Tuple[int, SchemaMigration]] = (
+    (1, _migration_add_history_is_historic),
+)
+
+
 class InputHelperStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -198,6 +231,8 @@ class InputHelperStore:
                     helper_slug TEXT NOT NULL,
                     value TEXT NOT NULL,
                     measured_at TEXT,
+                    history_cursor TEXT,
+                    is_historic INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(helper_slug) REFERENCES helpers(slug) ON DELETE CASCADE
                 )
@@ -316,6 +351,7 @@ class InputHelperStore:
             self._ensure_column(conn, "integration_connections", "helper_count", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "integration_connections", "metadata", "TEXT")
 
+            self._apply_migrations(conn)
             self._backfill_history_cursor_events(conn)
 
     @staticmethod
@@ -323,6 +359,22 @@ class InputHelperStore:
         existing = {info["name"] for info in conn.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"
+        )
+        applied = {
+            int(row["version"]) for row in conn.execute("SELECT version FROM schema_migrations")
+        }
+        for version, migration in sorted(SCHEMA_MIGRATIONS, key=lambda item: item[0]):
+            if version in applied:
+                continue
+            migration(conn)
+            conn.execute(
+                "INSERT INTO schema_migrations (version) VALUES (?)",
+                (version,),
+            )
 
     def _backfill_history_cursor_events(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute(
@@ -373,6 +425,72 @@ class InputHelperStore:
             """,
             (slug, cursor, timestamp),
         )
+
+    def _backfill_historic_points(
+        self,
+        conn: sqlite3.Connection,
+        slug: str,
+        *,
+        cursor: Optional[str] = None,
+    ) -> None:
+        threshold = datetime.now(timezone.utc) - HISTORICAL_THRESHOLD
+        rows = conn.execute(
+            """
+            SELECT id, measured_at, created_at, history_cursor, is_historic
+              FROM history
+             WHERE helper_slug = ?
+            """,
+            (slug,),
+        ).fetchall()
+        for row in rows:
+            measured_raw = row["measured_at"] or row["created_at"]
+            try:
+                measured_dt = datetime.fromisoformat(measured_raw)
+            except (TypeError, ValueError):
+                continue
+            if measured_dt > threshold:
+                continue
+            updates: List[str] = []
+            params: List[Any] = []
+            if not bool(row["is_historic"]):
+                updates.append("is_historic = 1")
+            if cursor and not row["history_cursor"]:
+                updates.append("history_cursor = ?")
+                params.append(cursor)
+            if not updates:
+                continue
+            params.append(row["id"])
+            conn.execute(
+                f"UPDATE history SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+
+    def _list_history_cursor_events_internal(
+        self, conn: sqlite3.Connection, slug: str
+    ) -> List[HistoryCursorEvent]:
+        rows = conn.execute(
+            """
+            SELECT history_cursor, changed_at
+              FROM history_cursor_events
+             WHERE helper_slug = ?
+          ORDER BY datetime(changed_at) ASC
+            """,
+            (slug,),
+        ).fetchall()
+        events: List[HistoryCursorEvent] = []
+        for row in rows:
+            changed_at_raw = row["changed_at"]
+            try:
+                changed_at = datetime.fromisoformat(changed_at_raw)
+            except (TypeError, ValueError):
+                continue
+            events.append(
+                HistoryCursorEvent(
+                    history_cursor=str(row["history_cursor"]),
+                    changed_at=changed_at,
+                )
+            )
+        return events
 
     def _ensure_helper_history_cursor(
         self,
@@ -937,7 +1055,7 @@ class InputHelperStore:
             return []
         placeholders = ",".join(["?"] * len(helper_slugs))
         query = f"""
-            SELECT h.helper_slug, h.value, h.measured_at, h.created_at, he.name
+            SELECT h.helper_slug, h.value, h.measured_at, h.created_at, h.history_cursor, h.is_historic, he.name
               FROM history AS h
               JOIN helpers AS he ON he.slug = h.helper_slug
              WHERE h.helper_slug IN ({placeholders})
@@ -962,6 +1080,12 @@ class InputHelperStore:
                     helper_name=row["name"],
                     value=_deserialize_value(row["value"]),
                     measured_at=measured_at,
+                    historic=bool(row["is_historic"]) if "is_historic" in row.keys() else False,
+                    historic_cursor=(
+                        str(row["history_cursor"])
+                        if "history_cursor" in row.keys() and row["history_cursor"]
+                        else None
+                    ),
                     recorded_at=recorded_at,
                 )
             )
@@ -1009,13 +1133,14 @@ class InputHelperStore:
                 statistics_mode = HASSEMSStatisticsMode.LINEAR
 
         history_cursor = mapping.get("history_cursor") or None
-        if not history_cursor:
-            with self._connection() as conn:
+        with self._connection() as helper_conn:
+            if not history_cursor:
                 history_cursor = self._ensure_helper_history_cursor(
-                    conn,
+                    helper_conn,
                     slug,
                     timestamp=mapping.get("updated_at") or mapping.get("created_at"),
                 )
+            cursor_events = self._list_history_cursor_events_internal(helper_conn, slug)
         history_changed_at_raw = mapping.get("history_changed_at")
         history_changed_at = None
         if history_changed_at_raw:
@@ -1058,6 +1183,7 @@ class InputHelperStore:
             device_identifiers=identifiers,
             statistics_mode=statistics_mode,
             history_cursor=history_cursor,
+            history_cursor_events=cursor_events,
             history_changed_at=history_changed_at,
             ha_enabled=bool(mapping.get("ha_enabled", 1)),
         )
@@ -1151,6 +1277,13 @@ class InputHelperStore:
                         else None,
                     ),
                 )
+                if helper.entity_type == EntityTransportType.HASSEMS:
+                    self._record_history_cursor_event(
+                        conn,
+                        helper.slug,
+                        helper.history_cursor,
+                        helper.created_at.isoformat(),
+                    )
         return helper
 
     def update_helper(self, slug: str, payload: InputHelperUpdate) -> InputHelper:
@@ -1286,11 +1419,25 @@ class InputHelperStore:
                     raise KeyError(f"Helper '{slug}' not found.")
                 conn.execute(
                     """
-                    INSERT INTO history (helper_slug, value, measured_at, created_at, history_cursor)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO history (
+                        helper_slug, value, measured_at, created_at, history_cursor, is_historic
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (slug, serialized_value, measured_iso, timestamp, history_cursor_value),
+                    (
+                        slug,
+                        serialized_value,
+                        measured_iso,
+                        timestamp,
+                        history_cursor_value,
+                        int(is_historical),
+                    ),
                 )
+                if is_historical:
+                    self._backfill_historic_points(
+                        conn,
+                        slug,
+                        cursor=history_cursor_value,
+                    )
                 row = conn.execute(
                     "SELECT * FROM helpers WHERE slug = ?",
                     (slug,),
@@ -1302,7 +1449,7 @@ class InputHelperStore:
     def list_history(self, slug: str, limit: int = 200) -> List[HistoryPoint]:
         query = (
             """
-            SELECT id, value, measured_at, created_at, history_cursor
+            SELECT id, value, measured_at, created_at, history_cursor, is_historic
               FROM history
              WHERE helper_slug = ?
           ORDER BY datetime(COALESCE(measured_at, created_at)) ASC,
@@ -1321,6 +1468,10 @@ class InputHelperStore:
             if point is not None:
                 history.append(point)
         return history
+
+    def list_history_cursor_events(self, slug: str) -> List[HistoryCursorEvent]:
+        with self._connection() as conn:
+            return self._list_history_cursor_events_internal(conn, slug)
 
     def update_history_point(
         self,
@@ -1358,6 +1509,7 @@ class InputHelperStore:
 
                 requires_new_cursor = _is_historical_timestamp(previous_dt) or _is_historical_timestamp(new_dt)
                 change_timestamp = datetime.now(timezone.utc).isoformat()
+                is_historic_flag = _is_historical_timestamp(new_dt)
                 if requires_new_cursor:
                     history_cursor_value = self._touch_history_cursor(
                         conn,
@@ -1377,7 +1529,8 @@ class InputHelperStore:
                     UPDATE history
                        SET value = ?,
                            measured_at = ?,
-                           history_cursor = ?
+                           history_cursor = ?,
+                           is_historic = ?
                      WHERE id = ?
                        AND helper_slug = ?
                     """,
@@ -1385,15 +1538,22 @@ class InputHelperStore:
                         serialized_value,
                         measured_iso,
                         history_cursor_value,
+                        int(is_historic_flag),
                         history_id,
                         slug,
                     ),
                 )
                 if cursor.rowcount == 0:
                     raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                if requires_new_cursor or is_historic_flag:
+                    self._backfill_historic_points(
+                        conn,
+                        slug,
+                        cursor=history_cursor_value,
+                    )
                 row = conn.execute(
                     """
-                    SELECT id, value, measured_at, created_at, history_cursor
+                    SELECT id, value, measured_at, created_at, history_cursor, is_historic
                       FROM history
                      WHERE id = ?
                        AND helper_slug = ?
@@ -1434,9 +1594,18 @@ class InputHelperStore:
                 if cursor.rowcount == 0:
                     raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
                 self._sync_helper_last_value(conn, slug)
+                new_cursor = None
                 if _is_historical_timestamp(previous_dt):
                     timestamp = datetime.now(timezone.utc).isoformat()
-                    self._touch_history_cursor(conn, slug, timestamp=timestamp)
+                    new_cursor = self._touch_history_cursor(
+                        conn, slug, timestamp=timestamp
+                    )
+                if new_cursor:
+                    self._backfill_historic_points(
+                        conn,
+                        slug,
+                        cursor=new_cursor,
+                    )
 
     def _row_to_history_point(self, row: sqlite3.Row) -> Optional[HistoryPoint]:
         if row is None:
@@ -1444,15 +1613,22 @@ class InputHelperStore:
         value = _deserialize_value(row["value"])
         if value is None:
             return None
+        # recorded_at is diagnostic-only; measured_at drives all logic.
         recorded_at = datetime.fromisoformat(row["created_at"])
         measured_source = row["measured_at"] or row["created_at"]
         measured_at = datetime.fromisoformat(measured_source)
+        history_cursor = row["history_cursor"] if "history_cursor" in row.keys() else None
+        if history_cursor is not None:
+            history_cursor = str(history_cursor)
+        is_historic = bool(row["is_historic"]) if "is_historic" in row.keys() else False
         return HistoryPoint(
             id=row["id"],
             measured_at=measured_at,
             recorded_at=recorded_at,
             value=value,
-            history_cursor=row["history_cursor"] if "history_cursor" in row.keys() else None,
+            historic=is_historic,
+            historic_cursor=history_cursor,
+            history_cursor=history_cursor,
         )
 
     def _sync_helper_last_value(self, conn: sqlite3.Connection, slug: str) -> None:
@@ -1565,4 +1741,4 @@ class InputHelperStore:
         return stored
 
 
-__all__ = ["InputHelperStore"]
+__all__ = ["InputHelperStore", "HISTORICAL_THRESHOLD"]

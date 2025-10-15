@@ -18,6 +18,18 @@ JSON.
 - [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, icons, and
       discovery components plus inline tooltips describing each setting.
 
+## Historic data lifecycle
+
+- HASSEMS classifies any value measured more than **10 days** in the past as historic. Historic points
+  are flagged with `historic = true` and assigned a `historic_cursor` so Home Assistant can reconcile
+  long-term statistics.
+- Every helper exposes `history_cursor_events`, a chronological list of cursor rotations. The Home
+  Assistant integration compares the current cursor to the stored value and triggers a history reload
+  when they diverge.
+- SQLite history rows also record the write timestamp (`recorded_at`), but this field is **diagnostic
+  only**. Automations and statistics must use `measured_at` alongside the historic metadata when
+  making decisions.
+
 ## Installation
 
 ### Prerequisites

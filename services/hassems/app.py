@@ -44,7 +44,7 @@ from .mqtt_service import (
     publish_value,
     verify_connection,
 )
-from .storage import InputHelperStore
+from .storage import HISTORICAL_THRESHOLD, InputHelperStore
 from .webhooks import WebhookNotifier
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -390,6 +390,8 @@ async def set_helper_value(
     measured_at = request.measured_at or datetime.now(timezone.utc)
     if measured_at.tzinfo is None:
         measured_at = measured_at.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - HISTORICAL_THRESHOLD
+    is_historic = measured_at.astimezone(timezone.utc) <= cutoff
 
     if client is not None and record.helper.entity_type == EntityTransportType.MQTT:
         try:
@@ -415,7 +417,13 @@ async def set_helper_value(
 
     helper_after = store.set_last_value(slug, coerced, measured_at=measured_at)
     if helper_after.entity_type == EntityTransportType.HASSEMS:
-        await notifier.helper_value(helper_after, value=coerced, measured_at=measured_at)
+        await notifier.helper_value(
+            helper_after,
+            value=coerced,
+            measured_at=measured_at,
+            historic=is_historic,
+            historic_cursor=helper_after.history_cursor,
+        )
     return helper_after
 
 
