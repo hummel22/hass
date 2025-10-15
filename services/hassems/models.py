@@ -579,6 +579,7 @@ class InputHelper(BaseModel):
     device_identifiers: List[str] = Field(default_factory=list)
     statistics_mode: Optional[HASSEMSStatisticsMode] = None
     history_cursor: Optional[str] = None
+    history_cursor_events: List["HistoryCursorEvent"] = Field(default_factory=list)
     history_changed_at: Optional[datetime] = None
     ha_enabled: bool = True
 
@@ -591,9 +592,21 @@ class InputHelper(BaseModel):
 class HistoryPoint(BaseModel):
     id: int
     measured_at: datetime
+    # recorded_at is diagnostic-only; do not use it for decisions or metrics.
     recorded_at: datetime
     value: InputValue
+    historic: bool = False
+    historic_cursor: Optional[str] = None
     history_cursor: Optional[str] = None
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class HistoryCursorEvent(BaseModel):
+    history_cursor: str
+    changed_at: datetime
 
 
 class HistoryPointUpdate(BaseModel):
@@ -781,6 +794,9 @@ class IntegrationConnectionHistoryItem(BaseModel):
     helper_name: str
     value: Any
     measured_at: Optional[datetime] = None
+    historic: bool = False
+    historic_cursor: Optional[str] = None
+    # recorded_at is diagnostic-only; avoid using it in calculations.
     recorded_at: datetime
 
 

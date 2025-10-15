@@ -33,6 +33,7 @@ from homeassistant.util import dt as dt_util
 from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
 from .const import (
     ATTR_HISTORY,
+    ATTR_HISTORY_CURSOR,
     ATTR_LAST_MEASURED,
     ATTR_STATE_CLASS,
     CONF_INCLUDED_HELPERS,
@@ -73,6 +74,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self.entry = entry
         self._helpers: Dict[str, Dict[str, Any]] = {}
         self._history: Dict[str, List[Dict[str, Any]]] = {}
+        # _recorded_measurements only keeps diagnostic recorded_at markers to avoid
+        # reprocessing the same payload; business logic must rely on measured_at.
         self._recorded_measurements: Dict[str, OrderedDict[str, None]] = {}
         stored_cursors = entry.data.get(DATA_HISTORY_CURSORS, {})
         if isinstance(stored_cursors, dict):
@@ -298,10 +301,15 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         if event == EVENT_HELPER_VALUE:
             measurement = (payload.get("data") or {}).get("measured_at")
             value = (payload.get("data") or {}).get("value")
+            historic_flag = bool((payload.get("data") or {}).get("historic"))
+            cursor_override = (payload.get("data") or {}).get("historic_cursor")
             history = self._history.setdefault(slug, [])
             history.append({
                 "value": value,
                 "measured_at": measurement,
+                "historic": historic_flag,
+                "historic_cursor": cursor_override or helper.get("history_cursor"),
+                "history_cursor": helper.get("history_cursor"),
             })
             if len(history) > MAX_HISTORY_POINTS:
                 del history[:-MAX_HISTORY_POINTS]
@@ -417,6 +425,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         except KeyError:
             return
 
+        # recorded_at markers are diagnostic only; use measured_at for decisions.
         recorded = self._recorded_measurements.setdefault(slug, OrderedDict())
         state_obj = self.hass.states.get(entity_id)
         if state_obj is not None:
@@ -455,6 +464,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             attributes = dict(base_attributes)
             attributes.pop(ATTR_HISTORY, None)
             attributes[ATTR_LAST_MEASURED] = measured_at
+            historic_cursor = item.get("historic_cursor") or item.get("history_cursor")
+            if historic_cursor:
+                attributes[ATTR_HISTORY_CURSOR] = historic_cursor
+            if "historic" in item:
+                attributes["historic"] = bool(item.get("historic"))
 
             context = Context()
             new_state = State(
@@ -568,7 +582,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             dedup[key] = {
                 "measured_at": key,
                 "value": item.get("value"),
-                "history_cursor": item.get("history_cursor"),
+                "historic": bool(item.get("historic")),
+                "historic_cursor": item.get("historic_cursor")
+                or item.get("history_cursor"),
+                "history_cursor": item.get("history_cursor")
+                or item.get("historic_cursor"),
             }
         ordered_keys = sorted(dedup)
         if len(ordered_keys) > MAX_HISTORY_POINTS:

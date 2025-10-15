@@ -34,6 +34,8 @@ class WebhookNotifier:
         *,
         value: Any,
         measured_at: datetime,
+        historic: bool,
+        historic_cursor: Optional[str],
     ) -> None:
         await self._broadcast(
             "helper_value",
@@ -41,6 +43,8 @@ class WebhookNotifier:
             data={
                 "value": value,
                 "measured_at": measured_at.astimezone(timezone.utc).isoformat(),
+                "historic": bool(historic),
+                "historic_cursor": historic_cursor,
             },
         )
 
