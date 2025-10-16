@@ -176,13 +176,22 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         except HASSEMSError as exc:
             raise UpdateFailed(str(exc)) from exc
 
-        mapping: Dict[str, Dict[str, Any]] = {entity["slug"]: entity for entity in entities if entity.get("slug")}
+        _LOGGER.debug("Fetched %s entities from HASSEMS", len(entities))
+        mapping: Dict[str, Dict[str, Any]] = {
+            entity["slug"]: entity for entity in entities if entity.get("slug")
+        }
         self._entities = mapping
 
         allowed_slugs = self._select_allowed_slugs(mapping)
+        _LOGGER.debug(
+            "Allowed slugs after filter application: %s", ", ".join(allowed_slugs)
+        )
         current_slugs = set(self.data or {})
         added = [slug for slug in allowed_slugs if slug not in current_slugs]
         removed = [slug for slug in current_slugs if slug not in allowed_slugs]
+
+        if added or removed:
+            _LOGGER.debug("Entity set changes - added: %s removed: %s", added, removed)
 
         await self._fetch_history_for_new(added)
 
@@ -203,6 +212,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         for slug in removed_cursor_slugs:
             self._history_cursors.pop(slug, None)
             self._mark_history_cursors_dirty()
+            _LOGGER.debug(
+                "Removed stored history cursor for %s because entity no longer exists",
+                slug,
+            )
         self._save_history_cursors_if_needed()
 
         if added:
@@ -216,6 +229,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     async def _fetch_history_for_new(self, slugs: List[str]) -> None:
         if not slugs:
             return
+        _LOGGER.debug("Fetching historic data for new entities: %s", slugs)
         tasks = [self.client.async_get_history(slug, full=True) for slug in slugs]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for slug, result in zip(slugs, results):
@@ -230,6 +244,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             else:
                 normalized = self._normalize_history_records(result)
                 self._history[slug] = normalized
+                _LOGGER.debug(
+                    "Loaded %s normalized history records for %s", len(normalized), slug
+                )
             if self._history.get(slug):
                 await self._async_store_measurements(slug, self._history[slug])
 
@@ -258,6 +275,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             normalized = self._normalize_history_records(history)
             self._history[slug] = normalized
             if normalized:
+                _LOGGER.debug(
+                    "Fetched %s history points on-demand for %s", len(normalized), slug
+                )
                 await self._async_store_measurements(slug, normalized)
         return list(self._history.get(slug, []))
 
@@ -268,6 +288,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             raise ConfigEntryAuthFailed(str(exc)) from exc
         except HASSEMSError as exc:
             raise HomeAssistantError(str(exc)) from exc
+        _LOGGER.debug("Set value %s for %s via HASSEMS API", value, slug)
 
     async def async_handle_webhook(self, hass: HomeAssistant, webhook_id: str, request) -> web.Response:
         token_header = request.headers.get("X-HASSEMS-Token")
@@ -281,6 +302,12 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         event = request.headers.get("X-HASSEMS-Event") or payload.get("event")
         if not event:
             return web.Response(status=400)
+        _LOGGER.debug(
+            "Received webhook event %s (webhook_id=%s) with payload keys: %s",
+            event,
+            webhook_id,
+            list(payload.keys()),
+        )
         await self._async_process_event(event, payload)
         return web.Response(status=200)
 
@@ -289,6 +316,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         slug = entity.get("slug")
         if not slug:
             return
+
+        _LOGGER.debug(
+            "Processing event %s for %s with history_cursor=%s",
+            event,
+            slug,
+            entity.get("history_cursor"),
+        )
 
         if event == EVENT_ENTITY_DELETED:
             self._entities.pop(slug, None)
@@ -316,6 +350,14 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             historic_flag = bool(data_payload.get("historic"))
             cursor_override = data_payload.get("historic_cursor")
             recorded_at = data_payload.get("recorded_at")
+            _LOGGER.debug(
+                "Received measurement for %s - measured_at=%s value=%s historic=%s cursor=%s",
+                slug,
+                measurement,
+                value,
+                historic_flag,
+                cursor_override or entity.get("history_cursor"),
+            )
             history = self._history.setdefault(slug, [])
             history.append({
                 "value": value,
@@ -459,6 +501,14 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if (icon := entity.get("icon")) is not None:
                 base_attributes["icon"] = icon
 
+        _LOGGER.debug(
+            "Processing %s measurements for %s (entity_id=%s force=%s)",
+            len(measurements),
+            slug,
+            entity_id,
+            force,
+        )
+
         entries_states_only: List[Dict[str, Any]] = []
         processed_for_statistics = False
 
@@ -471,9 +521,19 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         ):
             measured_at = item.get("measured_at")
             if not measured_at or (not force and measured_at in recorded):
+                _LOGGER.debug(
+                    "Skipping measurement for %s (measured_at=%s) - force=%s already_recorded=%s",
+                    slug,
+                    measured_at,
+                    force,
+                    measured_at in recorded if measured_at else False,
+                )
                 continue
             dt_value = dt_util.parse_datetime(measured_at)
             if dt_value is None:
+                _LOGGER.debug(
+                    "Unable to parse measured_at for %s: %s", slug, measured_at
+                )
                 continue
             dt_value = dt_util.as_utc(dt_value)
             measured_local = dt_util.as_local(dt_value)
@@ -495,6 +555,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 recorded[measured_at] = None
                 while len(recorded) > 200:
                     recorded.popitem(last=False)
+                _LOGGER.debug(
+                    "Ignoring %s measurement at %s for statistics - occurs today",
+                    slug,
+                    measured_at,
+                )
                 continue
 
             if dt_value >= historic_cutoff:
@@ -513,7 +578,20 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             while len(recorded) > 200:
                 recorded.popitem(last=False)
 
+            _LOGGER.debug(
+                "Prepared measurement for %s at %s (historic=%s cursor=%s)",
+                slug,
+                measured_at,
+                item.get("historic"),
+                historic_cursor,
+            )
+
         if entries_states_only:
+            _LOGGER.debug(
+                "Writing %s historic measurements for %s to recorder",
+                len(entries_states_only),
+                slug,
+            )
             await self.hass.async_add_executor_job(
                 self._write_measurements_direct,
                 instance,
@@ -523,6 +601,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             )
 
         if processed_for_statistics:
+            _LOGGER.debug("Triggering statistics refresh for %s", slug)
             await self._async_update_statistics(slug)
 
     def _write_measurements_direct(
@@ -699,6 +778,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if slug in self._history_cursors:
                 self._history_cursors.pop(slug, None)
                 self._mark_history_cursors_dirty()
+                _LOGGER.debug(
+                    "Cleared history cursor for %s because entity type is %s",
+                    slug,
+                    entity.get("entity_type"),
+                )
             return
 
         cursor = entity.get("history_cursor")
@@ -706,23 +790,39 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if slug in self._history_cursors:
                 self._history_cursors.pop(slug, None)
                 self._mark_history_cursors_dirty()
+                _LOGGER.debug("Cleared history cursor for %s because cursor missing", slug)
             return
 
         cursor_str = str(cursor)
         stored = self._history_cursors.get(slug)
+        _LOGGER.debug(
+            "Evaluating history cursor for %s - incoming=%s stored=%s force_reload=%s",
+            slug,
+            cursor_str,
+            stored,
+            force_reload,
+        )
         if stored is None and not force_reload:
             self._history_cursors[slug] = cursor_str
             self._mark_history_cursors_dirty()
+            _LOGGER.debug(
+                "Stored initial history cursor for %s: %s", slug, cursor_str
+            )
             return
         if stored == cursor_str and not force_reload:
+            _LOGGER.debug("History cursor unchanged for %s; skipping reload", slug)
             return
 
         success = await self._async_reload_history(slug)
         if not success:
+            _LOGGER.debug("History reload failed for %s", slug)
             return
         if stored != cursor_str:
             self._history_cursors[slug] = cursor_str
             self._mark_history_cursors_dirty()
+            _LOGGER.debug(
+                "Updated stored history cursor for %s to %s", slug, cursor_str
+            )
 
     async def _async_reload_history(self, slug: str) -> bool:
         entity = self._entities.get(slug)
@@ -742,6 +842,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         normalized = self._normalize_history_records(history)
         self._history[slug] = normalized
         self._recorded_measurements.pop(slug, None)
+        _LOGGER.debug(
+            "Reloaded history for %s with %s records", slug, len(normalized)
+        )
         if normalized:
             await self._async_store_measurements(slug, normalized, force=True)
         await self._async_update_statistics(
@@ -749,6 +852,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             full_refresh=True,
             history_override=normalized,
         )
+        _LOGGER.debug("Completed history reload workflow for %s", slug)
         return True
 
     def _normalize_history_records(
@@ -756,6 +860,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     ) -> List[Dict[str, Any]]:
         if not entries:
             return []
+        _LOGGER.debug(
+            "Normalizing %s history entries", len(entries)
+        )
         dedup: Dict[str, Dict[str, Any]] = {}
         for item in entries:
             if not isinstance(item, dict):
@@ -777,6 +884,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         ordered_keys = sorted(dedup)
         if len(ordered_keys) > MAX_HISTORY_POINTS:
             ordered_keys = ordered_keys[-MAX_HISTORY_POINTS:]
+            _LOGGER.debug(
+                "Truncated normalized history to last %s points", len(ordered_keys)
+            )
         return [dedup[key] for key in ordered_keys]
 
     async def _async_update_statistics(
@@ -796,6 +906,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         entity_id = self._sensor_entity_id(slug)
         if not entity_id:
             return
+        _LOGGER.debug(
+            "Updating statistics for %s (entity_id=%s full_refresh=%s history_override=%s)",
+            slug,
+            entity_id,
+            full_refresh,
+            history_override is not None,
+        )
         history = history_override if history_override is not None else self._history.get(slug)
         if not history:
             try:
@@ -806,6 +923,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 return
             if full_refresh:
                 await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
+                _LOGGER.debug(
+                    "Cleared statistics for %s because no history available", slug
+                )
             return
         points = self._parse_measurement_points(history)
         if not points:
@@ -817,8 +937,18 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 if not instance.is_running:
                     return
                 await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
+                _LOGGER.debug(
+                    "Cleared statistics for %s because no valid points were parsed",
+                    slug,
+                )
             return
         mode = str(entity.get("statistics_mode") or "linear").strip().lower()
+        _LOGGER.debug(
+            "Calculating statistics for %s using mode=%s with %s points",
+            slug,
+            mode,
+            len(points),
+        )
         statistics = self._calculate_hourly_statistics(points, mode)
         try:
             instance = recorder.get_instance(self.hass)
@@ -828,7 +958,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
         if full_refresh:
             await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
+            _LOGGER.debug("Cleared existing statistics for %s before reload", slug)
         if not statistics:
+            _LOGGER.debug("No statistics generated for %s; skipping submission", slug)
             return
 
         metadata: StatisticMetaData = {
@@ -840,6 +972,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             "mean_type": StatisticMeanType.ARITHMETIC,
             "unit_class": None,
         }
+        _LOGGER.debug(
+            "Submitting %s statistics rows for %s", len(statistics), slug
+        )
         async_add_external_statistics(self.hass, metadata, statistics)
 
     def _parse_measurement_points(
@@ -852,14 +987,24 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 continue
             dt_value = dt_util.parse_datetime(measured_at)
             if dt_value is None:
+                _LOGGER.debug(
+                    "Ignoring history entry with unparsable timestamp for statistics: %s",
+                    item,
+                )
                 continue
             dt_value = dt_util.as_utc(dt_value)
             value = item.get("value")
             try:
                 numeric = float(value)
             except (TypeError, ValueError):
+                _LOGGER.debug(
+                    "Ignoring non-numeric history entry for statistics: %s", item
+                )
                 continue
             if math.isnan(numeric) or math.isinf(numeric):
+                _LOGGER.debug(
+                    "Ignoring invalid numeric value for statistics: %s", item
+                )
                 continue
             points.append((dt_value, numeric))
         points.sort(key=lambda entry: entry[0])
@@ -869,6 +1014,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 deduped[-1] = (dt_value, numeric)
             else:
                 deduped.append((dt_value, numeric))
+        _LOGGER.debug(
+            "Prepared %s measurement points for statistics", len(deduped)
+        )
         return deduped
 
     def _calculate_hourly_statistics(
