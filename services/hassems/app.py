@@ -417,11 +417,13 @@ async def set_helper_value(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     helper_after = store.set_last_value(slug, coerced, measured_at=measured_at)
-    last_measured_after = (
-        helper_after.last_measured_at.astimezone(timezone.utc)
-        if helper_after.last_measured_at is not None
-        else None
-    )
+    last_measured_after: Optional[datetime] = None
+    if helper_after.last_measured_at is not None:
+        last_measured_after = helper_after.last_measured_at
+        if last_measured_after.tzinfo is None:
+            last_measured_after = last_measured_after.replace(tzinfo=timezone.utc)
+        else:
+            last_measured_after = last_measured_after.astimezone(timezone.utc)
     should_notify = last_measured_after == measured_at_utc
     if should_notify and helper_after.entity_type == EntityTransportType.HASSEMS:
         await notifier.helper_value(
