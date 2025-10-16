@@ -116,9 +116,9 @@
               Test connection
             </button>
           </div>
-          <p class="form-helper">
+          <p class="form-entity">
             Configure the Mosquitto add-on and MQTT integration first, then supply matching credentials here. Settings
-            are stored in <code>data/input_helpers.db</code>.
+            are stored in <code>data/managed_entities.db</code>.
           </p>
         </form>
       </section>
@@ -199,7 +199,7 @@
                 <th scope="col">Name</th>
                 <th scope="col">Entry ID</th>
                 <th scope="col">API user</th>
-                <th scope="col">Helpers</th>
+                <th scope="col">Entities</th>
                 <th scope="col">Last seen</th>
                 <th scope="col" class="actions-column">Actions</th>
               </tr>
@@ -209,7 +209,7 @@
                 <td>{{ connection.title || 'Home Assistant' }}</td>
                 <td><code>{{ connection.entry_id }}</code></td>
                 <td>{{ connection.owner?.name || 'Unknown' }}</td>
-                <td>{{ connection.helper_count }}</td>
+                <td>{{ connection.entity_count }}</td>
                 <td>{{ connection.last_seen ? formatTimestamp(connection.last_seen) : '—' }}</td>
                 <td class="actions-cell">
                   <div class="button-group">
@@ -234,16 +234,16 @@
           <div>
             <h2>Entities</h2>
             <p class="card__subtitle">
-              Manage helper entities stored in HASSEMS and published to Home Assistant.
+              Manage entity entities stored in HASSEMS and published to Home Assistant.
             </p>
           </div>
           <div class="card__actions">
-            <button class="btn" type="button" @click="loadHelpers">Refresh</button>
+            <button class="btn" type="button" @click="loadEntities">Refresh</button>
             <button class="btn primary" type="button" @click="openCreateDialog">New entity</button>
           </div>
         </div>
 
-        <div v-if="helpers.length" class="entity-table-wrapper">
+        <div v-if="entities.length" class="entity-table-wrapper">
           <table class="entity-table">
             <thead>
               <tr>
@@ -257,26 +257,26 @@
             </thead>
             <tbody>
               <tr
-                v-for="helper in helpers"
-                :key="helper.slug"
-                :class="{ active: helper.slug === selectedSlug }"
-                @click="selectHelper(helper.slug)"
-                @keydown.enter.prevent="selectHelper(helper.slug)"
-                @keydown.space.prevent="selectHelper(helper.slug)"
+                v-for="entity in entities"
+                :key="entity.slug"
+                :class="{ active: entity.slug === selectedSlug }"
+                @click="selectEntity(entity.slug)"
+                @keydown.enter.prevent="selectEntity(entity.slug)"
+                @keydown.space.prevent="selectEntity(entity.slug)"
                 role="button"
                 tabindex="0"
               >
                 <td>
                   <div class="entity-name">
-                    <span class="entity-name__primary">{{ helper.name }}</span>
-                    <span v-if="helper.device_name" class="entity-name__secondary">{{ helper.device_name }}</span>
+                    <span class="entity-name__primary">{{ entity.name }}</span>
+                    <span v-if="entity.device_name" class="entity-name__secondary">{{ entity.device_name }}</span>
                   </div>
                 </td>
-                <td><code>{{ helper.entity_id }}</code></td>
-                <td>{{ helperTypeMap[helper.type] || helper.type }}</td>
-                <td>{{ entityTransportLabels[helper.entity_type] || helper.entity_type }}</td>
-                <td>{{ helper.last_value ?? '—' }}</td>
-                <td>{{ helper.updated_at ? formatTimestamp(helper.updated_at) : '—' }}</td>
+                <td><code>{{ entity.entity_id }}</code></td>
+                <td>{{ entityTypeMap[entity.type] || entity.type }}</td>
+                <td>{{ entityTransportLabels[entity.entity_type] || entity.entity_type }}</td>
+                <td>{{ entity.last_value ?? '—' }}</td>
+                <td>{{ entity.updated_at ? formatTimestamp(entity.updated_at) : '—' }}</td>
               </tr>
             </tbody>
           </table>
@@ -285,12 +285,12 @@
       </section>
 
 
-      <section v-if="activePage === 'entities' && selectedHelper" class="card" id="entity-detail-card">
+      <section v-if="activePage === 'entities' && selectedEntity" class="card" id="entity-detail-card">
         <div class="card__header">
           <div>
             <h2 id="detail-title">Entity details</h2>
             <p class="card__subtitle" id="detail-entity-id">
-              {{ selectedHelper?.entity_id }} · {{ selectedHelper?.unique_id }}
+              {{ selectedEntity?.entity_id }} · {{ selectedEntity?.unique_id }}
             </p>
           </div>
           <div class="card__actions">
@@ -307,7 +307,7 @@
               </svg>
             </button>
             <button class="btn" type="button" @click="openApiDialog">Call app</button>
-            <button class="btn danger" type="button" @click="deleteHelper">Delete</button>
+            <button class="btn danger" type="button" @click="deleteEntity">Delete</button>
           </div>
         </div>
 
@@ -334,33 +334,33 @@
           </dl>
         </div>
 
-        <div class="helper-status">
-          <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedHelper?.last_value ?? '—' }}</span></p>
+        <div class="entity-status">
+          <p><strong>Last value:</strong> <span id="detail-last-value">{{ selectedEntity?.last_value ?? '—' }}</span></p>
           <p><strong>Measured at:</strong> <span id="detail-measured-at">{{ selectedMeasuredAt }}</span></p>
           <p>
             <strong>Recorded (diagnostic only):</strong>
             <span id="detail-updated">{{ selectedUpdatedAt }}</span>
           </p>
           <p
-            v-if="selectedHelper?.entity_type === 'hassems' && selectedHelper?.history_cursor"
-            class="helper-status__history-cursor"
+            v-if="selectedEntity?.entity_type === 'hassems' && selectedEntity?.history_cursor"
+            class="entity-status__history-cursor"
           >
             <strong>History cursor:</strong>
-            <code>{{ selectedHelper.history_cursor }}</code>
-            <span v-if="selectedHelper.history_changed_at" class="helper-status__history-cursor-updated">
-              (updated {{ formatTimestamp(selectedHelper.history_changed_at) }})
+            <code>{{ selectedEntity.history_cursor }}</code>
+            <span v-if="selectedEntity.history_changed_at" class="entity-status__history-cursor-updated">
+              (updated {{ formatTimestamp(selectedEntity.history_changed_at) }})
             </span>
           </p>
         </div>
 
         <div
-          v-if="selectedHelper?.history_cursor_events?.length"
-          class="helper-status__timeline"
+          v-if="selectedEntity?.history_cursor_events?.length"
+          class="entity-status__timeline"
         >
           <h4>Historic cursor timeline</h4>
           <ul>
             <li
-              v-for="event in selectedHelper.history_cursor_events"
+              v-for="event in selectedEntity.history_cursor_events"
               :key="`${event.history_cursor}-${event.changed_at}`"
             >
               <code>{{ event.history_cursor }}</code>
@@ -495,7 +495,7 @@
           <template v-else-if="connectionDetail">
             <template v-if="connectionDialogMode === 'history'">
               <p class="modal__subtitle">
-                Recent helper values received from
+                Recent entity values received from
                 {{ connectionDetail.title || connectionDetail.entry_id }}.
               </p>
               <p v-if="connectionHistoryLoading" class="modal__subtitle">Loading history…</p>
@@ -505,11 +505,11 @@
               >
                 <li
                   v-for="item in connectionHistory"
-                  :key="`${item.helper_slug}-${item.recorded_at}`"
+                  :key="`${item.entity_slug}-${item.recorded_at}`"
                 >
                   <div class="history-list__row">
                     <span class="history-list__timestamp">
-                      {{ item.helper_name }} ·
+                      {{ item.entity_name }} ·
                       {{ formatTimestamp(item.measured_at || item.recorded_at) }}
                     </span>
                     <span class="history-list__value">{{ item.value ?? '—' }}</span>
@@ -547,20 +547,20 @@
                   </dd>
                 </div>
                 <div class="detail-list__item">
-                  <dt>Included helpers</dt>
+                  <dt>Included entities</dt>
                   <dd class="detail-list__value detail-list__value--wrap">
-                    {{ formattedIncludedHelpers }}
+                    {{ formattedIncludedEntities }}
                   </dd>
                 </div>
                 <div class="detail-list__item">
-                  <dt>Ignored helpers</dt>
+                  <dt>Ignored entities</dt>
                   <dd class="detail-list__value detail-list__value--wrap">
-                    {{ formattedIgnoredHelpers }}
+                    {{ formattedIgnoredEntities }}
                   </dd>
                 </div>
                 <div class="detail-list__item">
-                  <dt>Helpers synced</dt>
-                  <dd class="detail-list__value">{{ connectionDetail.helper_count }}</dd>
+                  <dt>Entities synced</dt>
+                  <dd class="detail-list__value">{{ connectionDetail.entity_count }}</dd>
                 </div>
                 <div class="detail-list__item">
                   <dt>Last seen</dt>
@@ -619,7 +619,7 @@
             ×
           </button>
         </div>
-        <form class="modal__form" id="create-helper-form" @submit.prevent="createHelper">
+        <form class="modal__form" id="create-entity-form" @submit.prevent="createEntity">
           <div class="modal__body">
             <div class="form-grid form-grid--base">
               <fieldset class="form-field full-width entity-type-field">
@@ -685,7 +685,7 @@
                   <button
                     type="button"
                     class="help-icon"
-                    data-tooltip="Select the Home Assistant helper domain this entity mirrors (input_text, input_number, etc.)."
+                    data-tooltip="Select the Home Assistant entity domain this entity mirrors (input_text, input_number, etc.)."
                   >?
                   </button>
                 </span>
@@ -750,7 +750,7 @@
                   <button
                     type="button"
                     class="help-icon"
-                    data-tooltip="Automatically generated from the device and entity names. Update if you already created a matching helper in Home Assistant."
+                    data-tooltip="Automatically generated from the device and entity names. Update if you already created a matching entity in Home Assistant."
                   >?
                   </button>
                 </span>
@@ -773,7 +773,7 @@
                     <button
                       type="button"
                       class="help-icon"
-                      data-tooltip="Comma-delimited options for input_select helpers. Example: short,average,tall."
+                      data-tooltip="Comma-delimited options for input_select entities. Example: short,average,tall."
                     >?
                     </button>
                   </span>
@@ -1047,7 +1047,7 @@
       @cancel.prevent="closeEditDialog"
       @close="onEditDialogClose"
     >
-      <template v-if="selectedHelper">
+      <template v-if="selectedEntity">
         <div class="modal__container">
           <div class="modal__header">
             <h3>Edit entity</h3>
@@ -1060,7 +1060,7 @@
               ×
             </button>
           </div>
-          <form class="modal__form" id="update-helper-form" @submit.prevent="updateHelper">
+          <form class="modal__form" id="update-entity-form" @submit.prevent="updateEntity">
             <div class="modal__body">
               <div class="form-grid form-grid--base">
                 <label class="form-field">
@@ -1087,7 +1087,7 @@
                 <label class="form-field">
                   <span class="label-text">
                     Type
-                    <button type="button" class="help-icon" data-tooltip="Helper domain mirrored in Home Assistant. This cannot be edited.">?</button>
+                    <button type="button" class="help-icon" data-tooltip="Entity domain mirrored in Home Assistant. This cannot be edited.">?</button>
                   </span>
                   <input :value="selectedTypeLabel" type="text" readonly />
                 </label>
@@ -1134,7 +1134,7 @@
                 <label class="form-field">
                   <span class="label-text">
                     Entity ID
-                    <button type="button" class="help-icon" data-tooltip="Home Assistant helper entity ID (domain.object_id).">?</button>
+                    <button type="button" class="help-icon" data-tooltip="Home Assistant entity entity ID (domain.object_id).">?</button>
                   </span>
                   <input v-model="updateForm.entity_id" type="text" required />
                 </label>
@@ -1168,7 +1168,7 @@
                   </select>
                 </label>
                 <label
-                  v-if="selectedHelper?.entity_type === 'hassems'"
+                  v-if="selectedEntity?.entity_type === 'hassems'"
                   class="form-field"
                 >
                   <span class="label-text">
@@ -1186,7 +1186,7 @@
                   </select>
                 </label>
                 <label
-                  v-if="selectedHelper?.entity_type === 'hassems'"
+                  v-if="selectedEntity?.entity_type === 'hassems'"
                   class="form-checkbox"
                 >
                   <input v-model="updateForm.ha_enabled" type="checkbox" />
@@ -1201,12 +1201,12 @@
                   </span>
                 </label>
                 <label
-                  v-if="selectedHelper?.type === 'input_select'"
+                  v-if="selectedEntity?.type === 'input_select'"
                   class="form-field full-width"
                 >
                   <span class="label-text">
                     Options (comma separated)
-                    <button type="button" class="help-icon" data-tooltip="Comma-delimited options for input_select helpers.">?</button>
+                    <button type="button" class="help-icon" data-tooltip="Comma-delimited options for input_select entities.">?</button>
                   </span>
                   <input v-model="updateForm.options" type="text" placeholder="short,average,tall" />
                 </label>
@@ -1331,7 +1331,7 @@
       @cancel.prevent="closeHistoryDialog"
       @close="onHistoryDialogClose"
     >
-      <template v-if="selectedHelper">
+      <template v-if="selectedEntity">
         <div class="modal__container">
           <div class="modal__header">
             <h3>Edit history entries</h3>
@@ -1346,7 +1346,7 @@
           </div>
           <div class="modal__body history-editor-body">
             <p class="modal__subtitle">
-              Adjust recorded values for <strong>{{ selectedHelper.name }}</strong> or remove entries you no longer need.
+              Adjust recorded values for <strong>{{ selectedEntity.name }}</strong> or remove entries you no longer need.
             </p>
             <div v-if="historyEditorRows.length" class="history-editor-wrapper">
               <table class="history-editor-table">
@@ -1485,10 +1485,10 @@
     </dialog>
 
     <dialog ref="apiDialog" class="modal" @cancel.prevent="closeApiDialog" @close="onApiDialogClose">
-      <template v-if="selectedHelper">
+      <template v-if="selectedEntity">
         <div class="modal__container">
           <div class="modal__header">
-            <h3>Call this helper from another app</h3>
+            <h3>Call this entity from another app</h3>
             <button type="button" class="modal__close" @click="closeApiDialog" aria-label="Close API details dialog">
               ×
             </button>
@@ -1565,7 +1565,7 @@
                 </button>
               </div>
             </label>
-            <p v-if="userForm.is_superuser" class="form-helper">
+            <p v-if="userForm.is_superuser" class="form-entity">
               The superuser token is fixed and cannot be modified or deleted.
             </p>
           </div>
@@ -1606,7 +1606,7 @@ function debugLog(message, payload = undefined) {
   }
 }
 
-const helperTypeMap = {
+const entityTypeMap = {
   input_text: 'Input text',
   input_number: 'Input number',
   input_boolean: 'Input boolean',
@@ -1860,7 +1860,7 @@ const connectionHistory = ref([]);
 const connectionHistoryLoading = ref(false);
 const selectedConnectionEntryId = ref(null);
 
-const helpers = ref([]);
+const entities = ref([]);
 const selectedSlug = ref(null);
 const historyRecords = ref([]);
 const historyMode = ref('empty');
@@ -1874,11 +1874,11 @@ const historyDebugDialog = ref(null);
 const historyChartDataset = ref([]);
 const historyDebugJson = computed(() => JSON.stringify(historyChartDataset.value, null, 2));
 
-const formattedIncludedHelpers = computed(() =>
-  formatHelperList(connectionDetail.value?.included_helpers),
+const formattedIncludedEntities = computed(() =>
+  formatEntityList(connectionDetail.value?.included_entities),
 );
-const formattedIgnoredHelpers = computed(() =>
-  formatHelperList(connectionDetail.value?.ignored_helpers),
+const formattedIgnoredEntities = computed(() =>
+  formatEntityList(connectionDetail.value?.ignored_entities),
 );
 const connectionMetadataDetails = computed(() => {
   const detail = connectionDetail.value;
@@ -1993,49 +1993,49 @@ const valueForm = reactive({
   measured_time: '',
 });
 
-const selectedHelper = computed(() => helpers.value.find((item) => item.slug === selectedSlug.value) ?? null);
+const selectedEntity = computed(() => entities.value.find((item) => item.slug === selectedSlug.value) ?? null);
 const selectedTypeLabel = computed(() => {
-  const helper = selectedHelper.value;
-  return helper ? helperTypeMap[helper.type] || helper.type : '';
+  const entity = selectedEntity.value;
+  return entity ? entityTypeMap[entity.type] || entity.type : '';
 });
 const selectedEntityTypeLabel = computed(() => {
-  const helper = selectedHelper.value;
-  if (!helper) return '';
-  return entityTransportLabels[helper.entity_type] || helper.entity_type;
+  const entity = selectedEntity.value;
+  if (!entity) return '';
+  return entityTransportLabels[entity.entity_type] || entity.entity_type;
 });
 const selectedMeasuredAt = computed(() => {
-  const helper = selectedHelper.value;
-  return helper?.last_measured_at ? formatTimestamp(helper.last_measured_at) : '—';
+  const entity = selectedEntity.value;
+  return entity?.last_measured_at ? formatTimestamp(entity.last_measured_at) : '—';
 });
 const selectedUpdatedAt = computed(() => {
   // recorded_at values are diagnostic only; surfaced here for troubleshooting.
-  const helper = selectedHelper.value;
-  return helper?.updated_at ? formatTimestamp(helper.updated_at) : '—';
+  const entity = selectedEntity.value;
+  return entity?.updated_at ? formatTimestamp(entity.updated_at) : '—';
 });
-const isUpdateMqtt = computed(() => selectedHelper.value?.entity_type === 'mqtt');
+const isUpdateMqtt = computed(() => selectedEntity.value?.entity_type === 'mqtt');
 const detailFields = computed(() => {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     return [];
   }
-  const description = (helper.description || '').trim();
-  const typeLabel = selectedTypeLabel.value || helper.type || '';
-  const deviceClass = helper.device_class || '';
-  const unit = helper.unit_of_measurement || '';
-  const stateClass = helper.state_class || '';
+  const description = (entity.description || '').trim();
+  const typeLabel = selectedTypeLabel.value || entity.type || '';
+  const deviceClass = entity.device_class || '';
+  const unit = entity.unit_of_measurement || '';
+  const stateClass = entity.state_class || '';
   const fields = [
     {
       key: 'device_name',
       label: 'Device name',
-      value: helper.device_name || '—',
-      isEmpty: !helper.device_name,
+      value: entity.device_name || '—',
+      isEmpty: !entity.device_name,
       wrap: false,
     },
     {
       key: 'entity_name',
       label: 'Entity name',
-      value: helper.name || '—',
-      isEmpty: !helper.name,
+      value: entity.name || '—',
+      isEmpty: !entity.name,
       wrap: false,
     },
     {
@@ -2074,8 +2074,8 @@ const detailFields = computed(() => {
       wrap: false,
     },
   ];
-  if (helper.entity_type === 'hassems') {
-    const statsValue = normalizeStatisticsModeValue(helper.statistics_mode || 'linear');
+  if (entity.entity_type === 'hassems') {
+    const statsValue = normalizeStatisticsModeValue(entity.statistics_mode || 'linear');
     const statsLabel = statisticsModeLabels[statsValue] || statsValue || '';
     fields.push({
       key: 'statistics_mode',
@@ -2087,7 +2087,7 @@ const detailFields = computed(() => {
     fields.push({
       key: 'ha_enabled',
       label: 'Home Assistant integration',
-      value: helper.ha_enabled !== false ? 'Enabled' : 'Hidden',
+      value: entity.ha_enabled !== false ? 'Enabled' : 'Hidden',
       isEmpty: false,
       wrap: false,
     });
@@ -2095,8 +2095,8 @@ const detailFields = computed(() => {
   return fields;
 });
 const selectedApiPath = computed(() => {
-  const helper = selectedHelper.value;
-  return helper ? `/api/inputs/${helper.slug}/set` : '';
+  const entity = selectedEntity.value;
+  return entity ? `/api/entities/${entity.slug}/set` : '';
 });
 const selectedApiUrl = computed(() => {
   const path = selectedApiPath.value;
@@ -2106,16 +2106,16 @@ const selectedApiUrl = computed(() => {
   return apiOrigin ? `${apiOrigin}${path}` : path;
 });
 const selectedApiPayload = computed(() => {
-  const helper = selectedHelper.value;
+  const entity = selectedEntity.value;
   const measuredAt = new Date().toISOString();
-  if (!helper) {
+  if (!entity) {
     return {
       value: 'example',
       measured_at: measuredAt,
     };
   }
   return {
-    value: exampleValueFor(helper),
+    value: exampleValueFor(entity),
     measured_at: measuredAt,
   };
 });
@@ -2131,25 +2131,25 @@ const selectedApiCurl = computed(() => {
   return `curl -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -d '${sanitized}'`;
 });
 const valueInputType = computed(() => {
-  const helper = selectedHelper.value;
-  if (!helper) return 'text';
-  if (helper.type === 'input_boolean') return 'boolean';
-  if (helper.type === 'input_number') return 'number';
-  if (helper.type === 'input_select') return 'select';
+  const entity = selectedEntity.value;
+  if (!entity) return 'text';
+  if (entity.type === 'input_boolean') return 'boolean';
+  if (entity.type === 'input_number') return 'number';
+  if (entity.type === 'input_select') return 'select';
   return 'text';
 });
-const valueOptions = computed(() => selectedHelper.value?.options ?? []);
+const valueOptions = computed(() => selectedEntity.value?.options ?? []);
 const valuePlaceholder = computed(() => {
-  const helper = selectedHelper.value;
-  if (!helper) return '';
-  if (helper.type === 'input_number' && helper.unit_of_measurement) {
-    return `Enter value in ${helper.unit_of_measurement}`;
+  const entity = selectedEntity.value;
+  if (!entity) return '';
+  if (entity.type === 'input_number' && entity.unit_of_measurement) {
+    return `Enter value in ${entity.unit_of_measurement}`;
   }
   return '';
 });
 const valueSubmitLabel = computed(() => {
-  const helper = selectedHelper.value;
-  return helper?.entity_type === 'hassems' ? 'Record value' : 'Publish to MQTT';
+  const entity = selectedEntity.value;
+  return entity?.entity_type === 'hassems' ? 'Record value' : 'Publish to MQTT';
 });
 const createOptionsDisabled = computed(() => createForm.type !== 'input_select');
 const isCreateMqtt = computed(() => createForm.entity_type === 'mqtt');
@@ -2217,16 +2217,16 @@ watch(discoveryPreview, (preview) => {
   }
 });
 
-watch(selectedHelper, async (helper, previous) => {
-  debugLog('selectedHelper changed', {
+watch(selectedEntity, async (entity, previous) => {
+  debugLog('selectedEntity changed', {
     previous: previous?.slug ?? null,
-    current: helper?.slug ?? null,
+    current: entity?.slug ?? null,
   });
   closeHistoryDialog();
-  if (helper) {
-    populateUpdateForm(helper);
-    populateValueForm(helper);
-    await loadHistory(helper.slug);
+  if (entity) {
+    populateUpdateForm(entity);
+    populateValueForm(entity);
+    await loadHistory(entity.slug);
   } else {
     closeEditDialog();
     resetUpdateForm();
@@ -2254,20 +2254,20 @@ watch(activePage, (page) => {
 });
 
 watch(
-  [historyRecords, selectedHelper],
-  ([records, helper]) => {
-    debugLog('History records or helper changed', {
-      helper: helper?.slug ?? null,
+  [historyRecords, selectedEntity],
+  ([records, entity]) => {
+    debugLog('History records or entity changed', {
+      entity: entity?.slug ?? null,
       recordCount: records?.length ?? 0,
     });
-    if (!helper) {
+    if (!entity) {
       destroyChart();
       historyMode.value = 'empty';
       historyList.value = [];
       return;
     }
     nextTick(() => {
-      renderHistory(helper, records);
+      renderHistory(entity, records);
     });
   },
   { deep: true },
@@ -2363,29 +2363,29 @@ async function testMqttConfig() {
   }
 }
 
-function normalizeHelper(helper) {
-  if (!helper || typeof helper !== 'object') {
-    return helper;
+function normalizeEntity(entity) {
+  if (!entity || typeof entity !== 'object') {
+    return entity;
   }
   return {
-    ...helper,
-    ha_enabled: helper.ha_enabled !== false,
-    history_cursor_events: Array.isArray(helper.history_cursor_events)
-      ? helper.history_cursor_events
+    ...entity,
+    ha_enabled: entity.ha_enabled !== false,
+    history_cursor_events: Array.isArray(entity.history_cursor_events)
+      ? entity.history_cursor_events
       : [],
   };
 }
 
-async function loadHelpers() {
+async function loadEntities() {
   try {
-    const data = await requestJson('/inputs');
-    debugLog('Loaded helpers response', data);
+    const data = await requestJson('/entities');
+    debugLog('Loaded entities response', data);
     const rawList = Array.isArray(data) ? data : [];
-    helpers.value = rawList.map((helper) => normalizeHelper(helper));
+    entities.value = rawList.map((entity) => normalizeEntity(entity));
     if (selectedSlug.value) {
-      const exists = helpers.value.some((helper) => helper.slug === selectedSlug.value);
+      const exists = entities.value.some((entity) => entity.slug === selectedSlug.value);
       if (!exists) {
-        debugLog('Previously selected helper no longer exists, clearing selection', selectedSlug.value);
+        debugLog('Previously selected entity no longer exists, clearing selection', selectedSlug.value);
         selectedSlug.value = null;
       }
     }
@@ -2657,8 +2657,8 @@ async function toggleConnectionDialogMode() {
   }
 }
 
-function selectHelper(slug) {
-  debugLog('Selecting helper', { slug });
+function selectEntity(slug) {
+  debugLog('Selecting entity', { slug });
   selectedSlug.value = slug;
 }
 
@@ -2685,12 +2685,12 @@ function onCreateDialogClose() {
 }
 
 function openEditDialog() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to edit.', 'error');
     return;
   }
-  populateUpdateForm(helper);
+  populateUpdateForm(entity);
   const dialog = editDialog.value;
   if (!dialog || typeof dialog.showModal !== 'function') {
     return;
@@ -2708,14 +2708,14 @@ function closeEditDialog() {
 }
 
 function onEditDialogClose() {
-  if (!selectedHelper.value) {
+  if (!selectedEntity.value) {
     resetUpdateForm();
   }
 }
 
 function openHistoryDialog() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to edit history.', 'error');
     return;
   }
@@ -2765,8 +2765,8 @@ function closeHistoryDebugDialog() {
 }
 
 function openApiDialog() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to view API details.', 'error');
     return;
   }
@@ -2790,16 +2790,16 @@ function onApiDialogClose() {
   // Dialog state is managed directly via the native <dialog> element.
 }
 
-function helperMeta(helper) {
-  const parts = [helper.component];
-  if (helper.device_class) {
-    parts.push(helper.device_class);
+function entityMeta(entity) {
+  const parts = [entity.component];
+  if (entity.device_class) {
+    parts.push(entity.device_class);
   }
-  if (helper.unit_of_measurement) {
-    parts.push(helper.unit_of_measurement);
+  if (entity.unit_of_measurement) {
+    parts.push(entity.unit_of_measurement);
   }
-  if (helper.last_measured_at) {
-    parts.push(formatTimestamp(helper.last_measured_at));
+  if (entity.last_measured_at) {
+    parts.push(formatTimestamp(entity.last_measured_at));
   }
   return parts.join(' · ');
 }
@@ -2904,16 +2904,16 @@ function handleCreateNodeBlur() {
   syncCreateAutofill();
 }
 
-async function createHelper() {
+async function createEntity() {
   try {
     const payload = buildCreatePayload();
-    await requestJson('/inputs', {
+    await requestJson('/entities', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
     showToast('Entity created.', 'success');
     resetCreateForm();
-    await loadHelpers();
+    await loadEntities();
     closeCreateDialog();
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -2996,9 +2996,9 @@ function previewDiscovery() {
     return;
   }
   try {
-    const helperDraft = buildHelperDraft();
-    const topic = computeDiscoveryTopic(helperDraft);
-    const payload = buildDiscoveryPreviewPayload(helperDraft);
+    const entityDraft = buildEntityDraft();
+    const topic = computeDiscoveryTopic(entityDraft);
+    const payload = buildDiscoveryPreviewPayload(entityDraft);
     discoveryPreview.value = {
       topic,
       payload: JSON.stringify(payload, null, 2),
@@ -3008,7 +3008,7 @@ function previewDiscovery() {
   }
 }
 
-function buildHelperDraft() {
+function buildEntityDraft() {
   const payload = buildCreatePayload();
   if (!payload.name) {
     throw new Error('Provide a name before previewing the discovery payload.');
@@ -3062,57 +3062,57 @@ function buildHelperDraft() {
   };
 }
 
-function buildDiscoveryPreviewPayload(helper) {
-  const stateTopic = helper.state_topic;
+function buildDiscoveryPreviewPayload(entity) {
+  const stateTopic = entity.state_topic;
   const payload = {
-    name: helper.name,
-    unique_id: helper.unique_id,
-    object_id: helper.object_id,
+    name: entity.name,
+    unique_id: entity.unique_id,
+    object_id: entity.object_id,
     state_topic: stateTopic,
-    availability_topic: helper.availability_topic,
+    availability_topic: entity.availability_topic,
     payload_available: 'online',
     payload_not_available: 'offline',
-    force_update: helper.force_update !== false,
-    value_template: valueTemplateFor(helper.type),
+    force_update: entity.force_update !== false,
+    value_template: valueTemplateFor(entity.type),
     json_attributes_topic: stateTopic,
     json_attributes_template: "{{ {'measured_at': value_json.measured_at} | tojson }}",
     device: {
-      identifiers: helper.device_identifiers,
-      name: helper.device_name,
+      identifiers: entity.device_identifiers,
+      name: entity.device_name,
     },
   };
 
-  if (helper.device_class) {
-    payload.device_class = helper.device_class;
+  if (entity.device_class) {
+    payload.device_class = entity.device_class;
   }
-  if (helper.unit_of_measurement) {
-    payload.unit_of_measurement = helper.unit_of_measurement;
+  if (entity.unit_of_measurement) {
+    payload.unit_of_measurement = entity.unit_of_measurement;
   }
-  const stateClass = helper.state_class || (helper.type === 'input_number' ? 'measurement' : undefined);
+  const stateClass = entity.state_class || (entity.type === 'input_number' ? 'measurement' : undefined);
   if (stateClass) {
     payload.state_class = stateClass;
   }
-  if (helper.icon) {
-    payload.icon = helper.icon;
+  if (entity.icon) {
+    payload.icon = entity.icon;
   }
-  if (helper.device_manufacturer) {
-    payload.device.manufacturer = helper.device_manufacturer;
+  if (entity.device_manufacturer) {
+    payload.device.manufacturer = entity.device_manufacturer;
   }
-  if (helper.device_model) {
-    payload.device.model = helper.device_model;
+  if (entity.device_model) {
+    payload.device.model = entity.device_model;
   }
-  if (helper.device_sw_version) {
-    payload.device.sw_version = helper.device_sw_version;
+  if (entity.device_sw_version) {
+    payload.device.sw_version = entity.device_sw_version;
   }
 
   return removeUndefined(payload);
 }
 
-function valueTemplateFor(helperType) {
-  if (helperType === 'input_number') {
+function valueTemplateFor(entityType) {
+  if (entityType === 'input_number') {
     return '{{ value_json.value | float }}';
   }
-  if (helperType === 'input_boolean') {
+  if (entityType === 'input_boolean') {
     return '{{ value_json.value | lower }}';
   }
   return '{{ value_json.value }}';
@@ -3126,39 +3126,39 @@ function onDiscoveryDialogClose() {
   discoveryPreview.value = null;
 }
 
-function populateUpdateForm(helper) {
-  const isMqtt = helper.entity_type === 'mqtt';
+function populateUpdateForm(entity) {
+  const isMqtt = entity.entity_type === 'mqtt';
   Object.assign(updateForm, {
-    device_name: helper.device_name ?? '',
-    name: helper.name ?? '',
-    description: helper.description ?? '',
-    entity_id: helper.entity_id ?? '',
-    default_value: helper.default_value ?? '',
-    options: helper.type === 'input_select' ? (helper.options || []).join(', ') : '',
-    component: helper.component ?? 'sensor',
-    device_class: helper.device_class ?? '',
-    unit_of_measurement: helper.unit_of_measurement ?? '',
-    icon: helper.icon ?? '',
-    state_class: helper.state_class ?? (helper.type === 'input_number' ? 'measurement' : ''),
+    device_name: entity.device_name ?? '',
+    name: entity.name ?? '',
+    description: entity.description ?? '',
+    entity_id: entity.entity_id ?? '',
+    default_value: entity.default_value ?? '',
+    options: entity.type === 'input_select' ? (entity.options || []).join(', ') : '',
+    component: entity.component ?? 'sensor',
+    device_class: entity.device_class ?? '',
+    unit_of_measurement: entity.unit_of_measurement ?? '',
+    icon: entity.icon ?? '',
+    state_class: entity.state_class ?? (entity.type === 'input_number' ? 'measurement' : ''),
     statistics_mode:
-      helper.entity_type === 'hassems'
-        ? normalizeStatisticsModeValue(helper.statistics_mode)
+      entity.entity_type === 'hassems'
+        ? normalizeStatisticsModeValue(entity.statistics_mode)
         : 'linear',
     ha_enabled:
-      helper.entity_type === 'hassems'
-        ? helper.ha_enabled !== false
+      entity.entity_type === 'hassems'
+        ? entity.ha_enabled !== false
         : true,
-    unique_id: helper.unique_id ?? '',
-    object_id: helper.object_id ?? '',
-    device_id: helper.device_id ?? slugifyIdentifier(helper.device_name ?? ''),
-    node_id: isMqtt ? helper.node_id ?? 'hassems' : '',
-    state_topic: isMqtt ? helper.state_topic ?? '' : '',
-    availability_topic: isMqtt ? helper.availability_topic ?? '' : '',
-    device_manufacturer: isMqtt ? helper.device_manufacturer ?? '' : '',
-    device_model: isMqtt ? helper.device_model ?? '' : '',
-    device_sw_version: isMqtt ? helper.device_sw_version ?? '' : '',
-    device_identifiers: isMqtt ? (helper.device_identifiers || []).join(', ') : '',
-    force_update: isMqtt ? helper.force_update !== false : false,
+    unique_id: entity.unique_id ?? '',
+    object_id: entity.object_id ?? '',
+    device_id: entity.device_id ?? slugifyIdentifier(entity.device_name ?? ''),
+    node_id: isMqtt ? entity.node_id ?? 'hassems' : '',
+    state_topic: isMqtt ? entity.state_topic ?? '' : '',
+    availability_topic: isMqtt ? entity.availability_topic ?? '' : '',
+    device_manufacturer: isMqtt ? entity.device_manufacturer ?? '' : '',
+    device_model: isMqtt ? entity.device_model ?? '' : '',
+    device_sw_version: isMqtt ? entity.device_sw_version ?? '' : '',
+    device_identifiers: isMqtt ? (entity.device_identifiers || []).join(', ') : '',
+    force_update: isMqtt ? entity.force_update !== false : false,
   });
 }
 
@@ -3191,21 +3191,21 @@ function resetUpdateForm() {
   });
 }
 
-async function updateHelper() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+async function updateEntity() {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to edit.', 'error');
     return;
   }
   try {
-    const payload = buildUpdatePayload(helper.type);
-    const response = await requestJson(`/inputs/${helper.slug}`, {
+    const payload = buildUpdatePayload(entity.type);
+    const response = await requestJson(`/entities/${entity.slug}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    const updated = normalizeHelper(response);
+    const updated = normalizeEntity(response);
     showToast('Entity updated.', 'success');
-    helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
+    entities.value = entities.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
     closeEditDialog();
   } catch (error) {
@@ -3213,9 +3213,9 @@ async function updateHelper() {
   }
 }
 
-function buildUpdatePayload(helperType) {
-  const helper = selectedHelper.value;
-  const isMqtt = helper?.entity_type === 'mqtt';
+function buildUpdatePayload(entityType) {
+  const entity = selectedEntity.value;
+  const isMqtt = entity?.entity_type === 'mqtt';
   const payload = {
     name: updateForm.name?.trim(),
     entity_id: updateForm.entity_id?.trim(),
@@ -3244,10 +3244,10 @@ function buildUpdatePayload(helperType) {
 
   const defaultRaw = updateForm.default_value?.trim();
   if (defaultRaw) {
-    payload.default_value = coerceValue(helperType, defaultRaw);
+    payload.default_value = coerceValue(entityType, defaultRaw);
   }
 
-  if (helperType === 'input_select') {
+  if (entityType === 'input_select') {
     const options = parseCsv(updateForm.options || '');
     if (options.length) {
       payload.options = options;
@@ -3268,19 +3268,19 @@ function buildUpdatePayload(helperType) {
   return removeUndefined(payload);
 }
 
-async function deleteHelper() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+async function deleteEntity() {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to delete.', 'error');
     return;
   }
-  const confirmed = window.confirm(`Delete ${helper.name}? This action cannot be undone.`);
+  const confirmed = window.confirm(`Delete ${entity.name}? This action cannot be undone.`);
   if (!confirmed) {
     return;
   }
   try {
-    await requestJson(`/inputs/${helper.slug}`, { method: 'DELETE' });
-    helpers.value = helpers.value.filter((item) => item.slug !== helper.slug);
+    await requestJson(`/entities/${entity.slug}`, { method: 'DELETE' });
+    entities.value = entities.value.filter((item) => item.slug !== entity.slug);
     selectedSlug.value = null;
     showToast('Entity deleted.', 'success');
   } catch (error) {
@@ -3288,12 +3288,12 @@ async function deleteHelper() {
   }
 }
 
-function exampleValueFor(helper) {
-  if (!helper) {
+function exampleValueFor(entity) {
+  if (!entity) {
     return 'example';
   }
-  const fallback = helper.last_value ?? helper.default_value ?? null;
-  if (helper.type === 'input_boolean') {
+  const fallback = entity.last_value ?? entity.default_value ?? null;
+  if (entity.type === 'input_boolean') {
     if (fallback !== null && fallback !== undefined) {
       const normalized = String(fallback).toLowerCase();
       if (['true', 'on', '1', 'yes'].includes(normalized)) return true;
@@ -3301,7 +3301,7 @@ function exampleValueFor(helper) {
     }
     return true;
   }
-  if (helper.type === 'input_number') {
+  if (entity.type === 'input_number') {
     if (fallback !== null && fallback !== undefined) {
       const parsed = Number(fallback);
       if (Number.isFinite(parsed)) {
@@ -3310,8 +3310,8 @@ function exampleValueFor(helper) {
     }
     return 0;
   }
-  if (helper.type === 'input_select') {
-    const options = Array.isArray(helper.options) ? helper.options : [];
+  if (entity.type === 'input_select') {
+    const options = Array.isArray(entity.options) ? entity.options : [];
     if (options.length) {
       return options[0];
     }
@@ -3326,19 +3326,19 @@ function exampleValueFor(helper) {
   return 'example';
 }
 
-function populateValueForm(helper) {
-  if (helper.type === 'input_boolean') {
-    if (helper.last_value === true || helper.last_value === 'true') {
+function populateValueForm(entity) {
+  if (entity.type === 'input_boolean') {
+    if (entity.last_value === true || entity.last_value === 'true') {
       valueForm.value = 'true';
-    } else if (helper.last_value === false || helper.last_value === 'false') {
+    } else if (entity.last_value === false || entity.last_value === 'false') {
       valueForm.value = 'false';
     } else {
       valueForm.value = 'false';
     }
-  } else if (helper.type === 'input_number') {
-    valueForm.value = helper.last_value ?? '';
+  } else if (entity.type === 'input_number') {
+    valueForm.value = entity.last_value ?? '';
   } else {
-    valueForm.value = helper.last_value ?? '';
+    valueForm.value = entity.last_value ?? '';
   }
   setMeasuredInputsToNow();
 }
@@ -3350,14 +3350,14 @@ function clearValueForm() {
 }
 
 async function submitValue() {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity to update.', 'error');
     return;
   }
   try {
     const payload = {
-      value: coerceValue(helper.type, valueForm.value),
+      value: coerceValue(entity.type, valueForm.value),
     };
     const customDate = valueForm.measured_date?.trim();
     const customTime = valueForm.measured_time?.trim();
@@ -3375,16 +3375,16 @@ async function submitValue() {
       payload.measured_at = new Date().toISOString();
       setMeasuredInputsToNow();
     }
-    debugLog('Submitting value payload', { helper: helper.slug, payload });
-    const response = await requestJson(`/inputs/${helper.slug}/set`, {
+    debugLog('Submitting value payload', { entity: entity.slug, payload });
+    const response = await requestJson(`/entities/${entity.slug}/set`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    const updated = normalizeHelper(response);
-    debugLog('Value submission response', { helper: helper.slug, updated });
-    const successMessage = helper.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
+    const updated = normalizeEntity(response);
+    debugLog('Value submission response', { entity: entity.slug, updated });
+    const successMessage = entity.entity_type === 'hassems' ? 'Value recorded locally.' : 'Value sent to MQTT.';
     showToast(successMessage, 'success');
-    helpers.value = helpers.value.map((item) => (item.slug === updated.slug ? updated : item));
+    entities.value = entities.value.map((item) => (item.slug === updated.slug ? updated : item));
     selectedSlug.value = updated.slug;
     await loadHistory(updated.slug);
   } catch (error) {
@@ -3411,8 +3411,8 @@ function sortHistoryRecords(records) {
   return [...records].sort((a, b) => getHistoryTimestamp(a) - getHistoryTimestamp(b));
 }
 
-function formatHistoryValueForInput(helperType, value) {
-  if (helperType === 'input_boolean') {
+function formatHistoryValueForInput(entityType, value) {
+  if (entityType === 'input_boolean') {
     const normalized = String(value).toLowerCase();
     if (['true', 'on', '1', 'yes'].includes(normalized)) {
       return 'true';
@@ -3443,14 +3443,14 @@ function toDateTimeLocalString(value) {
 }
 
 function buildHistoryEditorRows(records) {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     return [];
   }
-  const helperType = helper.type;
+  const entityType = entity.type;
   return records.map((entry) => ({
     id: entry.id,
-    valueInput: formatHistoryValueForInput(helperType, entry.value),
+    valueInput: formatHistoryValueForInput(entityType, entry.value),
     measuredInput: toDateTimeLocalString(entry.measured_at || entry.recorded_at),
     recordedDisplay: formatTimestamp(entry.recorded_at),
     historic: Boolean(entry.historic),
@@ -3469,9 +3469,9 @@ function syncHistoryEditorRows() {
 }
 
 async function loadHistory(slug) {
-  debugLog('Loading history for helper', { slug });
+  debugLog('Loading history for entity', { slug });
   try {
-    const history = await requestJson(`/inputs/${slug}/history`);
+    const history = await requestJson(`/entities/${slug}/history`);
     const records = Array.isArray(history) ? history : [];
     debugLog('History response', { slug, recordsCount: records.length, records });
     const normalizedRecords = records.map((entry) => ({
@@ -3488,8 +3488,8 @@ async function loadHistory(slug) {
 }
 
 async function saveHistoryRow(row) {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity before editing history.', 'error');
     return;
   }
@@ -3504,7 +3504,7 @@ async function saveHistoryRow(row) {
   }
   let value;
   try {
-    value = coerceValue(helper.type, row.valueInput);
+    value = coerceValue(entity.type, row.valueInput);
   } catch (error) {
     row.error = error instanceof Error ? error.message : String(error);
     return;
@@ -3512,7 +3512,7 @@ async function saveHistoryRow(row) {
   row.error = '';
   row.saving = true;
   try {
-    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+    await requestJson(`/entities/${entity.slug}/history/${row.id}`, {
       method: 'PUT',
       body: JSON.stringify({
         value,
@@ -3520,7 +3520,7 @@ async function saveHistoryRow(row) {
       }),
     });
     showToast('History entry updated.', 'success');
-    await loadHistory(helper.slug);
+    await loadHistory(entity.slug);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
   } finally {
@@ -3529,8 +3529,8 @@ async function saveHistoryRow(row) {
 }
 
 async function deleteHistoryRow(row) {
-  const helper = selectedHelper.value;
-  if (!helper) {
+  const entity = selectedEntity.value;
+  if (!entity) {
     showToast('Select an entity before editing history.', 'error');
     return;
   }
@@ -3542,11 +3542,11 @@ async function deleteHistoryRow(row) {
   row.error = '';
   row.deleting = true;
   try {
-    await requestJson(`/inputs/${helper.slug}/history/${row.id}`, {
+    await requestJson(`/entities/${entity.slug}/history/${row.id}`, {
       method: 'DELETE',
     });
     showToast('History entry deleted.', 'success');
-    await loadHistory(helper.slug);
+    await loadHistory(entity.slug);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error');
   } finally {
@@ -3554,19 +3554,19 @@ async function deleteHistoryRow(row) {
   }
 }
 
-function renderHistory(helper, history) {
+function renderHistory(entity, history) {
   destroyChart();
   historyChartDataset.value = [];
   const sorted = sortHistoryRecords(history);
   debugLog('Rendering history', {
-    helper: helper.slug,
+    entity: entity.slug,
     entries: sorted.length,
     rawHistory: history,
   });
   if (!sorted.length) {
     historyMode.value = 'empty';
     historyList.value = [];
-    debugLog('No history entries to render', { helper: helper.slug });
+    debugLog('No history entries to render', { entity: entity.slug });
     return;
   }
   const datasetPoints = [];
@@ -3576,7 +3576,7 @@ function renderHistory(helper, history) {
     const timestampSource = item.measured_at || item.recorded_at;
     const timestampDate = timestampSource ? new Date(timestampSource) : null;
     const timestampValid = timestampDate instanceof Date && !Number.isNaN(timestampDate?.getTime?.());
-    const normalizedValue = normalizeHistoryValue(helper.type, item.value);
+    const normalizedValue = normalizeHistoryValue(entity.type, item.value);
     const numericValue = normalizedValue === null ? null : Number(normalizedValue);
     const cursorValue = item.historic_cursor || item.history_cursor || null;
     const historyCursor = cursorValue ? String(cursorValue) : null;
@@ -3603,13 +3603,13 @@ function renderHistory(helper, history) {
     }
   }
   debugLog('Prepared history dataset', {
-    helper: helper.slug,
+    entity: entity.slug,
     points: datasetPoints.length,
     skippedEntries: skippedEntries.length,
   });
   if (skippedEntries.length) {
     debugLog('Skipped history entries that could not be charted', {
-      helper: helper.slug,
+      entity: entity.slug,
       skippedEntries,
     });
   }
@@ -3628,7 +3628,7 @@ function renderHistory(helper, history) {
         historyMode.value = 'chart';
         historyList.value = [];
         debugLog('Rendering chart dataset', {
-          helper: helper.slug,
+          entity: entity.slug,
           datasetPoints,
         });
         const firstPoint = datasetPoints[0];
@@ -3640,7 +3640,7 @@ function renderHistory(helper, history) {
         if (lastPoint?.x instanceof Date) {
           xScaleBounds.max = lastPoint.x;
         }
-        const yScaleOptions = helper.type === 'input_boolean'
+        const yScaleOptions = entity.type === 'input_boolean'
           ? {
               ticks: {
                 callback: (value) => (value === 1 ? 'On' : 'Off'),
@@ -3656,7 +3656,7 @@ function renderHistory(helper, history) {
             data: {
               datasets: [
                 {
-                  label: helper.name,
+                  label: entity.name,
                   data: datasetPoints,
                   fill: false,
                   borderColor: '#2563eb',
@@ -3687,7 +3687,7 @@ function renderHistory(helper, history) {
                   },
                 },
                 y: {
-                  beginAtZero: helper.type !== 'input_number',
+                  beginAtZero: entity.type !== 'input_number',
                   ...yScaleOptions,
                 },
               },
@@ -3705,11 +3705,11 @@ function renderHistory(helper, history) {
                       if (value === undefined || value === null) {
                         return '';
                       }
-                      if (helper.type === 'input_boolean') {
+                      if (entity.type === 'input_boolean') {
                         return value === 1 ? 'On' : 'Off';
                       }
                       const formatted = typeof value === 'number' ? value.toLocaleString() : String(value);
-                      const unit = helper.unit_of_measurement || '';
+                      const unit = entity.unit_of_measurement || '';
                       return unit ? `${formatted} ${unit}` : formatted;
                     },
                     afterLabel: (context) => {
@@ -3728,17 +3728,17 @@ function renderHistory(helper, history) {
               },
             },
           });
-          debugLog('Chart rendered successfully', { helper: helper.slug });
+          debugLog('Chart rendered successfully', { entity: entity.slug });
           return;
         } catch (error) {
-          console.error('Failed to render history chart', error, { helper, datasetPoints });
+          console.error('Failed to render history chart', error, { entity, datasetPoints });
         }
       } else {
-        debugLog('Canvas context unavailable, cannot render chart', { helper: helper.slug });
+        debugLog('Canvas context unavailable, cannot render chart', { entity: entity.slug });
       }
     }
   }
-  debugLog('Falling back to history list view', { helper: helper.slug });
+  debugLog('Falling back to history list view', { entity: entity.slug });
   historyChartDataset.value = [];
   historyMode.value = 'list';
   const listEntries = [];
@@ -3782,30 +3782,30 @@ function destroyChart() {
   }
 }
 
-function normalizeHistoryValue(helperType, value) {
+function normalizeHistoryValue(entityType, value) {
   if (value === null || value === undefined) {
     return null;
   }
-  if (helperType === 'input_boolean') {
+  if (entityType === 'input_boolean') {
     if (value === true || value === 'true' || value === 'on') return 1;
     if (value === false || value === 'false' || value === 'off') return 0;
     return null;
   }
-  if (helperType === 'input_number') {
+  if (entityType === 'input_number') {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : null;
   }
   return null;
 }
 
-function computeDiscoveryTopic(helper) {
+function computeDiscoveryTopic(entity) {
   const prefix = (mqttConfig.value?.discovery_prefix || mqttForm.discovery_prefix || 'homeassistant').replace(/\/+$/, '');
-  const parts = [prefix, helper.component];
-  const nodeSegment = helper.node_id ?? 'hassems';
+  const parts = [prefix, entity.component];
+  const nodeSegment = entity.node_id ?? 'hassems';
   if (nodeSegment) {
     parts.push(nodeSegment);
   }
-  parts.push(helper.object_id);
+  parts.push(entity.object_id);
   parts.push('config');
   return parts.join('/');
 }
@@ -3826,20 +3826,20 @@ function removeUndefined(payload) {
   );
 }
 
-function coerceValue(helperType, rawValue) {
+function coerceValue(entityType, rawValue) {
   if (rawValue === null || rawValue === undefined) {
     return null;
   }
-  if (helperType === 'input_boolean') {
+  if (entityType === 'input_boolean') {
     const normalized = String(rawValue).toLowerCase();
     if (['true', 'on', '1', 'yes'].includes(normalized)) return true;
     if (['false', 'off', '0', 'no'].includes(normalized)) return false;
-    throw new Error('Boolean helpers expect true/false values.');
+    throw new Error('Boolean entities expect true/false values.');
   }
-  if (helperType === 'input_number') {
+  if (entityType === 'input_number') {
     const parsed = Number(rawValue);
     if (Number.isNaN(parsed)) {
-      throw new Error('Number helpers expect numeric values.');
+      throw new Error('Number entities expect numeric values.');
     }
     return parsed;
   }
@@ -3858,7 +3858,7 @@ function formatTimestamp(value) {
   }
 }
 
-function formatHelperList(list) {
+function formatEntityList(list) {
   if (!Array.isArray(list) || list.length === 0) {
     return 'None';
   }
@@ -3954,7 +3954,7 @@ onMounted(async () => {
   debugLog('App mounted - initializing data loads');
   resetCreateForm();
   await loadMqttConfig();
-  await loadHelpers();
+  await loadEntities();
   await loadApiUsers();
   await loadIntegrationConnections();
 });

@@ -11,8 +11,8 @@ from homeassistant.helpers import aiohttp_client, config_validation as cv
 from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
 from .const import (
     CONF_BASE_URL,
-    CONF_INCLUDED_HELPERS,
-    CONF_IGNORED_HELPERS,
+    CONF_INCLUDED_ENTITIES,
+    CONF_IGNORED_ENTITIES,
     CONF_TOKEN,
     DOMAIN,
 )
@@ -24,7 +24,7 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._reauth_entry: config_entries.ConfigEntry | None = None
-        self._discovery_helper: Dict[str, Any] | None = None
+        self._discovery_entity: Dict[str, Any] | None = None
         self._discovery_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(self, user_input: Dict[str, Any] | None = None):
@@ -93,42 +93,42 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_integration_discovery(self, discovery_info: Dict[str, Any]):
-        helper = discovery_info.get("helper")
+        entity = discovery_info.get("entity")
         entry_id = self.context.get("entry_id")
-        if helper is None or entry_id is None:
+        if entity is None or entry_id is None:
             return self.async_abort(reason="unknown")
         entry = self.hass.config_entries.async_get_entry(entry_id)
         if entry is None:
             return self.async_abort(reason="unknown")
-        slug = helper.get("slug")
-        included = set(entry.options.get(CONF_INCLUDED_HELPERS, []))
-        ignored = set(entry.options.get(CONF_IGNORED_HELPERS, []))
+        slug = entity.get("slug")
+        included = set(entry.options.get(CONF_INCLUDED_ENTITIES, []))
+        ignored = set(entry.options.get(CONF_IGNORED_ENTITIES, []))
         if slug in included or slug in ignored:
             return self.async_abort(reason="already_configured")
-        self._discovery_helper = helper
+        self._discovery_entity = entity
         self._discovery_entry = entry
         return await self.async_step_discovery_confirm()
 
     async def async_step_discovery_confirm(self, user_input: Dict[str, Any] | None = None):
         errors: Dict[str, str] = {}
-        helper = getattr(self, "_discovery_helper", None)
+        entity = getattr(self, "_discovery_entity", None)
         entry = getattr(self, "_discovery_entry", None)
-        if helper is None or entry is None:
+        if entity is None or entry is None:
             return self.async_abort(reason="unknown")
-        slug = helper.get("slug")
+        slug = entity.get("slug")
         if user_input is not None:
             action = user_input["action"]
             options = dict(entry.options)
-            included = set(options.get(CONF_INCLUDED_HELPERS, []))
-            ignored = set(options.get(CONF_IGNORED_HELPERS, []))
+            included = set(options.get(CONF_INCLUDED_ENTITIES, []))
+            ignored = set(options.get(CONF_IGNORED_ENTITIES, []))
             if action == "add":
                 included.add(slug)
                 ignored.discard(slug)
             else:
                 ignored.add(slug)
                 included.discard(slug)
-            options[CONF_INCLUDED_HELPERS] = sorted(included)
-            options[CONF_IGNORED_HELPERS] = sorted(ignored)
+            options[CONF_INCLUDED_ENTITIES] = sorted(included)
+            options[CONF_IGNORED_ENTITIES] = sorted(ignored)
             self.hass.config_entries.async_update_entry(entry, options=options)
             domain_data = self.hass.data.get(DOMAIN, {})
             entry_data = domain_data.get(entry.entry_id)
@@ -152,8 +152,8 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
         description = {
-            "name": helper.get("name", helper.get("slug")),
-            "entity_id": helper.get("entity_id"),
+            "name": entity.get("name", entity.get("slug")),
+            "entity_id": entity.get("entity_id"),
         }
         return self.async_show_form(
             step_id="discovery_confirm",
@@ -165,7 +165,7 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _async_validate(self, user_input: Dict[str, Any]) -> None:
         session = aiohttp_client.async_get_clientsession(self.hass)
         client = HASSEMSClient(session, user_input[CONF_BASE_URL], user_input[CONF_TOKEN])
-        await client.async_list_helpers()
+        await client.async_list_entities()
 
     def _user_schema(
         self, base_url: Optional[str], token: Optional[str]
@@ -212,29 +212,29 @@ class HASSEMSOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
             coordinator = entry_data.get("coordinator")
         if coordinator is None:
             return self.async_abort(reason="not_ready")
-        helpers = coordinator._helpers  # type: ignore[attr-defined]
-        helper_options = {
-            slug: helper.get("name", slug)
-            for slug, helper in sorted(helpers.items(), key=lambda item: item[1].get("name") or item[0])
+        entities = coordinator._entities  # type: ignore[attr-defined]
+        entity_options = {
+            slug: entity.get("name", slug)
+            for slug, entity in sorted(entities.items(), key=lambda item: item[1].get("name") or item[0])
         }
         if user_input is not None:
-            selected = set(user_input[CONF_INCLUDED_HELPERS])
-            existing_ignored = set(self.config_entry.options.get(CONF_IGNORED_HELPERS, []))
-            ignored = (set(helper_options) - selected) | (existing_ignored - set(helper_options))
+            selected = set(user_input[CONF_INCLUDED_ENTITIES])
+            existing_ignored = set(self.config_entry.options.get(CONF_IGNORED_ENTITIES, []))
+            ignored = (set(entity_options) - selected) | (existing_ignored - set(entity_options))
             return self.async_create_entry(
                 title="Options",
                 data={
-                    CONF_INCLUDED_HELPERS: sorted(selected),
-                    CONF_IGNORED_HELPERS: sorted(ignored),
+                    CONF_INCLUDED_ENTITIES: sorted(selected),
+                    CONF_IGNORED_ENTITIES: sorted(ignored),
                 },
             )
-        default_included = self.config_entry.options.get(CONF_INCLUDED_HELPERS, list(helper_options))
+        default_included = self.config_entry.options.get(CONF_INCLUDED_ENTITIES, list(entity_options))
         schema = vol.Schema(
             {
                 vol.Required(
-                    CONF_INCLUDED_HELPERS,
+                    CONF_INCLUDED_ENTITIES,
                     default=default_included,
-                ): cv.multi_select(helper_options)
+                ): cv.multi_select(entity_options)
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

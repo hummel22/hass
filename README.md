@@ -5,7 +5,7 @@ smarter home. It is organized around three services plus a set of blueprints for
 
 - **`services/hass_helper`** – A FastAPI web app that syncs metadata from Home Assistant, lets you
   manage domain allow/deny lists, and persists entity information for other tooling.
-- **`services/hassems`** – The Home Assistant Entity Management System used to curate helpers and
+- **`services/hassems`** – The Home Assistant Entity Management System used to curate entities and
   publish MQTT discovery payloads with a bundled management UI.
 - **`custom_components/hassems/`** – The Home Assistant integration code used with HACS. Installation
   and configuration details now live alongside the service instead of in a separate folder; the legacy

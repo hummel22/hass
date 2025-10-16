@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from .models import HelperType, InputHelper, coerce_helper_value
+from .models import EntityKind, ManagedEntity, coerce_entity_value
 
 
 class HomeAssistantClient:
@@ -36,21 +36,21 @@ class HomeAssistantClient:
         response.raise_for_status()
         return response.json()
 
-    async def set_helper_value(self, helper: InputHelper, value: Any) -> Dict[str, Any]:
-        """Set the value of a Home Assistant input helper."""
+    async def set_entity_value(self, entity: ManagedEntity, value: Any) -> Dict[str, Any]:
+        """Set the value of a Home Assistant input entity."""
 
-        coerced_value = coerce_helper_value(helper.type, value, helper.options)
-        domain = helper.type.value
+        coerced_value = coerce_entity_value(entity.type, value, entity.options)
+        domain = entity.type.value
 
-        if helper.type == HelperType.INPUT_BOOLEAN:
+        if entity.type == EntityKind.INPUT_BOOLEAN:
             service = "turn_on" if coerced_value else "turn_off"
-            payload: Dict[str, Any] = {"entity_id": helper.entity_id}
-        elif helper.type == HelperType.INPUT_SELECT:
+            payload: Dict[str, Any] = {"entity_id": entity.entity_id}
+        elif entity.type == EntityKind.INPUT_SELECT:
             service = "select_option"
-            payload = {"entity_id": helper.entity_id, "option": coerced_value}
+            payload = {"entity_id": entity.entity_id, "option": coerced_value}
         else:  # input_text or input_number
             service = "set_value"
-            payload = {"entity_id": helper.entity_id, "value": coerced_value}
+            payload = {"entity_id": entity.entity_id, "value": coerced_value}
 
         response = await self._client.post(f"/api/services/{domain}/{service}", json=payload)
         response.raise_for_status()

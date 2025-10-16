@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from paho.mqtt import client as mqtt_client
 
-from .models import HelperType, InputHelper, InputValue, MQTTConfig
+from .models import EntityKind, ManagedEntity, InputValue, MQTTConfig
 
 
 class MQTTError(RuntimeError):
@@ -97,12 +97,12 @@ def verify_connection(config: MQTTConfig, *, timeout: float = 5.0) -> None:
     )
 
 
-def _state_topic(_: MQTTConfig, helper: InputHelper) -> str:
-    return helper.state_topic
+def _state_topic(_: MQTTConfig, entity: ManagedEntity) -> str:
+    return entity.state_topic
 
 
-def _availability_topic(_: MQTTConfig, helper: InputHelper) -> str:
-    return helper.availability_topic
+def _availability_topic(_: MQTTConfig, entity: ManagedEntity) -> str:
+    return entity.availability_topic
 
 
 def _publish(
@@ -157,116 +157,116 @@ def _publish(
 
 def publish_value(
     config: MQTTConfig,
-    helper: InputHelper,
+    entity: ManagedEntity,
     value: InputValue,
     measured_at: datetime,
     *,
     timeout: float = 5.0,
 ) -> None:
-    """Publish an updated helper value to the configured MQTT topic."""
+    """Publish an updated entity value to the configured MQTT topic."""
 
     measured_iso = measured_at.astimezone(timezone.utc).isoformat()
     payload = json.dumps(
         {
-            "entity_id": helper.entity_id,
+            "entity_id": entity.entity_id,
             "value": value,
             "measured_at": measured_iso,
-            "device_class": helper.device_class,
-            "unit_of_measurement": helper.unit_of_measurement,
-            "helper_type": helper.type.value,
+            "device_class": entity.device_class,
+            "unit_of_measurement": entity.unit_of_measurement,
+            "entity_kind": entity.type.value,
         },
         default=str,
     )
 
-    topic = _state_topic(config, helper)
+    topic = _state_topic(config, entity)
     _publish(config, topic, payload, retain=False, timeout=timeout)
 
 
 def _discovery_topic(
-    config: MQTTConfig, helper: InputHelper, discovery_prefix: Optional[str] = None
+    config: MQTTConfig, entity: ManagedEntity, discovery_prefix: Optional[str] = None
 ) -> str:
     prefix = (discovery_prefix or config.discovery_prefix or DEFAULT_DISCOVERY_PREFIX).strip("/")
     if not prefix:
         prefix = DEFAULT_DISCOVERY_PREFIX
-    parts = [prefix, helper.component]
-    if helper.node_id:
-        parts.append(helper.node_id)
-    parts.append(helper.object_id)
+    parts = [prefix, entity.component]
+    if entity.node_id:
+        parts.append(entity.node_id)
+    parts.append(entity.object_id)
     parts.append("config")
     return "/".join(parts)
 
 
-def _value_template(helper: InputHelper) -> str:
-    if helper.type == HelperType.INPUT_NUMBER:
+def _value_template(entity: ManagedEntity) -> str:
+    if entity.type == EntityKind.INPUT_NUMBER:
         return "{{ value_json.value | float }}"
-    if helper.type == HelperType.INPUT_BOOLEAN:
+    if entity.type == EntityKind.INPUT_BOOLEAN:
         return "{{ value_json.value | lower }}"
     return "{{ value_json.value }}"
 
 
-def _state_class(helper: InputHelper) -> Optional[str]:
-    if helper.type == HelperType.INPUT_NUMBER:
+def _state_class(entity: ManagedEntity) -> Optional[str]:
+    if entity.type == EntityKind.INPUT_NUMBER:
         return "measurement"
     return None
 
 
 def publish_discovery_config(
     config: MQTTConfig,
-    helper: InputHelper,
+    entity: ManagedEntity,
     *,
     discovery_prefix: Optional[str] = None,
     timeout: float = 5.0,
 ) -> None:
     """Publish a retained MQTT discovery payload for Home Assistant."""
 
-    state_topic = _state_topic(config, helper)
-    availability_topic = _availability_topic(config, helper)
-    default_identifier = f"{helper.node_id or 'hassems'}:{helper.unique_id}"
-    device_identifiers = helper.device_identifiers or [default_identifier]
+    state_topic = _state_topic(config, entity)
+    availability_topic = _availability_topic(config, entity)
+    default_identifier = f"{entity.node_id or 'hassems'}:{entity.unique_id}"
+    device_identifiers = entity.device_identifiers or [default_identifier]
     device: dict[str, Any] = {
         "identifiers": device_identifiers,
-        "name": helper.device_name,
+        "name": entity.device_name,
     }
-    if helper.device_manufacturer:
-        device["manufacturer"] = helper.device_manufacturer
-    if helper.device_model:
-        device["model"] = helper.device_model
-    if helper.device_sw_version:
-        device["sw_version"] = helper.device_sw_version
+    if entity.device_manufacturer:
+        device["manufacturer"] = entity.device_manufacturer
+    if entity.device_model:
+        device["model"] = entity.device_model
+    if entity.device_sw_version:
+        device["sw_version"] = entity.device_sw_version
 
     payload: dict[str, Any] = {
-        "name": helper.name,
-        "unique_id": helper.unique_id,
-        "object_id": helper.object_id,
+        "name": entity.name,
+        "unique_id": entity.unique_id,
+        "object_id": entity.object_id,
         "state_topic": state_topic,
         "availability_topic": availability_topic,
         "payload_available": "online",
         "payload_not_available": "offline",
-        "force_update": helper.force_update,
-        "value_template": _value_template(helper),
+        "force_update": entity.force_update,
+        "value_template": _value_template(entity),
         "json_attributes_topic": state_topic,
         "json_attributes_template": "{{ {'measured_at': value_json.measured_at} | tojson }}",
         "device": device,
     }
 
-    if helper.device_class:
-        payload["device_class"] = helper.device_class
-    if helper.unit_of_measurement:
-        payload["unit_of_measurement"] = helper.unit_of_measurement
+    if entity.device_class:
+        payload["device_class"] = entity.device_class
+    if entity.unit_of_measurement:
+        payload["unit_of_measurement"] = entity.unit_of_measurement
 
-    state_class = _state_class(helper) or helper.state_class
+    state_class = _state_class(entity) or entity.state_class
     if state_class:
         payload["state_class"] = state_class
-    if helper.icon:
-        payload["icon"] = helper.icon
+    if entity.icon:
+        payload["icon"] = entity.icon
 
-    topic = _discovery_topic(config, helper, discovery_prefix)
+    topic = _discovery_topic(config, entity, discovery_prefix)
     logger.info(
         "Publishing MQTT discovery payload",
         extra={
             "mqtt_topic": topic,
             "mqtt_state_topic": state_topic,
-            "mqtt_component": helper.component,
+            "mqtt_component": entity.component,
             "mqtt_device_class": payload.get("device_class"),
             "mqtt_unit": payload.get("unit_of_measurement"),
         },
@@ -276,19 +276,19 @@ def publish_discovery_config(
 
 def publish_availability(
     config: MQTTConfig,
-    helper: InputHelper,
+    entity: ManagedEntity,
     available: bool,
     *,
     timeout: float = 5.0,
 ) -> None:
-    topic = _availability_topic(config, helper)
+    topic = _availability_topic(config, entity)
     payload = "online" if available else "offline"
     logger.info(
         "Publishing MQTT availability",
         extra={
             "mqtt_topic": topic,
             "mqtt_payload": payload,
-            "mqtt_helper_slug": helper.slug,
+            "mqtt_entity_slug": entity.slug,
         },
     )
     _publish(config, topic, payload, retain=True, timeout=timeout)
@@ -296,19 +296,19 @@ def publish_availability(
 
 def clear_discovery_config(
     config: MQTTConfig,
-    helper: InputHelper,
+    entity: ManagedEntity,
     *,
     discovery_prefix: Optional[str] = None,
     timeout: float = 5.0,
 ) -> None:
-    """Remove the retained MQTT discovery payload for a helper."""
+    """Remove the retained MQTT discovery payload for a entity."""
 
-    topic = _discovery_topic(config, helper, discovery_prefix)
+    topic = _discovery_topic(config, entity, discovery_prefix)
     logger.info(
         "Clearing MQTT discovery payload",
         extra={
             "mqtt_topic": topic,
-            "mqtt_helper_slug": helper.slug,
+            "mqtt_entity_slug": entity.slug,
         },
     )
     _publish(config, topic, "", retain=True, timeout=timeout)

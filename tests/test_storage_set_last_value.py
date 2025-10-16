@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from services.hassems.models import EntityTransportType, HelperType
-from services.hassems.storage import InputHelperStore
+from services.hassems.models import EntityTransportType, EntityKind
+from services.hassems.storage import ManagedEntityStore
 
 
-def _create_store_with_helper(tmp_path):
+def _create_store_with_entity(tmp_path):
     db_path = tmp_path / "hassems.sqlite3"
-    store = InputHelperStore(db_path)
+    store = ManagedEntityStore(db_path)
 
     slug = "test_height"
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -17,8 +17,8 @@ def _create_store_with_helper(tmp_path):
     with store._connection() as conn:  # type: ignore[attr-defined]
         conn.execute(
             """
-            INSERT INTO helpers (
-                slug, name, entity_id, helper_type, entity_type, description, default_value,
+            INSERT INTO entities (
+                slug, name, entity_id, entity_kind, entity_type, description, default_value,
                 options, last_value, last_measured_at, created_at, updated_at,
                 device_class, unit_of_measurement, component, unique_id, object_id,
                 node_id, state_topic, availability_topic, icon, state_class,
@@ -33,7 +33,7 @@ def _create_store_with_helper(tmp_path):
                 slug,
                 "Test Height",
                 "input_number.test_height",
-                HelperType.INPUT_NUMBER.value,
+                EntityKind.INPUT_NUMBER.value,
                 EntityTransportType.HASSEMS.value,
                 None,
                 None,
@@ -72,49 +72,49 @@ def _create_store_with_helper(tmp_path):
             now_iso,
         )
 
-    record = store.get_helper(slug)
+    record = store.get_entity(slug)
     assert record is not None
-    return store, record.helper
+    return store, record.entity
 
 
 def test_set_last_value_does_not_overwrite_with_older_measurements(tmp_path):
-    store, helper = _create_store_with_helper(tmp_path)
+    store, entity = _create_store_with_entity(tmp_path)
 
     recent_measurement = datetime.now(timezone.utc)
-    store.set_last_value(helper.slug, 12, measured_at=recent_measurement)
+    store.set_last_value(entity.slug, 12, measured_at=recent_measurement)
 
     older_measurement = recent_measurement - timedelta(days=4)
-    store.set_last_value(helper.slug, 5, measured_at=older_measurement)
+    store.set_last_value(entity.slug, 5, measured_at=older_measurement)
 
-    updated_record = store.get_helper(helper.slug)
+    updated_record = store.get_entity(entity.slug)
     assert updated_record is not None
-    updated_helper = updated_record.helper
+    updated_entity = updated_record.entity
 
-    assert updated_helper.last_value == 12
-    assert updated_helper.last_measured_at == recent_measurement
+    assert updated_entity.last_value == 12
+    assert updated_entity.last_measured_at == recent_measurement
 
-    history = store.list_history(helper.slug)
+    history = store.list_history(entity.slug)
     assert [point.value for point in history] == [5, 12]
     assert [point.historic for point in history] == [False, False]
 
 
 def test_set_last_value_marks_historic_without_overwriting_recent(tmp_path):
-    store, helper = _create_store_with_helper(tmp_path)
+    store, entity = _create_store_with_entity(tmp_path)
 
     recent_measurement = datetime.now(timezone.utc)
-    store.set_last_value(helper.slug, 42, measured_at=recent_measurement)
+    store.set_last_value(entity.slug, 42, measured_at=recent_measurement)
 
     historic_measurement = recent_measurement - timedelta(days=30)
-    store.set_last_value(helper.slug, 7, measured_at=historic_measurement)
+    store.set_last_value(entity.slug, 7, measured_at=historic_measurement)
 
-    updated_record = store.get_helper(helper.slug)
+    updated_record = store.get_entity(entity.slug)
     assert updated_record is not None
-    updated_helper = updated_record.helper
+    updated_entity = updated_record.entity
 
-    assert updated_helper.last_value == 42
-    assert updated_helper.last_measured_at == recent_measurement
+    assert updated_entity.last_value == 42
+    assert updated_entity.last_measured_at == recent_measurement
 
-    history = store.list_history(helper.slug)
+    history = store.list_history(entity.slug)
     assert len(history) == 2
     assert history[0].value == 7
     assert history[0].historic is True

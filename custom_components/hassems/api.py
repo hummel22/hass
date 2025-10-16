@@ -61,15 +61,15 @@ class HASSEMSClient:
     async def async_health(self) -> Dict[str, Any]:
         return await self._request("GET", "/health")
 
-    async def async_list_helpers(self) -> List[Dict[str, Any]]:
-        data = await self._request("GET", "/integrations/home-assistant/helpers")
+    async def async_list_entities(self) -> List[Dict[str, Any]]:
+        data = await self._request("GET", "/integrations/home-assistant/entities")
         return data if isinstance(data, list) else []
 
-    async def async_get_helper(self, slug: str) -> Dict[str, Any]:
-        return await self._request("GET", f"/integrations/home-assistant/helpers/{slug}")
+    async def async_get_entity(self, slug: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/integrations/home-assistant/entities/{slug}")
 
     async def async_get_history(self, slug: str, *, full: bool = False) -> List[Dict[str, Any]]:
-        path = f"/integrations/home-assistant/helpers/{slug}/history"
+        path = f"/integrations/home-assistant/entities/{slug}/history"
         if full:
             path += "?full=1"
         data = await self._request("GET", path)
@@ -79,7 +79,7 @@ class HASSEMSClient:
         payload = {"value": value}
         return await self._request(
             "POST",
-            f"/integrations/home-assistant/helpers/{slug}/set",
+            f"/integrations/home-assistant/entities/{slug}/set",
             json=payload,
         )
 
