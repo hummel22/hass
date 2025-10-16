@@ -390,8 +390,9 @@ async def set_helper_value(
     measured_at = request.measured_at or datetime.now(timezone.utc)
     if measured_at.tzinfo is None:
         measured_at = measured_at.replace(tzinfo=timezone.utc)
+    measured_at_utc = measured_at.astimezone(timezone.utc)
     cutoff = datetime.now(timezone.utc) - HISTORICAL_THRESHOLD
-    is_historic = measured_at.astimezone(timezone.utc) <= cutoff
+    is_historic = measured_at_utc <= cutoff
 
     if client is not None and record.helper.entity_type == EntityTransportType.MQTT:
         try:
@@ -416,7 +417,13 @@ async def set_helper_value(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     helper_after = store.set_last_value(slug, coerced, measured_at=measured_at)
-    if helper_after.entity_type == EntityTransportType.HASSEMS:
+    last_measured_after = (
+        helper_after.last_measured_at.astimezone(timezone.utc)
+        if helper_after.last_measured_at is not None
+        else None
+    )
+    should_notify = last_measured_after == measured_at_utc
+    if should_notify and helper_after.entity_type == EntityTransportType.HASSEMS:
         await notifier.helper_value(
             helper_after,
             value=coerced,

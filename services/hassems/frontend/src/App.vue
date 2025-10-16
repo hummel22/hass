@@ -1327,7 +1327,7 @@
 
     <dialog
       ref="historyDialog"
-      class="modal"
+      class="modal modal--wide"
       @cancel.prevent="closeHistoryDialog"
       @close="onHistoryDialogClose"
     >

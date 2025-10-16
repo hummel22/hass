@@ -1386,12 +1386,32 @@ class InputHelperStore:
         with self._lock:
             with self._connection() as conn:
                 helper_row = conn.execute(
-                    "SELECT history_cursor FROM helpers WHERE slug = ?",
+                    "SELECT history_cursor, last_measured_at FROM helpers WHERE slug = ?",
                     (slug,),
                 ).fetchone()
                 if helper_row is None:
                     raise KeyError(f"Helper '{slug}' not found.")
                 existing_cursor = helper_row["history_cursor"] if helper_row else None
+                existing_last_measured_raw = (
+                    helper_row["last_measured_at"] if helper_row else None
+                )
+                existing_last_measured: Optional[datetime] = None
+                if existing_last_measured_raw:
+                    try:
+                        existing_last_measured = datetime.fromisoformat(
+                            existing_last_measured_raw
+                        )
+                    except ValueError:
+                        existing_last_measured = None
+                    if existing_last_measured and existing_last_measured.tzinfo is None:
+                        existing_last_measured = existing_last_measured.replace(
+                            tzinfo=timezone.utc
+                        )
+                incoming_measured = measured_at.astimezone(timezone.utc)
+                should_update_last = (
+                    existing_last_measured is None
+                    or incoming_measured >= existing_last_measured.astimezone(timezone.utc)
+                )
                 if is_historical:
                     history_cursor_value = self._touch_history_cursor(
                         conn,
@@ -1405,16 +1425,26 @@ class InputHelperStore:
                         existing=existing_cursor,
                         timestamp=timestamp,
                     )
-                cursor = conn.execute(
-                    """
-                    UPDATE helpers
-                       SET last_value = ?,
-                           last_measured_at = ?,
-                           updated_at = ?
-                     WHERE slug = ?
-                    """,
-                    (serialized_value, measured_iso, timestamp, slug),
-                )
+                if should_update_last:
+                    cursor = conn.execute(
+                        """
+                        UPDATE helpers
+                           SET last_value = ?,
+                               last_measured_at = ?,
+                               updated_at = ?
+                         WHERE slug = ?
+                        """,
+                        (serialized_value, measured_iso, timestamp, slug),
+                    )
+                else:
+                    cursor = conn.execute(
+                        """
+                        UPDATE helpers
+                           SET updated_at = ?
+                         WHERE slug = ?
+                        """,
+                        (timestamp, slug),
+                    )
                 if cursor.rowcount == 0:
                     raise KeyError(f"Helper '{slug}' not found.")
                 conn.execute(
