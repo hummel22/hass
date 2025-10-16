@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 from collections import OrderedDict
@@ -10,6 +11,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from aiohttp import web
 from homeassistant import config_entries
 from homeassistant.components import recorder
+from homeassistant.components.recorder.db_schema import (
+    EventData,
+    Events,
+    EventTypes,
+    StateAttributes,
+    States,
+    StatesMeta,
+)
 from homeassistant.components.recorder.statistics import (
     StatisticData,
     StatisticMeanType,
@@ -17,6 +26,7 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     clear_statistics,
 )
+from homeassistant.components.recorder.util import session_scope
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
@@ -24,7 +34,7 @@ from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     EVENT_STATE_CHANGED,
 )
-from homeassistant.core import Context, Event, EventOrigin, HomeAssistant, State
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -53,6 +63,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 MAX_HISTORY_POINTS = 10000
+HISTORY_HORIZON_DAYS = 10
 
 
 class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
@@ -299,14 +310,17 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self._pending_discoveries.discard(slug)
 
         if event == EVENT_HELPER_VALUE:
-            measurement = (payload.get("data") or {}).get("measured_at")
-            value = (payload.get("data") or {}).get("value")
-            historic_flag = bool((payload.get("data") or {}).get("historic"))
-            cursor_override = (payload.get("data") or {}).get("historic_cursor")
+            data_payload = payload.get("data") or {}
+            measurement = data_payload.get("measured_at")
+            value = data_payload.get("value")
+            historic_flag = bool(data_payload.get("historic"))
+            cursor_override = data_payload.get("historic_cursor")
+            recorded_at = data_payload.get("recorded_at")
             history = self._history.setdefault(slug, [])
             history.append({
                 "value": value,
                 "measured_at": measurement,
+                "recorded_at": recorded_at,
                 "historic": historic_flag,
                 "historic_cursor": cursor_override or helper.get("history_cursor"),
                 "history_cursor": helper.get("history_cursor"),
@@ -445,8 +459,12 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if (icon := helper.get("icon")) is not None:
                 base_attributes["icon"] = icon
 
-        events: List[Event] = []
-        previous_state: State | None = None
+        entries_states_only: List[Dict[str, Any]] = []
+        processed_for_statistics = False
+
+        now_local = dt_util.now()
+        today_local = now_local.date()
+        historic_cutoff = dt_util.utcnow() - timedelta(days=HISTORY_HORIZON_DAYS)
 
         for item in sorted(
             measurements, key=lambda entry: entry.get("measured_at") or ""
@@ -458,6 +476,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if dt_value is None:
                 continue
             dt_value = dt_util.as_utc(dt_value)
+            measured_local = dt_util.as_local(dt_value)
+            measured_date = measured_local.date()
+
             state_value = item.get("value")
             state_str = "" if state_value is None else str(state_value)
 
@@ -470,38 +491,216 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if "historic" in item:
                 attributes["historic"] = bool(item.get("historic"))
 
-            context = Context()
-            new_state = State(
-                entity_id,
-                state_str,
-                attributes,
-                last_changed=dt_value,
-                last_updated=dt_value,
-                context=context,
+            recorded_at = item.get("recorded_at")
+            recorded_dt = None
+            if isinstance(recorded_at, str):
+                recorded_dt = dt_util.parse_datetime(recorded_at)
+                if recorded_dt is not None:
+                    recorded_dt = dt_util.as_utc(recorded_dt)
+            recorded_date = (
+                dt_util.as_local(recorded_dt).date() if recorded_dt is not None else None
             )
-            event = Event(
-                EVENT_STATE_CHANGED,
-                {
-                    ATTR_ENTITY_ID: entity_id,
-                    "old_state": previous_state,
-                    "new_state": new_state,
-                },
-                context=context,
-                origin=EventOrigin.remote,
-                time_fired_timestamp=dt_util.as_timestamp(dt_value),
-            )
-            events.append(event)
+
+            if (
+                recorded_date is not None
+                and recorded_date == measured_date
+                and measured_date == today_local
+            ):
+                recorded[measured_at] = None
+                while len(recorded) > 200:
+                    recorded.popitem(last=False)
+                continue
+
+            if dt_value >= historic_cutoff:
+                entries_states_only.append(
+                    {
+                        "timestamp": dt_value,
+                        "state": state_str,
+                        "attributes": attributes,
+                    }
+                )
+                processed_for_statistics = True
+            else:
+                processed_for_statistics = True
+
             recorded[measured_at] = None
             while len(recorded) > 200:
                 recorded.popitem(last=False)
-            previous_state = new_state
 
-        if not events:
+        if entries_states_only:
+            await self.hass.async_add_executor_job(
+                self._write_measurements_direct,
+                instance,
+                entity_id,
+                entries_states_only,
+                True,
+            )
+
+        if processed_for_statistics:
+            await self._async_update_statistics(slug)
+
+    def _write_measurements_direct(
+        self,
+        instance: recorder.Recorder,
+        entity_id: str,
+        entries: List[Dict[str, Any]],
+        states_only: bool = False,
+    ) -> None:
+        if not entries:
             return
 
-        for event in events:
-            instance._queue.put_nowait(event)
-        await self._async_update_statistics(slug)
+        session = instance.get_session()
+        with session_scope(session=session) as scoped_session:
+            if not states_only:
+                event_type = (
+                    scoped_session.query(EventTypes)
+                    .filter(EventTypes.event_type == EVENT_STATE_CHANGED)
+                    .one_or_none()
+                )
+                if event_type is None:
+                    event_type = EventTypes(event_type=EVENT_STATE_CHANGED)
+                    scoped_session.add(event_type)
+                    scoped_session.flush()
+            else:
+                event_type = None
+
+            states_meta = (
+                scoped_session.query(StatesMeta)
+                .filter(StatesMeta.entity_id == entity_id)
+                .one_or_none()
+            )
+            if states_meta is None:
+                states_meta = StatesMeta(entity_id=entity_id)
+                scoped_session.add(states_meta)
+                scoped_session.flush()
+
+            metadata_id = states_meta.metadata_id
+
+            last_state = (
+                scoped_session.query(States)
+                .filter(States.metadata_id == metadata_id)
+                .order_by(States.last_updated_ts.desc())
+                .limit(1)
+                .one_or_none()
+            )
+
+            if last_state is not None:
+                last_state_obj = last_state.to_native(validate_entity_id=False)
+            else:
+                last_state_obj = None
+
+            previous_state_dict: Dict[str, Any] | None = (
+                last_state_obj.as_dict() if last_state_obj is not None else None
+            )
+            previous_state_id = last_state.state_id if last_state is not None else None
+            previous_state_value = (
+                last_state_obj.state if last_state_obj is not None else None
+            )
+            if last_state is None:
+                previous_last_changed_ts: float | None = None
+            elif last_state.last_changed_ts is not None:
+                previous_last_changed_ts = last_state.last_changed_ts
+            else:
+                previous_last_changed_ts = last_state.last_updated_ts
+
+            for entry in entries:
+                timestamp: datetime = dt_util.as_utc(entry["timestamp"])
+                timestamp_ts = dt_util.utc_to_timestamp(timestamp)
+                state_str: str = entry["state"]
+                attributes: Dict[str, Any] = entry["attributes"]
+
+                if (
+                    previous_state_value is not None
+                    and previous_state_value == state_str
+                    and previous_last_changed_ts is not None
+                ):
+                    last_changed_ts = previous_last_changed_ts
+                else:
+                    last_changed_ts = timestamp_ts
+
+                last_changed_dt = dt_util.utc_from_timestamp(last_changed_ts)
+                new_state_dict = {
+                    "entity_id": entity_id,
+                    "state": state_str,
+                    "attributes": attributes,
+                    "last_changed": last_changed_dt.isoformat(),
+                    "last_updated": timestamp.isoformat(),
+                }
+
+                if not states_only and event_type is not None:
+                    event_data = {
+                        ATTR_ENTITY_ID: entity_id,
+                        "old_state": previous_state_dict,
+                        "new_state": new_state_dict,
+                    }
+
+                    event_data_row = EventData(
+                        hash=None,
+                        shared_data=json.dumps(
+                            event_data, sort_keys=True, default=str
+                        ),
+                    )
+                    scoped_session.add(event_data_row)
+                    scoped_session.flush()
+
+                    event_row = Events(
+                        event_type=None,
+                        event_data=None,
+                        origin=None,
+                        origin_idx=1,
+                        time_fired=timestamp,
+                        time_fired_ts=timestamp_ts,
+                        context_id=None,
+                        context_user_id=None,
+                        context_parent_id=None,
+                        data_id=event_data_row.data_id,
+                        context_id_bin=None,
+                        context_user_id_bin=None,
+                        context_parent_id_bin=None,
+                        event_type_id=event_type.event_type_id,
+                    )
+                    scoped_session.add(event_row)
+                    scoped_session.flush()
+                    event_id = event_row.event_id
+                else:
+                    event_id = None
+
+                attributes_row = StateAttributes(
+                    hash=None,
+                    shared_attrs=json.dumps(attributes, sort_keys=True, default=str),
+                )
+                scoped_session.add(attributes_row)
+                scoped_session.flush()
+
+                states_row = States(
+                    entity_id=entity_id,
+                    state=state_str,
+                    attributes=None,
+                    event_id=event_id,
+                    last_changed=None,
+                    last_changed_ts=None
+                    if last_changed_ts == timestamp_ts
+                    else last_changed_ts,
+                    last_updated=None,
+                    last_updated_ts=timestamp_ts,
+                    old_state_id=previous_state_id,
+                    attributes_id=attributes_row.attributes_id,
+                    context_id=None,
+                    context_user_id=None,
+                    context_parent_id=None,
+                    origin_idx=1,
+                    context_id_bin=None,
+                    context_user_id_bin=None,
+                    context_parent_id_bin=None,
+                    metadata_id=metadata_id,
+                )
+                scoped_session.add(states_row)
+                scoped_session.flush()
+
+                previous_state_dict = new_state_dict
+                previous_state_id = states_row.state_id
+                previous_state_value = state_str
+                previous_last_changed_ts = last_changed_ts
 
     async def _async_process_history_cursor(
         self,
@@ -582,6 +781,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             dedup[key] = {
                 "measured_at": key,
                 "value": item.get("value"),
+                "recorded_at": item.get("recorded_at"),
                 "historic": bool(item.get("historic")),
                 "historic_cursor": item.get("historic_cursor")
                 or item.get("history_cursor"),
