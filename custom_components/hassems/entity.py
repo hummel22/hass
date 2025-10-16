@@ -4,9 +4,9 @@ import logging
 from typing import Any, Dict, Optional
 
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.entities.device_registry import DeviceInfo
-from homeassistant.entities.dispatcher import async_dispatcher_connect
-from homeassistant.entities.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import HASSEMSCoordinator
 from .const import (
