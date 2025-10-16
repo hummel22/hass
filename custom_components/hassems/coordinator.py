@@ -491,21 +491,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if "historic" in item:
                 attributes["historic"] = bool(item.get("historic"))
 
-            recorded_at = item.get("recorded_at")
-            recorded_dt = None
-            if isinstance(recorded_at, str):
-                recorded_dt = dt_util.parse_datetime(recorded_at)
-                if recorded_dt is not None:
-                    recorded_dt = dt_util.as_utc(recorded_dt)
-            recorded_date = (
-                dt_util.as_local(recorded_dt).date() if recorded_dt is not None else None
-            )
-
-            if (
-                recorded_date is not None
-                and recorded_date == measured_date
-                and measured_date == today_local
-            ):
+            if measured_date == today_local:
                 recorded[measured_at] = None
                 while len(recorded) > 200:
                     recorded.popitem(last=False)
