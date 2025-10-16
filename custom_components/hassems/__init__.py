@@ -13,8 +13,8 @@ from homeassistant.helpers import aiohttp_client
 from .api import HASSEMSError, HASSEMSClient
 from .const import (
     CONF_BASE_URL,
-    CONF_INCLUDED_HELPERS,
-    CONF_IGNORED_HELPERS,
+    CONF_INCLUDED_ENTITIES,
+    CONF_IGNORED_ENTITIES,
     CONF_SUBSCRIPTION_ID,
     CONF_WEBHOOK_ID,
     DOMAIN,
@@ -39,12 +39,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     options = dict(entry.options)
-    included = set(options.get(CONF_INCLUDED_HELPERS, []))
-    ignored = set(options.get(CONF_IGNORED_HELPERS, []))
-    if not options.get(CONF_INCLUDED_HELPERS):
-        included = set(coordinator._helpers.keys()) - ignored  # type: ignore[attr-defined]
-        options[CONF_INCLUDED_HELPERS] = sorted(included)
-        options[CONF_IGNORED_HELPERS] = sorted(ignored)
+    included = set(options.get(CONF_INCLUDED_ENTITIES, []))
+    ignored = set(options.get(CONF_IGNORED_ENTITIES, []))
+    if not options.get(CONF_INCLUDED_ENTITIES):
+        included = set(coordinator._entities.keys()) - ignored  # type: ignore[attr-defined]
+        options[CONF_INCLUDED_ENTITIES] = sorted(included)
+        options[CONF_IGNORED_ENTITIES] = sorted(ignored)
         hass.config_entries.async_update_entry(entry, options=options)
     coordinator.update_filters(included=included, ignored=ignored)
     coordinator.reapply_filters()
@@ -136,8 +136,8 @@ def _build_connection_payload(
     coordinator: HASSEMSCoordinator,
 ) -> Dict[str, Any]:
     options = entry.options or {}
-    included = sorted(options.get(CONF_INCLUDED_HELPERS, []))
-    ignored = sorted(options.get(CONF_IGNORED_HELPERS, []))
+    included = sorted(options.get(CONF_INCLUDED_ENTITIES, []))
+    ignored = sorted(options.get(CONF_IGNORED_ENTITIES, []))
     unit_system = getattr(getattr(hass.config, "units", None), "name", None)
     metadata: Dict[str, Any] = {
         "base_url": entry.data.get(CONF_BASE_URL),
@@ -166,9 +166,9 @@ def _build_connection_payload(
     payload: Dict[str, Any] = {
         "entry_id": entry.entry_id,
         "title": entry.title,
-        "included_helpers": included,
-        "ignored_helpers": ignored,
-        "helper_count": len(coordinator.data or {}),
+        "included_entities": included,
+        "ignored_entities": ignored,
+        "entity_count": len(coordinator.data or {}),
     }
     if metadata:
         payload["metadata"] = metadata

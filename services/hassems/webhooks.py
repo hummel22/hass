@@ -7,30 +7,30 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from .models import InputHelper
-from .storage import InputHelperStore, WebhookTarget
+from .models import ManagedEntity
+from .storage import ManagedEntityStore, WebhookTarget
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class WebhookNotifier:
-    """Dispatches helper events to subscribed Home Assistant webhooks."""
+    """Dispatches entity events to subscribed Home Assistant webhooks."""
 
-    def __init__(self, store: InputHelperStore) -> None:
+    def __init__(self, store: ManagedEntityStore) -> None:
         self._store = store
 
-    async def helper_created(self, helper: InputHelper) -> None:
-        await self._broadcast("helper_created", helper)
+    async def entity_created(self, entity: ManagedEntity) -> None:
+        await self._broadcast("entity_created", entity)
 
-    async def helper_updated(self, helper: InputHelper) -> None:
-        await self._broadcast("helper_updated", helper)
+    async def entity_updated(self, entity: ManagedEntity) -> None:
+        await self._broadcast("entity_updated", entity)
 
-    async def helper_deleted(self, helper: InputHelper) -> None:
-        await self._broadcast("helper_deleted", helper)
+    async def entity_deleted(self, entity: ManagedEntity) -> None:
+        await self._broadcast("entity_deleted", entity)
 
-    async def helper_value(
+    async def entity_value(
         self,
-        helper: InputHelper,
+        entity: ManagedEntity,
         *,
         value: Any,
         measured_at: datetime,
@@ -38,8 +38,8 @@ class WebhookNotifier:
         historic_cursor: Optional[str],
     ) -> None:
         await self._broadcast(
-            "helper_value",
-            helper,
+            "entity_value",
+            entity,
             data={
                 "value": value,
                 "measured_at": measured_at.astimezone(timezone.utc).isoformat(),
@@ -51,7 +51,7 @@ class WebhookNotifier:
     async def _broadcast(
         self,
         event: str,
-        helper: InputHelper,
+        entity: ManagedEntity,
         data: Optional[Dict[str, Any]] = None,
     ) -> None:
         targets = self._store.list_webhook_targets()
@@ -60,7 +60,7 @@ class WebhookNotifier:
 
         payload = {
             "event": event,
-            "helper": helper.model_dump(mode="json"),
+            "entity": entity.model_dump(mode="json"),
             "data": data or {},
             "subscription_ids": [target.id for target in targets],
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -68,7 +68,7 @@ class WebhookNotifier:
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
             coroutines = [
-                self._post_payload(client, target, payload, event, helper.slug)
+                self._post_payload(client, target, payload, event, entity.slug)
                 for target in targets
             ]
             results = await asyncio.gather(*coroutines, return_exceptions=True)
@@ -93,7 +93,7 @@ class WebhookNotifier:
         headers = {
             "Content-Type": "application/json",
             "X-HASSEMS-Event": event,
-            "X-HASSEMS-Helper": slug,
+            "X-HASSEMS-Entity": slug,
             "X-HASSEMS-Token": target.token,
             "X-HASSEMS-Subscription": str(target.id),
         }

@@ -20,7 +20,7 @@ class EntityTransportType(str, Enum):
     HASSEMS = "hassems"
 
 
-class HelperType(str, Enum):
+class EntityKind(str, Enum):
     INPUT_TEXT = "input_text"
     INPUT_NUMBER = "input_number"
     INPUT_BOOLEAN = "input_boolean"
@@ -47,7 +47,7 @@ def slugify(value: str) -> str:
     slug = _slug_pattern.sub("-", slug)
     slug = re.sub(r"-+", "-", slug)
     slug = slug.strip("-")
-    return slug or "helper"
+    return slug or "entity"
 
 
 def slugify_identifier(value: str) -> str:
@@ -55,7 +55,7 @@ def slugify_identifier(value: str) -> str:
     slug = _identifier_pattern.sub("_", slug)
     slug = re.sub(r"_+", "_", slug)
     slug = slug.strip("_")
-    return slug or "helper"
+    return slug or "entity"
 
 
 def clean_topic_segment(value: Optional[str], *, allow_empty: bool = False) -> Optional[str]:
@@ -85,21 +85,21 @@ def clean_topic_path(value: str) -> str:
     return cleaned
 
 
-def _validate_entity_id(helper_type: HelperType, entity_id: str) -> str:
+def _validate_entity_id(entity_kind: EntityKind, entity_id: str) -> str:
     if not _entity_pattern.match(entity_id):
         raise ValueError("Entity ID must look like 'domain.object_id'.")
-    if not entity_id.startswith(f"{helper_type.value}."):
+    if not entity_id.startswith(f"{entity_kind.value}."):
         raise ValueError(
-            f"Entity ID '{entity_id}' must start with '{helper_type.value}.' for helper type {helper_type.value}."
+            f"Entity ID '{entity_id}' must start with '{entity_kind.value}.' for entity kind {entity_kind.value}."
         )
     return entity_id
 
 
-def coerce_helper_value(helper_type: HelperType, value: Any, options: Optional[List[str]] = None) -> InputValue:
+def coerce_entity_value(entity_kind: EntityKind, value: Any, options: Optional[List[str]] = None) -> InputValue:
     if value is None:
-        raise ValueError("Value cannot be null for helper updates.")
+        raise ValueError("Value cannot be null for entity updates.")
 
-    if helper_type == HelperType.INPUT_BOOLEAN:
+    if entity_kind == EntityKind.INPUT_BOOLEAN:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -108,17 +108,17 @@ def coerce_helper_value(helper_type: HelperType, value: Any, options: Optional[L
                 return True
             if lower in {"false", "off", "0", "no"}:
                 return False
-        raise ValueError("Boolean helpers require a true/false value.")
+        raise ValueError("Boolean entities require a true/false value.")
 
-    if helper_type == HelperType.INPUT_NUMBER:
+    if entity_kind == EntityKind.INPUT_NUMBER:
         try:
             return float(value)
         except (TypeError, ValueError) as exc:  # noqa: PERF203
-            raise ValueError("Number helpers require a numeric value.") from exc
+            raise ValueError("Number entities require a numeric value.") from exc
 
-    if helper_type == HelperType.INPUT_SELECT:
+    if entity_kind == EntityKind.INPUT_SELECT:
         if not options:
-            raise ValueError("Select helpers must define allowed options.")
+            raise ValueError("Select entities must define allowed options.")
         if value not in options:
             raise ValueError(f"Value '{value}' is not one of the allowed options: {options}.")
         return str(value)
@@ -127,10 +127,10 @@ def coerce_helper_value(helper_type: HelperType, value: Any, options: Optional[L
     return str(value)
 
 
-class InputHelperBase(BaseModel):
+class ManagedEntityBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     entity_id: str
-    type: HelperType
+    type: EntityKind
     entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = Field(default=None, max_length=512)
     default_value: Optional[InputValue] = None
@@ -160,10 +160,10 @@ class InputHelperBase(BaseModel):
     @field_validator("entity_id")
     @classmethod
     def ensure_entity_matches_type(cls, v: str, info: Field.ValidationInfo) -> str:  # type: ignore[name-defined]
-        helper_type = info.data.get("type")
-        if helper_type is None:
+        entity_kind = info.data.get("type")
+        if entity_kind is None:
             return v
-        return _validate_entity_id(helper_type, v)
+        return _validate_entity_id(entity_kind, v)
 
     @field_validator("component")
     @classmethod
@@ -254,25 +254,25 @@ class InputHelperBase(BaseModel):
     def clean_options(cls, v: Optional[List[str]], info: Field.ValidationInfo) -> Optional[List[str]]:  # type: ignore[name-defined]
         if v is None:
             return None
-        helper_type = info.data.get("type")
-        if helper_type != HelperType.INPUT_SELECT:
+        entity_kind = info.data.get("type")
+        if entity_kind != EntityKind.INPUT_SELECT:
             return None
         cleaned = [str(item) for item in v if str(item).strip()]
         if not cleaned:
-            raise ValueError("Select helpers must have at least one option.")
+            raise ValueError("Select entities must have at least one option.")
         return cleaned
 
     @field_validator("default_value")
     @classmethod
     def validate_default_value(cls, v: Optional[InputValue], info: Field.ValidationInfo) -> Optional[InputValue]:  # type: ignore[name-defined]
-        helper_type = info.data.get("type")
+        entity_kind = info.data.get("type")
         options = info.data.get("options")
-        if v is None or helper_type is None:
+        if v is None or entity_kind is None:
             return v
-        return coerce_helper_value(helper_type, v, options)
+        return coerce_entity_value(entity_kind, v, options)
 
     @model_validator(mode="after")
-    def enforce_transport_requirements(self) -> "InputHelperBase":
+    def enforce_transport_requirements(self) -> "ManagedEntityBase":
         try:
             entity_type = (
                 self.entity_type
@@ -284,9 +284,9 @@ class InputHelperBase(BaseModel):
 
         if entity_type == EntityTransportType.MQTT:
             if not self.state_topic:
-                raise ValueError("MQTT helpers require a state topic.")
+                raise ValueError("MQTT entities require a state topic.")
             if not self.availability_topic:
-                raise ValueError("MQTT helpers require an availability topic.")
+                raise ValueError("MQTT entities require an availability topic.")
             self.node_id = self.node_id or "hassems"
             self.force_update = bool(self.force_update)
             if not self.device_manufacturer:
@@ -318,7 +318,7 @@ class InputHelperBase(BaseModel):
         return self
 
 
-class InputHelperCreate(InputHelperBase):
+class ManagedEntityCreate(ManagedEntityBase):
     @model_validator(mode="before")
     @classmethod
     def autofill_identifiers(cls, values: Any) -> Any:
@@ -363,18 +363,18 @@ class InputHelperCreate(InputHelperBase):
         if object_id:
             data["object_id"] = object_id
 
-        helper_type = data.get("type")
-        if isinstance(helper_type, HelperType):
-            helper_domain = helper_type.value
+        entity_kind = data.get("type")
+        if isinstance(entity_kind, EntityKind):
+            entity_domain = entity_kind.value
         else:
-            helper_domain = str(helper_type).strip() if helper_type else ""
+            entity_domain = str(entity_kind).strip() if entity_kind else ""
 
-        if helper_domain:
+        if entity_domain:
             device_slug = slugify_identifier(raw_device_name)
             slug_parts = [part for part in (device_slug, name_slug) if part]
             if slug_parts:
                 candidate_slug = "_".join(slug_parts)
-                entity_id = f"{helper_domain}.{candidate_slug}"
+                entity_id = f"{entity_domain}.{candidate_slug}"
                 existing = str(data.get("entity_id") or "").strip()
                 if not existing:
                     data["entity_id"] = entity_id
@@ -426,7 +426,7 @@ class InputHelperCreate(InputHelperBase):
         return data
 
 
-class InputHelperUpdate(BaseModel):
+class ManagedEntityUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     entity_id: Optional[str] = None
     description: Optional[str] = Field(default=None, max_length=512)
@@ -459,10 +459,10 @@ class InputHelperUpdate(BaseModel):
     def validate_entity_id(cls, v: Optional[str], info: Field.ValidationInfo) -> Optional[str]:  # type: ignore[name-defined]
         if v is None:
             return None
-        helper_type = info.data.get("type")
-        if helper_type is None:
+        entity_kind = info.data.get("type")
+        if entity_kind is None:
             return v
-        return _validate_entity_id(helper_type, v)
+        return _validate_entity_id(entity_kind, v)
 
     @field_validator("component")
     @classmethod
@@ -547,11 +547,11 @@ class InputHelperUpdate(BaseModel):
         return cleaned
 
 
-class InputHelper(BaseModel):
+class ManagedEntity(BaseModel):
     slug: str
     name: str
     entity_id: str
-    type: HelperType
+    type: EntityKind
     entity_type: EntityTransportType = EntityTransportType.MQTT
     description: Optional[str] = None
     default_value: Optional[InputValue] = None
@@ -731,9 +731,9 @@ class IntegrationConnectionOwner(BaseModel):
 class IntegrationConnectionBase(BaseModel):
     entry_id: str = Field(..., min_length=1, max_length=120)
     title: Optional[str] = Field(default=None, max_length=255)
-    helper_count: int = Field(default=0, ge=0)
-    included_helpers: Optional[List[str]] = None
-    ignored_helpers: Optional[List[str]] = None
+    entity_count: int = Field(default=0, ge=0)
+    included_entities: Optional[List[str]] = None
+    ignored_entities: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
 
     @field_validator("entry_id")
@@ -752,9 +752,9 @@ class IntegrationConnectionBase(BaseModel):
         cleaned = value.strip()
         return cleaned or None
 
-    @field_validator("included_helpers", "ignored_helpers")
+    @field_validator("included_entities", "ignored_entities")
     @classmethod
-    def normalise_helper_list(
+    def normalise_entity_list(
         cls, value: Optional[List[str]]
     ) -> Optional[List[str]]:
         if not value:
@@ -790,8 +790,8 @@ class IntegrationConnectionSummary(IntegrationConnectionDetail):
 
 
 class IntegrationConnectionHistoryItem(BaseModel):
-    helper_slug: str
-    helper_name: str
+    entity_slug: str
+    entity_name: str
     value: Any
     measured_at: Optional[datetime] = None
     historic: bool = False
@@ -801,11 +801,11 @@ class IntegrationConnectionHistoryItem(BaseModel):
 
 
 @dataclass
-class InputHelperRecord:
-    helper: InputHelper
+class ManagedEntityRecord:
+    entity: ManagedEntity
 
     @classmethod
-    def create(cls, payload: InputHelperCreate) -> "InputHelperRecord":
+    def create(cls, payload: ManagedEntityCreate) -> "ManagedEntityRecord":
         now = datetime.now(timezone.utc)
         is_mqtt = payload.entity_type == EntityTransportType.MQTT
         node_id = payload.node_id or ("hassems" if is_mqtt else None)
@@ -839,7 +839,7 @@ class InputHelperRecord:
         else:
             ha_enabled = True
 
-        helper = InputHelper(
+        entity = ManagedEntity(
             slug=slugify(payload.unique_id),
             name=payload.name,
             entity_id=payload.entity_id,
@@ -874,31 +874,31 @@ class InputHelperRecord:
             history_changed_at=None,
             ha_enabled=ha_enabled,
         )
-        return cls(helper=helper)
+        return cls(entity=entity)
 
-    def update(self, payload: InputHelperUpdate) -> None:
-        data = self.helper.model_dump()
-        helper_type = self.helper.type
-        options = self.helper.options
+    def update(self, payload: ManagedEntityUpdate) -> None:
+        data = self.entity.model_dump()
+        entity_kind = self.entity.type
+        options = self.entity.options
         update_data = payload.model_dump(exclude_unset=True)
-        data["entity_type"] = self.helper.entity_type
-        is_mqtt = self.helper.entity_type == EntityTransportType.MQTT
+        data["entity_type"] = self.entity.entity_type
+        is_mqtt = self.entity.entity_type == EntityTransportType.MQTT
 
         if "options" in update_data:
-            if helper_type != HelperType.INPUT_SELECT:
-                raise ValueError("Only select helpers accept options.")
+            if entity_kind != EntityKind.INPUT_SELECT:
+                raise ValueError("Only select entities accept options.")
             cleaned = [str(item) for item in (payload.options or []) if str(item).strip()]
             if not cleaned:
-                raise ValueError("Select helpers must provide at least one option.")
+                raise ValueError("Select entities must provide at least one option.")
             options = cleaned
 
-        if helper_type == HelperType.INPUT_SELECT and options is None:
-            raise ValueError("Select helpers must define options.")
+        if entity_kind == EntityKind.INPUT_SELECT and options is None:
+            raise ValueError("Select entities must define options.")
 
         if "name" in update_data:
             data["name"] = payload.name
         if "entity_id" in update_data:
-            data["entity_id"] = _validate_entity_id(helper_type, payload.entity_id)
+            data["entity_id"] = _validate_entity_id(entity_kind, payload.entity_id)
         if "description" in update_data:
             data["description"] = payload.description
         if "default_value" in update_data:
@@ -906,7 +906,7 @@ class InputHelperRecord:
             if default_value is None:
                 data["default_value"] = None
             else:
-                data["default_value"] = coerce_helper_value(helper_type, default_value, options)
+                data["default_value"] = coerce_entity_value(entity_kind, default_value, options)
         if "device_class" in update_data:
             data["device_class"] = payload.device_class
         if "unit_of_measurement" in update_data:
@@ -948,19 +948,19 @@ class InputHelperRecord:
             else:
                 data["device_identifiers"] = data.get("device_identifiers", [])
         if "statistics_mode" in update_data:
-            if self.helper.entity_type != EntityTransportType.HASSEMS:
-                raise ValueError("Statistics mode is only available for HASSEMS helpers.")
+            if self.entity.entity_type != EntityTransportType.HASSEMS:
+                raise ValueError("Statistics mode is only available for HASSEMS entities.")
             mode = payload.statistics_mode or HASSEMSStatisticsMode.LINEAR
             data["statistics_mode"] = mode
         if "ha_enabled" in update_data:
             requested = update_data.get("ha_enabled")
-            if self.helper.entity_type != EntityTransportType.HASSEMS:
+            if self.entity.entity_type != EntityTransportType.HASSEMS:
                 data["ha_enabled"] = True
             elif requested is None:
                 data["ha_enabled"] = data.get("ha_enabled", True)
             else:
                 data["ha_enabled"] = bool(requested)
-        if helper_type == HelperType.INPUT_SELECT:
+        if entity_kind == EntityKind.INPUT_SELECT:
             data["options"] = options
         data["last_value"] = data.get("last_value")
         data["updated_at"] = datetime.now(timezone.utc)
@@ -976,11 +976,11 @@ class InputHelperRecord:
             data["device_identifiers"] = []
             data["statistics_mode"] = data.get("statistics_mode") or HASSEMSStatisticsMode.LINEAR
 
-        self.helper = InputHelper(**data)
+        self.entity = ManagedEntity(**data)
 
     def touch_last_value(self, value: InputValue, measured_at: datetime) -> None:
         now = datetime.now(timezone.utc)
-        self.helper = self.helper.model_copy(
+        self.entity = self.entity.model_copy(
             update={
                 "last_value": value,
                 "last_measured_at": measured_at,
@@ -989,10 +989,10 @@ class InputHelperRecord:
         )
 
     def as_dict(self) -> Dict[str, Any]:
-        return self.helper.model_dump(mode="json")
+        return self.entity.model_dump(mode="json")
 
 
-class HelperState(BaseModel):
+class EntityState(BaseModel):
     entity_id: str
     state: str
     last_changed: Optional[datetime] = None
@@ -1001,20 +1001,29 @@ class HelperState(BaseModel):
 
 
 __all__ = [
-    "HelperState",
-    "HelperType",
+    "EntityState",
+    "EntityKind",
     "EntityTransportType",
     "HASSEMSStatisticsMode",
-    "InputHelper",
-    "InputHelperCreate",
-    "InputHelperRecord",
-    "InputHelperUpdate",
+    "ManagedEntity",
+    "ManagedEntityCreate",
+    "ManagedEntityRecord",
+    "ManagedEntityUpdate",
     "InputValue",
     "HistoryPoint",
     "HistoryPointUpdate",
+    "HistoryCursorEvent",
+    "IntegrationConnectionCreate",
+    "IntegrationConnectionDetail",
+    "IntegrationConnectionHistoryItem",
+    "IntegrationConnectionOwner",
+    "IntegrationConnectionSummary",
     "MQTTConfig",
     "MQTTTestResponse",
     "SetValueRequest",
-    "coerce_helper_value",
+    "WebhookRegistration",
+    "WebhookSubscription",
+    "coerce_entity_value",
     "slugify",
+    "slugify_identifier",
 ]

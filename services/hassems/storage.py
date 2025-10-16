@@ -14,15 +14,16 @@ from .models import (
     ApiUser,
     ApiUserCreate,
     ApiUserUpdate,
+    EntityKind,
     EntityTransportType,
     HASSEMSStatisticsMode,
     HistoryCursorEvent,
     HistoryPoint,
     HistoryPointUpdate,
-    InputHelper,
-    InputHelperCreate,
-    InputHelperRecord,
-    InputHelperUpdate,
+    ManagedEntity,
+    ManagedEntityCreate,
+    ManagedEntityRecord,
+    ManagedEntityUpdate,
     InputValue,
     IntegrationConnectionCreate,
     IntegrationConnectionDetail,
@@ -164,7 +165,7 @@ SCHEMA_MIGRATIONS: Sequence[Tuple[int, SchemaMigration]] = (
 )
 
 
-class InputHelperStore:
+class ManagedEntityStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,11 +188,11 @@ class InputHelperStore:
         with self._connection() as conn:
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS helpers (
+                CREATE TABLE IF NOT EXISTS entities (
                     slug TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
-                    helper_type TEXT NOT NULL,
+                    entity_kind TEXT NOT NULL,
                     entity_type TEXT NOT NULL DEFAULT 'mqtt',
                     description TEXT,
                     default_value TEXT,
@@ -228,13 +229,13 @@ class InputHelperStore:
                 """
                 CREATE TABLE IF NOT EXISTS history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    helper_slug TEXT NOT NULL,
+                    entity_slug TEXT NOT NULL,
                     value TEXT NOT NULL,
                     measured_at TEXT,
                     history_cursor TEXT,
                     is_historic INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
-                    FOREIGN KEY(helper_slug) REFERENCES helpers(slug) ON DELETE CASCADE
+                    FOREIGN KEY(entity_slug) REFERENCES entities(slug) ON DELETE CASCADE
                 )
                 """
             )
@@ -287,9 +288,9 @@ class InputHelperStore:
                     api_user_id INTEGER NOT NULL,
                     entry_id TEXT NOT NULL UNIQUE,
                     title TEXT,
-                    helper_count INTEGER NOT NULL DEFAULT 0,
-                    included_helpers TEXT,
-                    ignored_helpers TEXT,
+                    entity_count INTEGER NOT NULL DEFAULT 0,
+                    included_entities TEXT,
+                    ignored_entities TEXT,
                     metadata TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -303,52 +304,52 @@ class InputHelperStore:
                 """
                 CREATE TABLE IF NOT EXISTS history_cursor_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    helper_slug TEXT NOT NULL,
+                    entity_slug TEXT NOT NULL,
                     history_cursor TEXT NOT NULL,
                     changed_at TEXT NOT NULL,
-                    UNIQUE(helper_slug, history_cursor),
-                    FOREIGN KEY(helper_slug) REFERENCES helpers(slug) ON DELETE CASCADE
+                    UNIQUE(entity_slug, history_cursor),
+                    FOREIGN KEY(entity_slug) REFERENCES entities(slug) ON DELETE CASCADE
                 )
                 """
             )
             conn.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_history_cursor_events_helper
-                    ON history_cursor_events (helper_slug, changed_at)
+                CREATE INDEX IF NOT EXISTS idx_history_cursor_events_entity
+                    ON history_cursor_events (entity_slug, changed_at)
                 """
             )
 
-            self._ensure_column(conn, "helpers", "last_measured_at", "TEXT")
-            self._ensure_column(conn, "helpers", "component", "TEXT NOT NULL DEFAULT 'sensor'")
-            self._ensure_column(conn, "helpers", "unique_id", "TEXT")
-            self._ensure_column(conn, "helpers", "object_id", "TEXT")
-            self._ensure_column(conn, "helpers", "node_id", "TEXT")
-            self._ensure_column(conn, "helpers", "state_topic", "TEXT")
-            self._ensure_column(conn, "helpers", "availability_topic", "TEXT")
-            self._ensure_column(conn, "helpers", "entity_type", "TEXT NOT NULL DEFAULT 'mqtt'")
-            self._ensure_column(conn, "helpers", "icon", "TEXT")
-            self._ensure_column(conn, "helpers", "state_class", "TEXT")
-            self._ensure_column(conn, "helpers", "force_update", "INTEGER NOT NULL DEFAULT 1")
-            self._ensure_column(conn, "helpers", "device_name", "TEXT")
-            self._ensure_column(conn, "helpers", "device_id", "TEXT")
-            self._ensure_column(conn, "helpers", "device_manufacturer", "TEXT")
-            self._ensure_column(conn, "helpers", "device_model", "TEXT")
-            self._ensure_column(conn, "helpers", "device_sw_version", "TEXT")
-            self._ensure_column(conn, "helpers", "device_identifiers", "TEXT")
+            self._ensure_column(conn, "entities", "last_measured_at", "TEXT")
+            self._ensure_column(conn, "entities", "component", "TEXT NOT NULL DEFAULT 'sensor'")
+            self._ensure_column(conn, "entities", "unique_id", "TEXT")
+            self._ensure_column(conn, "entities", "object_id", "TEXT")
+            self._ensure_column(conn, "entities", "node_id", "TEXT")
+            self._ensure_column(conn, "entities", "state_topic", "TEXT")
+            self._ensure_column(conn, "entities", "availability_topic", "TEXT")
+            self._ensure_column(conn, "entities", "entity_type", "TEXT NOT NULL DEFAULT 'mqtt'")
+            self._ensure_column(conn, "entities", "icon", "TEXT")
+            self._ensure_column(conn, "entities", "state_class", "TEXT")
+            self._ensure_column(conn, "entities", "force_update", "INTEGER NOT NULL DEFAULT 1")
+            self._ensure_column(conn, "entities", "device_name", "TEXT")
+            self._ensure_column(conn, "entities", "device_id", "TEXT")
+            self._ensure_column(conn, "entities", "device_manufacturer", "TEXT")
+            self._ensure_column(conn, "entities", "device_model", "TEXT")
+            self._ensure_column(conn, "entities", "device_sw_version", "TEXT")
+            self._ensure_column(conn, "entities", "device_identifiers", "TEXT")
             self._ensure_column(
-                conn, "helpers", "statistics_mode", "TEXT DEFAULT 'linear'"
+                conn, "entities", "statistics_mode", "TEXT DEFAULT 'linear'"
             )
             self._ensure_column(
-                conn, "helpers", "ha_enabled", "INTEGER NOT NULL DEFAULT 1"
+                conn, "entities", "ha_enabled", "INTEGER NOT NULL DEFAULT 1"
             )
-            self._ensure_column(conn, "helpers", "history_cursor", "TEXT")
-            self._ensure_column(conn, "helpers", "history_changed_at", "TEXT")
+            self._ensure_column(conn, "entities", "history_cursor", "TEXT")
+            self._ensure_column(conn, "entities", "history_changed_at", "TEXT")
             self._ensure_column(conn, "history", "measured_at", "TEXT")
             self._ensure_column(conn, "history", "history_cursor", "TEXT")
             self._ensure_column(conn, "api_users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "webhook_subscriptions", "metadata", "TEXT")
             self._ensure_column(conn, "integration_connections", "last_seen", "TEXT")
-            self._ensure_column(conn, "integration_connections", "helper_count", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "integration_connections", "entity_count", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "integration_connections", "metadata", "TEXT")
 
             self._apply_migrations(conn)
@@ -378,7 +379,7 @@ class InputHelperStore:
 
     def _backfill_history_cursor_events(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute(
-            "SELECT slug, history_cursor, history_changed_at, updated_at, created_at FROM helpers"
+            "SELECT slug, history_cursor, history_changed_at, updated_at, created_at FROM entities"
         ).fetchall()
         now_iso = datetime.now(timezone.utc).isoformat()
         for row in rows:
@@ -393,7 +394,7 @@ class InputHelperStore:
             )
             conn.execute(
                 """
-                INSERT OR IGNORE INTO history_cursor_events (helper_slug, history_cursor, changed_at)
+                INSERT OR IGNORE INTO history_cursor_events (entity_slug, history_cursor, changed_at)
                 VALUES (?, ?, ?)
                 """,
                 (row["slug"], cursor, changed_at),
@@ -403,7 +404,7 @@ class InputHelperStore:
             """
             UPDATE history
                SET history_cursor = (
-                    SELECT history_cursor FROM helpers WHERE helpers.slug = history.helper_slug
+                    SELECT history_cursor FROM entities WHERE entities.slug = history.entity_slug
                 )
              WHERE history_cursor IS NULL
             """
@@ -418,9 +419,9 @@ class InputHelperStore:
         timestamp = changed_at or datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
-            INSERT INTO history_cursor_events (helper_slug, history_cursor, changed_at)
+            INSERT INTO history_cursor_events (entity_slug, history_cursor, changed_at)
             VALUES (?, ?, ?)
-            ON CONFLICT(helper_slug, history_cursor)
+            ON CONFLICT(entity_slug, history_cursor)
             DO UPDATE SET changed_at = excluded.changed_at
             """,
             (slug, cursor, timestamp),
@@ -438,7 +439,7 @@ class InputHelperStore:
             """
             SELECT id, measured_at, created_at, history_cursor, is_historic
               FROM history
-             WHERE helper_slug = ?
+             WHERE entity_slug = ?
             """,
             (slug,),
         ).fetchall()
@@ -472,7 +473,7 @@ class InputHelperStore:
             """
             SELECT history_cursor, changed_at
               FROM history_cursor_events
-             WHERE helper_slug = ?
+             WHERE entity_slug = ?
           ORDER BY datetime(changed_at) ASC
             """,
             (slug,),
@@ -492,7 +493,7 @@ class InputHelperStore:
             )
         return events
 
-    def _ensure_helper_history_cursor(
+    def _ensure_entity_history_cursor(
         self,
         conn: sqlite3.Connection,
         slug: str,
@@ -503,7 +504,7 @@ class InputHelperStore:
         if existing:
             return str(existing)
         row = conn.execute(
-            "SELECT history_cursor FROM helpers WHERE slug = ?",
+            "SELECT history_cursor FROM entities WHERE slug = ?",
             (slug,),
         ).fetchone()
         if row and row["history_cursor"]:
@@ -511,7 +512,7 @@ class InputHelperStore:
         new_cursor = _generate_history_cursor()
         conn.execute(
             """
-            UPDATE helpers
+            UPDATE entities
                SET history_cursor = ?
              WHERE slug = ?
             """,
@@ -575,9 +576,9 @@ class InputHelperStore:
             api_user_id=row["api_user_id"],
             entry_id=row["entry_id"],
             title=row["title"] or None,
-            helper_count=int(row["helper_count"] or 0),
-            included_helpers=_deserialize_options(row["included_helpers"]),
-            ignored_helpers=_deserialize_options(row["ignored_helpers"]),
+            entity_count=int(row["entity_count"] or 0),
+            included_entities=_deserialize_options(row["included_entities"]),
+            ignored_entities=_deserialize_options(row["ignored_entities"]),
             metadata=_deserialize_metadata(row["metadata"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -600,24 +601,24 @@ class InputHelperStore:
         except (OSError, json.JSONDecodeError):
             return
 
-        inputs = data.get("inputs", [])
-        if not inputs:
+        entities = data.get("entities") or data.get("inputs", [])
+        if not entities:
             return
 
         with self._connection() as conn:
-            existing = conn.execute("SELECT COUNT(*) AS count FROM helpers").fetchone()
+            existing = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()
             if existing and existing["count"]:
                 return
 
-            for item in inputs:
+            for item in entities:
                 try:
-                    helper = InputHelper(**item)
+                    entity = ManagedEntity(**item)
                 except Exception:  # noqa: BLE001
                     continue
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO helpers (
-                        slug, name, entity_id, helper_type, entity_type, description, default_value,
+                    INSERT OR REPLACE INTO entities (
+                        slug, name, entity_id, entity_kind, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
@@ -626,37 +627,37 @@ class InputHelperStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    helper.slug,
-                    helper.name,
-                    helper.entity_id,
-                    helper.type.value,
-                    helper.entity_type.value,
-                    helper.description,
-                    _serialize_value(helper.default_value),
-                    _serialize_options(helper.options),
-                    _serialize_value(helper.last_value),
-                    helper.last_measured_at.isoformat() if helper.last_measured_at else None,
-                    helper.created_at.isoformat(),
-                    helper.updated_at.isoformat(),
-                    helper.device_class,
-                    helper.unit_of_measurement,
-                    helper.component,
-                    helper.unique_id,
-                    helper.object_id,
-                    helper.node_id,
-                    helper.state_topic,
-                    helper.availability_topic,
-                    helper.icon,
-                    helper.state_class,
-                    int(helper.force_update),
-                    helper.device_name,
-                    helper.device_id,
-                    helper.device_manufacturer,
-                    helper.device_model,
-                    helper.device_sw_version,
-                    _serialize_identifiers(helper.device_identifiers),
-                    helper.statistics_mode.value if helper.statistics_mode else None,
-                    int(helper.ha_enabled),
+                    entity.slug,
+                    entity.name,
+                    entity.entity_id,
+                    entity.type.value,
+                    entity.entity_type.value,
+                    entity.description,
+                    _serialize_value(entity.default_value),
+                    _serialize_options(entity.options),
+                    _serialize_value(entity.last_value),
+                    entity.last_measured_at.isoformat() if entity.last_measured_at else None,
+                    entity.created_at.isoformat(),
+                    entity.updated_at.isoformat(),
+                    entity.device_class,
+                    entity.unit_of_measurement,
+                    entity.component,
+                    entity.unique_id,
+                    entity.object_id,
+                    entity.node_id,
+                    entity.state_topic,
+                    entity.availability_topic,
+                    entity.icon,
+                    entity.state_class,
+                    int(entity.force_update),
+                    entity.device_name,
+                    entity.device_id,
+                    entity.device_manufacturer,
+                    entity.device_model,
+                    entity.device_sw_version,
+                    _serialize_identifiers(entity.device_identifiers),
+                    entity.statistics_mode.value if entity.statistics_mode else None,
+                    int(entity.ha_enabled),
                 ),
             )
 
@@ -949,10 +950,10 @@ class InputHelperStore:
             if payload.last_seen is not None
             else now_iso
         )
-        included_value = _serialize_options(payload.included_helpers)
-        ignored_value = _serialize_options(payload.ignored_helpers)
+        included_value = _serialize_options(payload.included_entities)
+        ignored_value = _serialize_options(payload.ignored_entities)
         metadata_value = _serialize_metadata(payload.metadata)
-        helper_count_value = int(payload.helper_count or 0)
+        entity_count_value = int(payload.entity_count or 0)
         with self._lock:
             with self._connection() as conn:
                 existing = conn.execute(
@@ -963,15 +964,15 @@ class InputHelperStore:
                     conn.execute(
                         """
                         INSERT INTO integration_connections (
-                            api_user_id, entry_id, title, helper_count, included_helpers,
-                            ignored_helpers, metadata, created_at, updated_at, last_seen
+                            api_user_id, entry_id, title, entity_count, included_entities,
+                            ignored_entities, metadata, created_at, updated_at, last_seen
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             user.id,
                             payload.entry_id,
                             payload.title,
-                            helper_count_value,
+                            entity_count_value,
                             included_value,
                             ignored_value,
                             metadata_value,
@@ -986,9 +987,9 @@ class InputHelperStore:
                         UPDATE integration_connections
                            SET api_user_id = ?,
                                title = ?,
-                               helper_count = ?,
-                               included_helpers = ?,
-                               ignored_helpers = ?,
+                               entity_count = ?,
+                               included_entities = ?,
+                               ignored_entities = ?,
                                metadata = ?,
                                updated_at = ?,
                                last_seen = ?
@@ -997,7 +998,7 @@ class InputHelperStore:
                         (
                             user.id,
                             payload.title,
-                            helper_count_value,
+                            entity_count_value,
                             included_value,
                             ignored_value,
                             metadata_value,
@@ -1050,19 +1051,19 @@ class InputHelperStore:
         connection = self.get_integration_connection(entry_id)
         if connection is None:
             raise KeyError(f"Integration connection {entry_id} not found.")
-        helper_slugs = connection.included_helpers or []
-        if not helper_slugs:
+        entity_slugs = connection.included_entities or []
+        if not entity_slugs:
             return []
-        placeholders = ",".join(["?"] * len(helper_slugs))
+        placeholders = ",".join(["?"] * len(entity_slugs))
         query = f"""
-            SELECT h.helper_slug, h.value, h.measured_at, h.created_at, h.history_cursor, h.is_historic, he.name
+            SELECT h.entity_slug, h.value, h.measured_at, h.created_at, h.history_cursor, h.is_historic, he.name
               FROM history AS h
-              JOIN helpers AS he ON he.slug = h.helper_slug
-             WHERE h.helper_slug IN ({placeholders})
+              JOIN entities AS he ON he.slug = h.entity_slug
+             WHERE h.entity_slug IN ({placeholders})
              ORDER BY datetime(COALESCE(h.measured_at, h.created_at)) DESC
              LIMIT ?
         """
-        params: List[Any] = list(helper_slugs)
+        params: List[Any] = list(entity_slugs)
         params.append(limit)
         with self._connection() as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
@@ -1076,8 +1077,8 @@ class InputHelperStore:
                 measured_at = None
             history.append(
                 IntegrationConnectionHistoryItem(
-                    helper_slug=row["helper_slug"],
-                    helper_name=row["name"],
+                    entity_slug=row["entity_slug"],
+                    entity_name=row["name"],
                     value=_deserialize_value(row["value"]),
                     measured_at=measured_at,
                     historic=bool(row["is_historic"]) if "is_historic" in row.keys() else False,
@@ -1091,7 +1092,7 @@ class InputHelperStore:
             )
         return history
 
-    def _row_to_helper(self, row: sqlite3.Row) -> InputHelper:
+    def _row_to_entity(self, row: sqlite3.Row) -> ManagedEntity:
         mapping = dict(row)
         keys = set(mapping.keys())
         entity_type_value = mapping.get("entity_type", "mqtt")
@@ -1133,14 +1134,14 @@ class InputHelperStore:
                 statistics_mode = HASSEMSStatisticsMode.LINEAR
 
         history_cursor = mapping.get("history_cursor") or None
-        with self._connection() as helper_conn:
+        with self._connection() as entity_conn:
             if not history_cursor:
-                history_cursor = self._ensure_helper_history_cursor(
-                    helper_conn,
+                history_cursor = self._ensure_entity_history_cursor(
+                    entity_conn,
                     slug,
                     timestamp=mapping.get("updated_at") or mapping.get("created_at"),
                 )
-            cursor_events = self._list_history_cursor_events_internal(helper_conn, slug)
+            cursor_events = self._list_history_cursor_events_internal(entity_conn, slug)
         history_changed_at_raw = mapping.get("history_changed_at")
         history_changed_at = None
         if history_changed_at_raw:
@@ -1149,11 +1150,21 @@ class InputHelperStore:
             except ValueError:
                 history_changed_at = None
 
-        return InputHelper(
+        entity_kind_raw = mapping["entity_kind"]
+        try:
+            entity_kind = (
+                entity_kind_raw
+                if isinstance(entity_kind_raw, EntityKind)
+                else EntityKind(str(entity_kind_raw))
+            )
+        except ValueError:
+            entity_kind = EntityKind.INPUT_TEXT
+
+        return ManagedEntity(
             slug=mapping["slug"],
             name=mapping["name"],
             entity_id=mapping["entity_id"],
-            type=mapping["helper_type"],
+            type=entity_kind,
             entity_type=entity_type,
             description=mapping["description"],
             default_value=_deserialize_value(mapping["default_value"]),
@@ -1188,47 +1199,47 @@ class InputHelperStore:
             ha_enabled=bool(mapping.get("ha_enabled", 1)),
         )
 
-    def list_helpers(self) -> List[InputHelper]:
+    def list_entities(self) -> List[ManagedEntity]:
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM helpers ORDER BY name COLLATE NOCASE"
+                "SELECT * FROM entities ORDER BY name COLLATE NOCASE"
             ).fetchall()
-        return [self._row_to_helper(row) for row in rows]
+        return [self._row_to_entity(row) for row in rows]
 
-    def list_helpers_by_type(
+    def list_entities_by_kind(
         self, entity_type: EntityTransportType, *, only_enabled: bool = False
-    ) -> List[InputHelper]:
+    ) -> List[ManagedEntity]:
         with self._connection() as conn:
-            query = "SELECT * FROM helpers WHERE entity_type = ?"
+            query = "SELECT * FROM entities WHERE entity_type = ?"
             params: List[Any] = [entity_type.value]
             if only_enabled:
                 query += " AND ha_enabled = 1"
             query += " ORDER BY name COLLATE NOCASE"
             rows = conn.execute(query, tuple(params)).fetchall()
-        return [self._row_to_helper(row) for row in rows]
+        return [self._row_to_entity(row) for row in rows]
 
-    def get_helper(self, slug: str) -> Optional[InputHelperRecord]:
+    def get_entity(self, slug: str) -> Optional[ManagedEntityRecord]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT * FROM helpers WHERE slug = ?",
+                "SELECT * FROM entities WHERE slug = ?",
                 (slug,),
             ).fetchone()
         if row is None:
             return None
-        return InputHelperRecord(self._row_to_helper(row))
+        return ManagedEntityRecord(self._row_to_entity(row))
 
-    def create_helper(self, payload: InputHelperCreate) -> InputHelper:
-        record = InputHelperRecord.create(payload)
-        helper = record.helper
+    def create_entity(self, payload: ManagedEntityCreate) -> ManagedEntity:
+        record = ManagedEntityRecord.create(payload)
+        entity = record.entity
 
         with self._lock:
-            if self.get_helper(helper.slug) is not None:
-                raise ValueError(f"Helper with slug '{helper.slug}' already exists.")
+            if self.get_entity(entity.slug) is not None:
+                raise ValueError(f"Entity with slug '{entity.slug}' already exists.")
             with self._connection() as conn:
                 conn.execute(
                     """
-                    INSERT INTO helpers (
-                        slug, name, entity_id, helper_type, entity_type, description, default_value,
+                    INSERT INTO entities (
+                        slug, name, entity_id, entity_kind, entity_type, description, default_value,
                         options, last_value, last_measured_at, created_at, updated_at,
                         device_class, unit_of_measurement, component, unique_id, object_id,
                         node_id, state_topic, availability_topic, icon, state_class,
@@ -1240,63 +1251,63 @@ class InputHelperStore:
                     )
                     """,
                     (
-                        helper.slug,
-                        helper.name,
-                        helper.entity_id,
-                        helper.type.value,
-                        helper.entity_type.value,
-                        helper.description,
-                        _serialize_value(helper.default_value),
-                        _serialize_options(helper.options),
-                        _serialize_value(helper.last_value),
-                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
-                        helper.created_at.isoformat(),
-                        helper.updated_at.isoformat(),
-                        helper.device_class,
-                        helper.unit_of_measurement,
-                        helper.component,
-                        helper.unique_id,
-                        helper.object_id,
-                        helper.node_id,
-                        helper.state_topic or "",
-                        helper.availability_topic or "",
-                        helper.icon,
-                        helper.state_class,
-                        int(helper.force_update),
-                        helper.device_name,
-                        helper.device_id,
-                        helper.device_manufacturer,
-                        helper.device_model,
-                        helper.device_sw_version,
-                        _serialize_identifiers(helper.device_identifiers),
-                        helper.statistics_mode.value if helper.statistics_mode else None,
-                        int(helper.ha_enabled),
-                        helper.history_cursor,
-                        helper.history_changed_at.isoformat()
-                        if helper.history_changed_at
+                        entity.slug,
+                        entity.name,
+                        entity.entity_id,
+                        entity.type.value,
+                        entity.entity_type.value,
+                        entity.description,
+                        _serialize_value(entity.default_value),
+                        _serialize_options(entity.options),
+                        _serialize_value(entity.last_value),
+                        entity.last_measured_at.isoformat() if entity.last_measured_at else None,
+                        entity.created_at.isoformat(),
+                        entity.updated_at.isoformat(),
+                        entity.device_class,
+                        entity.unit_of_measurement,
+                        entity.component,
+                        entity.unique_id,
+                        entity.object_id,
+                        entity.node_id,
+                        entity.state_topic or "",
+                        entity.availability_topic or "",
+                        entity.icon,
+                        entity.state_class,
+                        int(entity.force_update),
+                        entity.device_name,
+                        entity.device_id,
+                        entity.device_manufacturer,
+                        entity.device_model,
+                        entity.device_sw_version,
+                        _serialize_identifiers(entity.device_identifiers),
+                        entity.statistics_mode.value if entity.statistics_mode else None,
+                        int(entity.ha_enabled),
+                        entity.history_cursor,
+                        entity.history_changed_at.isoformat()
+                        if entity.history_changed_at
                         else None,
                     ),
                 )
-                if helper.entity_type == EntityTransportType.HASSEMS:
+                if entity.entity_type == EntityTransportType.HASSEMS:
                     self._record_history_cursor_event(
                         conn,
-                        helper.slug,
-                        helper.history_cursor,
-                        helper.created_at.isoformat(),
+                        entity.slug,
+                        entity.history_cursor,
+                        entity.created_at.isoformat(),
                     )
-        return helper
+        return entity
 
-    def update_helper(self, slug: str, payload: InputHelperUpdate) -> InputHelper:
+    def update_entity(self, slug: str, payload: ManagedEntityUpdate) -> ManagedEntity:
         with self._lock:
-            existing = self.get_helper(slug)
+            existing = self.get_entity(slug)
             if existing is None:
-                raise KeyError(f"Helper '{slug}' not found.")
+                raise KeyError(f"Entity '{slug}' not found.")
             existing.update(payload)
-            helper = existing.helper
+            entity = existing.entity
             with self._connection() as conn:
                 conn.execute(
                     """
-                    UPDATE helpers
+                    UPDATE entities
                        SET name = ?,
                            entity_id = ?,
                            entity_type = ?,
@@ -1328,72 +1339,72 @@ class InputHelperStore:
                      WHERE slug = ?
                     """,
                     (
-                        helper.name,
-                        helper.entity_id,
-                        helper.entity_type.value,
-                        helper.description,
-                        _serialize_value(helper.default_value),
-                        _serialize_options(helper.options),
-                        _serialize_value(helper.last_value),
-                        helper.last_measured_at.isoformat() if helper.last_measured_at else None,
-                        helper.updated_at.isoformat(),
-                        helper.device_class,
-                        helper.unit_of_measurement,
-                        helper.component,
-                        helper.unique_id,
-                        helper.object_id,
-                        helper.node_id,
-                        helper.state_topic or "",
-                        helper.availability_topic or "",
-                        helper.icon,
-                        helper.state_class,
-                        int(helper.force_update),
-                        helper.device_name,
-                        helper.device_id,
-                        helper.device_manufacturer,
-                        helper.device_model,
-                        helper.device_sw_version,
-                        _serialize_identifiers(helper.device_identifiers),
-                        helper.statistics_mode.value if helper.statistics_mode else None,
-                        int(helper.ha_enabled),
-                        helper.slug,
+                        entity.name,
+                        entity.entity_id,
+                        entity.entity_type.value,
+                        entity.description,
+                        _serialize_value(entity.default_value),
+                        _serialize_options(entity.options),
+                        _serialize_value(entity.last_value),
+                        entity.last_measured_at.isoformat() if entity.last_measured_at else None,
+                        entity.updated_at.isoformat(),
+                        entity.device_class,
+                        entity.unit_of_measurement,
+                        entity.component,
+                        entity.unique_id,
+                        entity.object_id,
+                        entity.node_id,
+                        entity.state_topic or "",
+                        entity.availability_topic or "",
+                        entity.icon,
+                        entity.state_class,
+                        int(entity.force_update),
+                        entity.device_name,
+                        entity.device_id,
+                        entity.device_manufacturer,
+                        entity.device_model,
+                        entity.device_sw_version,
+                        _serialize_identifiers(entity.device_identifiers),
+                        entity.statistics_mode.value if entity.statistics_mode else None,
+                        int(entity.ha_enabled),
+                        entity.slug,
                     ),
                 )
-                if helper.entity_type == EntityTransportType.HASSEMS:
+                if entity.entity_type == EntityTransportType.HASSEMS:
                     self._record_history_cursor_event(
                         conn,
-                        helper.slug,
-                        helper.history_cursor,
-                        helper.created_at.isoformat(),
+                        entity.slug,
+                        entity.history_cursor,
+                        entity.created_at.isoformat(),
                     )
-        return helper
+        return entity
 
-    def delete_helper(self, slug: str) -> None:
+    def delete_entity(self, slug: str) -> None:
         with self._lock:
             with self._connection() as conn:
                 cursor = conn.execute(
-                    "DELETE FROM helpers WHERE slug = ?",
+                    "DELETE FROM entities WHERE slug = ?",
                     (slug,),
                 )
                 if cursor.rowcount == 0:
-                    raise KeyError(f"Helper '{slug}' not found.")
+                    raise KeyError(f"Entity '{slug}' not found.")
 
-    def set_last_value(self, slug: str, value: InputValue, *, measured_at: datetime) -> InputHelper:
+    def set_last_value(self, slug: str, value: InputValue, *, measured_at: datetime) -> ManagedEntity:
         timestamp = datetime.now(timezone.utc).isoformat()
         measured_iso = measured_at.astimezone(timezone.utc).isoformat()
         serialized_value = _serialize_value(value)
         is_historical = _is_historical_timestamp(measured_at)
         with self._lock:
             with self._connection() as conn:
-                helper_row = conn.execute(
-                    "SELECT history_cursor, last_measured_at FROM helpers WHERE slug = ?",
+                entity_row = conn.execute(
+                    "SELECT history_cursor, last_measured_at FROM entities WHERE slug = ?",
                     (slug,),
                 ).fetchone()
-                if helper_row is None:
-                    raise KeyError(f"Helper '{slug}' not found.")
-                existing_cursor = helper_row["history_cursor"] if helper_row else None
+                if entity_row is None:
+                    raise KeyError(f"Entity '{slug}' not found.")
+                existing_cursor = entity_row["history_cursor"] if entity_row else None
                 existing_last_measured_raw = (
-                    helper_row["last_measured_at"] if helper_row else None
+                    entity_row["last_measured_at"] if entity_row else None
                 )
                 existing_last_measured: Optional[datetime] = None
                 if existing_last_measured_raw:
@@ -1419,7 +1430,7 @@ class InputHelperStore:
                         timestamp=timestamp,
                     )
                 else:
-                    history_cursor_value = self._ensure_helper_history_cursor(
+                    history_cursor_value = self._ensure_entity_history_cursor(
                         conn,
                         slug,
                         existing=existing_cursor,
@@ -1428,7 +1439,7 @@ class InputHelperStore:
                 if should_update_last:
                     cursor = conn.execute(
                         """
-                        UPDATE helpers
+                        UPDATE entities
                            SET last_value = ?,
                                last_measured_at = ?,
                                updated_at = ?
@@ -1439,18 +1450,18 @@ class InputHelperStore:
                 else:
                     cursor = conn.execute(
                         """
-                        UPDATE helpers
+                        UPDATE entities
                            SET updated_at = ?
                          WHERE slug = ?
                         """,
                         (timestamp, slug),
                     )
                 if cursor.rowcount == 0:
-                    raise KeyError(f"Helper '{slug}' not found.")
+                    raise KeyError(f"Entity '{slug}' not found.")
                 conn.execute(
                     """
                     INSERT INTO history (
-                        helper_slug, value, measured_at, created_at, history_cursor, is_historic
+                        entity_slug, value, measured_at, created_at, history_cursor, is_historic
                     ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
@@ -1469,19 +1480,19 @@ class InputHelperStore:
                         cursor=history_cursor_value,
                     )
                 row = conn.execute(
-                    "SELECT * FROM helpers WHERE slug = ?",
+                    "SELECT * FROM entities WHERE slug = ?",
                     (slug,),
                 ).fetchone()
         if row is None:
-            raise KeyError(f"Helper '{slug}' not found.")
-        return self._row_to_helper(row)
+            raise KeyError(f"Entity '{slug}' not found.")
+        return self._row_to_entity(row)
 
     def list_history(self, slug: str, limit: int = 200) -> List[HistoryPoint]:
         query = (
             """
             SELECT id, value, measured_at, created_at, history_cursor, is_historic
               FROM history
-             WHERE helper_slug = ?
+             WHERE entity_slug = ?
           ORDER BY datetime(COALESCE(measured_at, created_at)) ASC,
                    datetime(created_at) ASC
             """
@@ -1524,12 +1535,12 @@ class InputHelperStore:
                     SELECT measured_at, created_at, history_cursor
                       FROM history
                      WHERE id = ?
-                       AND helper_slug = ?
+                       AND entity_slug = ?
                     """,
                     (history_id, slug),
                 ).fetchone()
                 if existing_row is None:
-                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                    raise KeyError(f"History entry {history_id} not found for entity '{slug}'.")
                 try:
                     previous_measured = existing_row["measured_at"] or existing_row["created_at"]
                     previous_dt = datetime.fromisoformat(previous_measured)
@@ -1547,7 +1558,7 @@ class InputHelperStore:
                         timestamp=change_timestamp,
                     )
                 else:
-                    history_cursor_value = self._ensure_helper_history_cursor(
+                    history_cursor_value = self._ensure_entity_history_cursor(
                         conn,
                         slug,
                         existing=existing_row["history_cursor"],
@@ -1562,7 +1573,7 @@ class InputHelperStore:
                            history_cursor = ?,
                            is_historic = ?
                      WHERE id = ?
-                       AND helper_slug = ?
+                       AND entity_slug = ?
                     """,
                     (
                         serialized_value,
@@ -1574,7 +1585,7 @@ class InputHelperStore:
                     ),
                 )
                 if cursor.rowcount == 0:
-                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                    raise KeyError(f"History entry {history_id} not found for entity '{slug}'.")
                 if requires_new_cursor or is_historic_flag:
                     self._backfill_historic_points(
                         conn,
@@ -1586,13 +1597,13 @@ class InputHelperStore:
                     SELECT id, value, measured_at, created_at, history_cursor, is_historic
                       FROM history
                      WHERE id = ?
-                       AND helper_slug = ?
+                       AND entity_slug = ?
                     """,
                     (history_id, slug),
                 ).fetchone()
-                self._sync_helper_last_value(conn, slug)
+                self._sync_entity_last_value(conn, slug)
         if row is None:
-            raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+            raise KeyError(f"History entry {history_id} not found for entity '{slug}'.")
         point = self._row_to_history_point(row)
         if point is None:
             raise ValueError("History value could not be deserialized.")
@@ -1606,24 +1617,24 @@ class InputHelperStore:
                     SELECT measured_at, created_at
                       FROM history
                      WHERE id = ?
-                       AND helper_slug = ?
+                       AND entity_slug = ?
                     """,
                     (history_id, slug),
                 ).fetchone()
                 if existing_row is None:
-                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
+                    raise KeyError(f"History entry {history_id} not found for entity '{slug}'.")
                 try:
                     previous_measured = existing_row["measured_at"] or existing_row["created_at"]
                     previous_dt = datetime.fromisoformat(previous_measured)
                 except (TypeError, ValueError):
                     previous_dt = None
                 cursor = conn.execute(
-                    "DELETE FROM history WHERE id = ? AND helper_slug = ?",
+                    "DELETE FROM history WHERE id = ? AND entity_slug = ?",
                     (history_id, slug),
                 )
                 if cursor.rowcount == 0:
-                    raise KeyError(f"History entry {history_id} not found for helper '{slug}'.")
-                self._sync_helper_last_value(conn, slug)
+                    raise KeyError(f"History entry {history_id} not found for entity '{slug}'.")
+                self._sync_entity_last_value(conn, slug)
                 new_cursor = None
                 if _is_historical_timestamp(previous_dt):
                     timestamp = datetime.now(timezone.utc).isoformat()
@@ -1661,13 +1672,13 @@ class InputHelperStore:
             history_cursor=history_cursor,
         )
 
-    def _sync_helper_last_value(self, conn: sqlite3.Connection, slug: str) -> None:
+    def _sync_entity_last_value(self, conn: sqlite3.Connection, slug: str) -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
         latest = conn.execute(
             """
             SELECT value, measured_at, created_at
               FROM history
-             WHERE helper_slug = ?
+             WHERE entity_slug = ?
           ORDER BY datetime(COALESCE(measured_at, created_at)) DESC
              LIMIT 1
             """,
@@ -1676,7 +1687,7 @@ class InputHelperStore:
         if latest is None:
             conn.execute(
                 """
-                UPDATE helpers
+                UPDATE entities
                    SET last_value = NULL,
                        last_measured_at = NULL,
                        updated_at = ?
@@ -1688,7 +1699,7 @@ class InputHelperStore:
         measured_source = latest["measured_at"] or latest["created_at"]
         conn.execute(
             """
-            UPDATE helpers
+            UPDATE entities
                SET last_value = ?,
                    last_measured_at = ?,
                    updated_at = ?
@@ -1713,7 +1724,7 @@ class InputHelperStore:
         change_ts = timestamp or datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
-            UPDATE helpers
+            UPDATE entities
                SET history_cursor = ?,
                    history_changed_at = ?
              WHERE slug = ?
@@ -1771,4 +1782,4 @@ class InputHelperStore:
         return stored
 
 
-__all__ = ["InputHelperStore", "HISTORICAL_THRESHOLD"]
+__all__ = ["ManagedEntityStore", "HISTORICAL_THRESHOLD"]

@@ -1,21 +1,21 @@
 # Home Assistant Entity Management System (HASSEMS)
 
-HASSEMS is a FastAPI application that manages Home Assistant helper entities, publishes Home
-Assistant MQTT discovery payloads, and stores helper history in SQLite. The bundled web console lets
+HASSEMS is a FastAPI application that manages Home Assistant entity entities, publishes Home
+Assistant MQTT discovery payloads, and stores entity history in SQLite. The bundled web console lets
 you configure broker access, publish test values, and manage discovery metadata without hand-writing
 JSON.
 
 ## Feature checklist
 
-- [x] Persist helper definitions, MQTT credentials, and history in `data/input_helpers.db` (SQLite).
-- [x] Create, update, delete, and list helpers via REST endpoints that validate metadata with Pydantic.
+- [x] Persist entity definitions, MQTT credentials, and history in `data/managed_entities.db` (SQLite).
+- [x] Create, update, delete, and list entities via REST endpoints that validate metadata with Pydantic.
 - [x] Configure MQTT connectivity from the UI and verify credentials with a single "Test connection"
       action.
 - [x] Publish retained MQTT discovery payloads that follow the
       `<discovery_prefix>/<component>/[<node_id>/]<object_id>/config` pattern Home Assistant expects.
-- [x] Surface measured timestamps alongside helper history and allow backdating through date & time
+- [x] Surface measured timestamps alongside entity history and allow backdating through date & time
       pickers.
-- [x] Provide rich UI helpers such as dropdowns for device classes, units, state classes, icons, and
+- [x] Provide rich UI entities such as dropdowns for device classes, units, state classes, icons, and
       discovery components plus inline tooltips describing each setting.
 
 ## Historic data lifecycle
@@ -23,7 +23,7 @@ JSON.
 - HASSEMS classifies any value measured more than **10 days** in the past as historic. Historic points
   are flagged with `historic = true` and assigned a `historic_cursor` so Home Assistant can reconcile
   long-term statistics.
-- Every helper exposes `history_cursor_events`, a chronological list of cursor rotations. The Home
+- Every entity exposes `history_cursor_events`, a chronological list of cursor rotations. The Home
   Assistant integration compares the current cursor to the stored value and triggers a history reload
   when they diverge.
 - SQLite history rows also record the write timestamp (`recorded_at`), but this field is **diagnostic
@@ -63,7 +63,7 @@ Assistant HTTP API will return `503`.
 
 ## Running locally
 
-Create a virtual environment and launch the API using the included helper script:
+Create a virtual environment and launch the API using the included entity script:
 
 ```bash
 services/hassems/start.sh
@@ -75,13 +75,13 @@ you can:
 - Configure the Mosquitto broker credentials that are stored in SQLite (discovery prefix is locked to
   `homeassistant` for compatibility with the integration).
 - Review broker connectivity logs via the **Test connection** button.
-- Create helpers with a streamlined base form (device name, entity name, description, type, device
+- Create entities with a streamlined base form (device name, entity name, description, type, device
   class, unit, icon, entity ID, and force-update toggle). The advanced section auto-generates the
   device ID, unique ID (`{device_id}_{entity_name}`), object ID, and MQTT topics using the default node
   ID `hassems`, while still exposing component, state class, device registry metadata, and other
   discovery overrides when needed.
-- Edit existing helpers, regenerate discovery payloads, and inspect state/availability topics.
-- Review helper history with inline charts and publish new readings that include `measured_at`
+- Edit existing entities, regenerate discovery payloads, and inspect state/availability topics.
+- Review entity history with inline charts and publish new readings that include `measured_at`
   timestamps selected via date/time pickers.
 
 ## API overview
@@ -89,12 +89,12 @@ you can:
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | `GET`  | `/health` | Basic health probe. |
-| `GET`  | `/inputs` | List stored helpers and their metadata. |
-| `POST` | `/inputs` | Create a helper definition and publish discovery + availability payloads. |
-| `PUT`  | `/inputs/{slug}` | Update a helper definition and refresh discovery payloads. |
-| `DELETE` | `/inputs/{slug}` | Delete a helper and clear the retained discovery payload. |
-| `POST` | `/inputs/{slug}/set` | Publish a new helper value (optionally with `measured_at`). |
-| `GET`  | `/inputs/{slug}/history` | Return persisted history for a helper. |
+| `GET`  | `/inputs` | List stored entities and their metadata. |
+| `POST` | `/inputs` | Create a entity definition and publish discovery + availability payloads. |
+| `PUT`  | `/inputs/{slug}` | Update a entity definition and refresh discovery payloads. |
+| `DELETE` | `/inputs/{slug}` | Delete a entity and clear the retained discovery payload. |
+| `POST` | `/inputs/{slug}/set` | Publish a new entity value (optionally with `measured_at`). |
+| `GET`  | `/inputs/{slug}/history` | Return persisted history for a entity. |
 | `GET`  | `/config/mqtt` | Fetch stored MQTT configuration. |
 | `PUT`  | `/config/mqtt` | Save MQTT configuration (discovery prefix forced to `homeassistant`). |
 | `POST` | `/config/mqtt/test` | Attempt a broker connection using the stored credentials. |
@@ -103,13 +103,13 @@ Refer to `/docs` for detailed schemas.
 
 ## MQTT discovery & telemetry
 
-Every helper publish triggers three MQTT messages:
+Every entity publish triggers three MQTT messages:
 
 1. **Discovery** – Retained payload on
    `homeassistant/<component>/[node_id/]<object_id>/config` using the metadata you configure in the UI.
-2. **Availability** – Retained payload on the helper-specific availability topic (defaults to
+2. **Availability** – Retained payload on the entity-specific availability topic (defaults to
    `online`/`offline`) which resolves to `{node_id}/{device_id}/{entity_name}/availability` by default.
-3. **State** – JSON payload on the helper's state topic containing both the `value` and
+3. **State** – JSON payload on the entity's state topic containing both the `value` and
    `measured_at` timestamp. The default pattern is `{node_id}/{device_id}/{entity_name}/state`.
 
 When advanced fields are left blank HASSEMS derives `device_id` from the device name, sets
@@ -128,9 +128,9 @@ from the JSON body. The same publish updates the entity's `measured_at` attribut
 3. Open HASSEMS at `http://127.0.0.1:8100`, enter the broker host/port, credentials, and click **Save
    configuration**. The discovery prefix is automatically set to `homeassistant`.
 4. Press **Test connection** to confirm the broker accepts the credentials.
-5. Create helpers with the desired discovery metadata. Each save republishes a retained discovery
+5. Create entities with the desired discovery metadata. Each save republishes a retained discovery
    payload so Home Assistant discovers or updates the entity automatically.
-6. Use the value publishing form to send new readings. The payload includes the helper's metadata and
+6. Use the value publishing form to send new readings. The payload includes the entity's metadata and
    the `measured_at` timestamp selected through the date/time pickers.
 
 ## Additional references
@@ -140,4 +140,4 @@ from the JSON body. The same publish updates the entity's `measured_at` attribut
 - `services/hassems/mqtt_service.py` – Implementation of discovery/state publishing if you
   need to integrate HASSEMS concepts into other tooling.
 
-Enjoy building and managing MQTT-discovered helpers without editing YAML!
+Enjoy building and managing MQTT-discovered entities without editing YAML!

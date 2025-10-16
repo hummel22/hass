@@ -36,8 +36,8 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.entities.dispatcher import async_dispatcher_send
+from homeassistant.entities.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .api import HASSEMSAuthError, HASSEMSError, HASSEMSClient
@@ -46,18 +46,18 @@ from .const import (
     ATTR_HISTORY_CURSOR,
     ATTR_LAST_MEASURED,
     ATTR_STATE_CLASS,
-    CONF_INCLUDED_HELPERS,
-    CONF_IGNORED_HELPERS,
+    CONF_INCLUDED_ENTITIES,
+    CONF_IGNORED_ENTITIES,
     DATA_HISTORY_CURSORS,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
-    EVENT_HELPER_CREATED,
-    EVENT_HELPER_DELETED,
-    EVENT_HELPER_UPDATED,
-    EVENT_HELPER_VALUE,
-    SIGNAL_HELPER_ADDED,
-    SIGNAL_HELPER_REMOVED,
-    SIGNAL_HELPER_UPDATED,
+    EVENT_ENTITY_CREATED,
+    EVENT_ENTITY_DELETED,
+    EVENT_ENTITY_UPDATED,
+    EVENT_ENTITY_VALUE,
+    SIGNAL_ENTITY_ADDED,
+    SIGNAL_ENTITY_REMOVED,
+    SIGNAL_ENTITY_UPDATED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         )
         self.client = client
         self.entry = entry
-        self._helpers: Dict[str, Dict[str, Any]] = {}
+        self._entities: Dict[str, Dict[str, Any]] = {}
         self._history: Dict[str, List[Dict[str, Any]]] = {}
         # _recorded_measurements only keeps diagnostic recorded_at markers to avoid
         # reprocessing the same payload; business logic must rely on measured_at.
@@ -100,13 +100,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self._history_cursors_dirty = False
         self._entity_ids: Dict[str, str] = {}
         self._pending_discoveries: Set[str] = set()
-        self._included: Set[str] = set(entry.options.get(CONF_INCLUDED_HELPERS, []))
-        self._ignored: Set[str] = set(entry.options.get(CONF_IGNORED_HELPERS, []))
+        self._included: Set[str] = set(entry.options.get(CONF_INCLUDED_ENTITIES, []))
+        self._ignored: Set[str] = set(entry.options.get(CONF_IGNORED_ENTITIES, []))
         self._subscription_id: Optional[int] = entry.data.get("subscription_id")
 
-        self.signal_add = SIGNAL_HELPER_ADDED.format(entry_id=entry.entry_id)
-        self.signal_remove = SIGNAL_HELPER_REMOVED.format(entry_id=entry.entry_id)
-        self.signal_update = SIGNAL_HELPER_UPDATED.format(entry_id=entry.entry_id)
+        self.signal_add = SIGNAL_ENTITY_ADDED.format(entry_id=entry.entry_id)
+        self.signal_remove = SIGNAL_ENTITY_REMOVED.format(entry_id=entry.entry_id)
+        self.signal_update = SIGNAL_ENTITY_UPDATED.format(entry_id=entry.entry_id)
 
     @property
     def subscription_id(self) -> Optional[int]:
@@ -136,20 +136,20 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     async def async_update_options(self, entry: ConfigEntry) -> None:
         self.entry = entry
         self.update_filters(
-            included=set(entry.options.get(CONF_INCLUDED_HELPERS, [])),
-            ignored=set(entry.options.get(CONF_IGNORED_HELPERS, [])),
+            included=set(entry.options.get(CONF_INCLUDED_ENTITIES, [])),
+            ignored=set(entry.options.get(CONF_IGNORED_ENTITIES, [])),
         )
         self.reapply_filters()
         await self.async_request_refresh()
 
     def reapply_filters(self) -> None:
-        allowed_slugs = self._select_allowed_slugs(self._helpers)
+        allowed_slugs = self._select_allowed_slugs(self._entities)
         allowed_set = set(allowed_slugs)
         current = dict(self.data or {})
         updated = {
-            slug: self._helpers[slug]
+            slug: self._entities[slug]
             for slug in allowed_slugs
-            if slug in self._helpers
+            if slug in self._entities
         }
         removed = [slug for slug in current if slug not in allowed_set]
         added = [slug for slug in allowed_slugs if slug not in current]
@@ -170,14 +170,14 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
 
     async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
         try:
-            helpers = await self.client.async_list_helpers()
+            entities = await self.client.async_list_entities()
         except HASSEMSAuthError as exc:
             raise ConfigEntryAuthFailed(str(exc)) from exc
         except HASSEMSError as exc:
             raise UpdateFailed(str(exc)) from exc
 
-        mapping: Dict[str, Dict[str, Any]] = {helper["slug"]: helper for helper in helpers if helper.get("slug")}
-        self._helpers = mapping
+        mapping: Dict[str, Dict[str, Any]] = {entity["slug"]: entity for entity in entities if entity.get("slug")}
+        self._entities = mapping
 
         allowed_slugs = self._select_allowed_slugs(mapping)
         current_slugs = set(self.data or {})
@@ -194,8 +194,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         }
 
         for slug in allowed_slugs:
-            helper_data = mapping[slug]
-            await self._async_process_history_cursor(slug, helper_data)
+            entity_data = mapping[slug]
+            await self._async_process_history_cursor(slug, entity_data)
 
         removed_cursor_slugs = [
             slug for slug in list(self._history_cursors) if slug not in mapping
@@ -261,7 +261,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 await self._async_store_measurements(slug, normalized)
         return list(self._history.get(slug, []))
 
-    async def async_set_helper_value(self, slug: str, value: Any) -> None:
+    async def async_set_entity_value(self, slug: str, value: Any) -> None:
         try:
             await self.client.async_set_value(slug, value)
         except HASSEMSAuthError as exc:
@@ -285,13 +285,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         return web.Response(status=200)
 
     async def _async_process_event(self, event: str, payload: Dict[str, Any]) -> None:
-        helper = payload.get("helper") or {}
-        slug = helper.get("slug")
+        entity = payload.get("entity") or {}
+        slug = entity.get("slug")
         if not slug:
             return
 
-        if event == EVENT_HELPER_DELETED:
-            self._helpers.pop(slug, None)
+        if event == EVENT_ENTITY_DELETED:
+            self._entities.pop(slug, None)
             if self.data and slug in self.data:
                 new_data = dict(self.data)
                 new_data.pop(slug, None)
@@ -306,10 +306,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             self._save_history_cursors_if_needed()
             return
 
-        self._helpers[slug] = helper
+        self._entities[slug] = entity
         self._pending_discoveries.discard(slug)
 
-        if event == EVENT_HELPER_VALUE:
+        if event == EVENT_ENTITY_VALUE:
             data_payload = payload.get("data") or {}
             measurement = data_payload.get("measured_at")
             value = data_payload.get("value")
@@ -322,33 +322,33 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 "measured_at": measurement,
                 "recorded_at": recorded_at,
                 "historic": historic_flag,
-                "historic_cursor": cursor_override or helper.get("history_cursor"),
-                "history_cursor": helper.get("history_cursor"),
+                "historic_cursor": cursor_override or entity.get("history_cursor"),
+                "history_cursor": entity.get("history_cursor"),
             })
             if len(history) > MAX_HISTORY_POINTS:
                 del history[:-MAX_HISTORY_POINTS]
             if measurement:
                 await self._async_store_measurements(slug, [history[-1]])
 
-        await self._async_process_history_cursor(slug, helper)
+        await self._async_process_history_cursor(slug, entity)
         self._save_history_cursors_if_needed()
 
-        allowed_slugs = set(self._select_allowed_slugs(self._helpers))
+        allowed_slugs = set(self._select_allowed_slugs(self._entities))
         if slug not in allowed_slugs:
-            await self._async_prompt_discovery(helper)
+            await self._async_prompt_discovery(entity)
             return
 
         existed = slug in (self.data or {})
         new_data = dict(self.data or {})
-        new_data[slug] = helper
+        new_data[slug] = entity
         self.async_set_updated_data(new_data)
         if existed:
             async_dispatcher_send(self.hass, self.signal_update, slug)
         else:
             async_dispatcher_send(self.hass, self.signal_add, slug)
 
-    async def _async_prompt_discovery(self, helper: Dict[str, Any]) -> None:
-        slug = helper.get("slug")
+    async def _async_prompt_discovery(self, entity: Dict[str, Any]) -> None:
+        slug = entity.get("slug")
         if not slug or slug in self._pending_discoveries or slug in self._ignored:
             return
         self._pending_discoveries.add(slug)
@@ -359,16 +359,16 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                     "source": config_entries.SOURCE_INTEGRATION_DISCOVERY,
                     "entry_id": self.entry.entry_id,
                 },
-                data={"helper": helper},
+                data={"entity": entity},
             )
         )
 
-    def helper(self, slug: str) -> Optional[Dict[str, Any]]:
+    def entity(self, slug: str) -> Optional[Dict[str, Any]]:
         if self.data:
             return self.data.get(slug)
         return None
 
-    def helper_history(self, slug: str) -> List[Dict[str, Any]]:
+    def entity_history(self, slug: str) -> List[Dict[str, Any]]:
         return list(self._history.get(slug, []))
 
     def register_entity(self, slug: str, entity_id: str | None) -> None:
@@ -421,8 +421,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     async def _async_store_measurements(
         self, slug: str, measurements: List[Dict[str, Any]], *, force: bool = False
     ) -> None:
-        helper = self._helpers.get(slug)
-        if not helper:
+        entity = self._entities.get(slug)
+        if not entity:
             return
         entity_id = self._sensor_entity_id(slug)
         if not entity_id:
@@ -450,13 +450,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             }
         else:
             base_attributes = {}
-            if (unit := helper.get("unit_of_measurement")) is not None:
+            if (unit := entity.get("unit_of_measurement")) is not None:
                 base_attributes[ATTR_UNIT_OF_MEASUREMENT] = unit
-            if (device_class := helper.get("device_class")) is not None:
+            if (device_class := entity.get("device_class")) is not None:
                 base_attributes[ATTR_DEVICE_CLASS] = device_class
-            if (state_class := helper.get("state_class")) is not None:
+            if (state_class := entity.get("state_class")) is not None:
                 base_attributes[ATTR_STATE_CLASS] = state_class
-            if (icon := helper.get("icon")) is not None:
+            if (icon := entity.get("icon")) is not None:
                 base_attributes["icon"] = icon
 
         entries_states_only: List[Dict[str, Any]] = []
@@ -691,17 +691,17 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
     async def _async_process_history_cursor(
         self,
         slug: str,
-        helper: Dict[str, Any],
+        entity: Dict[str, Any],
         *,
         force_reload: bool = False,
     ) -> None:
-        if helper.get("entity_type") != "hassems":
+        if entity.get("entity_type") != "hassems":
             if slug in self._history_cursors:
                 self._history_cursors.pop(slug, None)
                 self._mark_history_cursors_dirty()
             return
 
-        cursor = helper.get("history_cursor")
+        cursor = entity.get("history_cursor")
         if not cursor:
             if slug in self._history_cursors:
                 self._history_cursors.pop(slug, None)
@@ -725,8 +725,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             self._mark_history_cursors_dirty()
 
     async def _async_reload_history(self, slug: str) -> bool:
-        helper = self._helpers.get(slug)
-        if not helper:
+        entity = self._entities.get(slug)
+        if not entity:
             return False
         try:
             history = await self.client.async_get_history(slug, full=True)
@@ -786,12 +786,12 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         full_refresh: bool = False,
         history_override: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        helper = self._helpers.get(slug)
-        if not helper:
+        entity = self._entities.get(slug)
+        if not entity:
             return
-        if helper.get("entity_type") != "hassems":
+        if entity.get("entity_type") != "hassems":
             return
-        if helper.get("state_class") != "measurement":
+        if entity.get("state_class") != "measurement":
             return
         entity_id = self._sensor_entity_id(slug)
         if not entity_id:
@@ -818,7 +818,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                     return
                 await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
             return
-        mode = str(helper.get("statistics_mode") or "linear").strip().lower()
+        mode = str(entity.get("statistics_mode") or "linear").strip().lower()
         statistics = self._calculate_hourly_statistics(points, mode)
         try:
             instance = recorder.get_instance(self.hass)
@@ -834,8 +834,8 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         metadata: StatisticMetaData = {
             "statistic_id": entity_id,
             "source": DOMAIN,
-            "name": helper.get("name"),
-            "unit_of_measurement": helper.get("unit_of_measurement"),
+            "name": entity.get("name"),
+            "unit_of_measurement": entity.get("unit_of_measurement"),
             "has_sum": False,
             "mean_type": StatisticMeanType.ARITHMETIC,
             "unit_class": None,

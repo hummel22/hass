@@ -21,10 +21,10 @@ from .models import (
     EntityTransportType,
     HistoryPoint,
     HistoryPointUpdate,
-    HelperState,
-    InputHelper,
-    InputHelperCreate,
-    InputHelperUpdate,
+    EntityState,
+    ManagedEntity,
+    ManagedEntityCreate,
+    ManagedEntityUpdate,
     IntegrationConnectionCreate,
     IntegrationConnectionDetail,
     IntegrationConnectionHistoryItem,
@@ -34,7 +34,7 @@ from .models import (
     SetValueRequest,
     WebhookRegistration,
     WebhookSubscription,
-    coerce_helper_value,
+    coerce_entity_value,
 )
 from .mqtt_service import (
     MQTTError,
@@ -44,7 +44,7 @@ from .mqtt_service import (
     publish_value,
     verify_connection,
 )
-from .storage import HISTORICAL_THRESHOLD, InputHelperStore
+from .storage import HISTORICAL_THRESHOLD, ManagedEntityStore
 from .webhooks import WebhookNotifier
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -54,8 +54,8 @@ load_dotenv()  # fall back to repo/root .env if present
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
-DATA_FILE = BASE_DIR / "data" / "input_helpers.db"
-store = InputHelperStore(DATA_FILE)
+DATA_FILE = BASE_DIR / "data" / "managed_entities.db"
+store = ManagedEntityStore(DATA_FILE)
 SUPERUSER_NAME = "HASSEMS Superuser"
 SUPERUSER_TOKEN = "hassems-super-token"
 store.ensure_superuser(name=SUPERUSER_NAME, token=SUPERUSER_TOKEN)
@@ -75,7 +75,7 @@ app.add_middleware(
 )
 
 
-def get_store() -> InputHelperStore:
+def get_store() -> ManagedEntityStore:
     return store
 
 
@@ -95,7 +95,7 @@ def get_optional_client() -> Optional[HomeAssistantClient]:
 def require_api_user(
     x_hassems_token: Optional[str] = Header(default=None, alias="X-HASSEMS-Token"),
     authorization: Optional[str] = Header(default=None),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> ApiUser:
     token = (x_hassems_token or "").strip()
     if not token and authorization:
@@ -122,16 +122,16 @@ def healthcheck() -> dict:
 
 
 @api_router.get("/config/mqtt", response_model=Optional[MQTTConfig])
-def read_mqtt_config(store: InputHelperStore = Depends(get_store)) -> Optional[MQTTConfig]:
+def read_mqtt_config(store: ManagedEntityStore = Depends(get_store)) -> Optional[MQTTConfig]:
     config = store.get_mqtt_config()
     if config is None:
         return None
     return config
 @api_router.put("/config/mqtt", response_model=MQTTConfig)
-def update_mqtt_config(payload: MQTTConfig, store: InputHelperStore = Depends(get_store)) -> MQTTConfig:
+def update_mqtt_config(payload: MQTTConfig, store: ManagedEntityStore = Depends(get_store)) -> MQTTConfig:
     return store.save_mqtt_config(payload)
 @api_router.post("/config/mqtt/test", response_model=MQTTTestResponse)
-async def test_mqtt_config(store: InputHelperStore = Depends(get_store)) -> MQTTTestResponse:
+async def test_mqtt_config(store: ManagedEntityStore = Depends(get_store)) -> MQTTTestResponse:
     config = store.get_mqtt_config()
     if config is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MQTT configuration not found.")
@@ -157,12 +157,12 @@ async def test_mqtt_config(store: InputHelperStore = Depends(get_store)) -> MQTT
 
 
 @api_router.get("/users", response_model=List[ApiUser])
-def list_api_users(store: InputHelperStore = Depends(get_store)) -> List[ApiUser]:
+def list_api_users(store: ManagedEntityStore = Depends(get_store)) -> List[ApiUser]:
     return store.list_api_users()
 
 
 @api_router.post("/users", response_model=ApiUser, status_code=status.HTTP_201_CREATED)
-def create_api_user(payload: ApiUserCreate, store: InputHelperStore = Depends(get_store)) -> ApiUser:
+def create_api_user(payload: ApiUserCreate, store: ManagedEntityStore = Depends(get_store)) -> ApiUser:
     try:
         return store.create_api_user(payload)
     except ValueError as exc:
@@ -179,7 +179,7 @@ def generate_api_token() -> Dict[str, str]:
 def update_api_user(
     user_id: int,
     payload: ApiUserUpdate,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> ApiUser:
     try:
         return store.update_api_user(user_id, payload)
@@ -190,7 +190,7 @@ def update_api_user(
 
 
 @api_router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def delete_api_user(user_id: int, store: InputHelperStore = Depends(get_store)) -> Response:
+def delete_api_user(user_id: int, store: ManagedEntityStore = Depends(get_store)) -> Response:
     try:
         store.delete_api_user(user_id)
     except KeyError as exc:
@@ -200,103 +200,103 @@ def delete_api_user(user_id: int, store: InputHelperStore = Depends(get_store)) 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@api_router.get("/inputs", response_model=List[InputHelper])
-def list_inputs(store: InputHelperStore = Depends(get_store)) -> List[InputHelper]:
-    return store.list_helpers()
-@api_router.post("/inputs", response_model=InputHelper, status_code=status.HTTP_201_CREATED)
-async def create_input_helper(
-    payload: InputHelperCreate,
-    store: InputHelperStore = Depends(get_store),
-) -> InputHelper:
+@api_router.get("/entities", response_model=List[ManagedEntity])
+def list_entities(store: ManagedEntityStore = Depends(get_store)) -> List[ManagedEntity]:
+    return store.list_entities()
+@api_router.post("/entities", response_model=ManagedEntity, status_code=status.HTTP_201_CREATED)
+async def create_entity(
+    payload: ManagedEntityCreate,
+    store: ManagedEntityStore = Depends(get_store),
+) -> ManagedEntity:
     config = store.get_mqtt_config() if payload.entity_type == EntityTransportType.MQTT else None
     if payload.entity_type == EntityTransportType.MQTT and config is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT configuration not provided. Save broker settings before creating helpers.",
+            detail="MQTT configuration not provided. Save broker settings before creating entities.",
         )
 
     try:
-        helper = store.create_helper(payload)
+        entity = store.create_entity(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if helper.entity_type == EntityTransportType.MQTT and config is not None:
+    if entity.entity_type == EntityTransportType.MQTT and config is not None:
         try:
-            await asyncio.to_thread(publish_discovery_config, config, helper)
-            await asyncio.to_thread(publish_availability, config, helper, True)
+            await asyncio.to_thread(publish_discovery_config, config, entity)
+            await asyncio.to_thread(publish_availability, config, entity, True)
         except MQTTError as exc:
-            logger.warning("Failed to publish MQTT discovery payload during helper creation: %s", exc)
+            logger.warning("Failed to publish MQTT discovery payload during entity creation: %s", exc)
             try:
-                store.delete_helper(helper.slug)
+                store.delete_entity(entity.slug)
             except Exception:  # noqa: BLE001
-                logger.exception("Unable to roll back helper creation after MQTT failure")
+                logger.exception("Unable to roll back entity creation after MQTT failure")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Unexpected error publishing MQTT discovery payload during helper creation")
+            logger.exception("Unexpected error publishing MQTT discovery payload during entity creation")
             try:
-                store.delete_helper(helper.slug)
+                store.delete_entity(entity.slug)
             except Exception:  # noqa: BLE001
-                logger.exception("Unable to roll back helper creation after unexpected MQTT failure")
+                logger.exception("Unable to roll back entity creation after unexpected MQTT failure")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    if helper.entity_type == EntityTransportType.HASSEMS:
-        await notifier.helper_created(helper)
-    return helper
-@api_router.put("/inputs/{slug}", response_model=InputHelper)
-async def update_input_helper(
+    if entity.entity_type == EntityTransportType.HASSEMS:
+        await notifier.entity_created(entity)
+    return entity
+@api_router.put("/entities/{slug}", response_model=ManagedEntity)
+async def update_entity(
     slug: str,
-    payload: InputHelperUpdate,
-    store: InputHelperStore = Depends(get_store),
-) -> InputHelper:
+    payload: ManagedEntityUpdate,
+    store: ManagedEntityStore = Depends(get_store),
+) -> ManagedEntity:
     if not payload.model_fields_set:
-        helper_record = store.get_helper(slug)
-        if helper_record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
-        return helper_record.helper
+        entity_record = store.get_entity(slug)
+        if entity_record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
+        return entity_record.entity
 
     try:
-        helper = store.update_helper(slug, payload)
+        entity = store.update_entity(slug, payload)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if helper.entity_type == EntityTransportType.MQTT:
+    if entity.entity_type == EntityTransportType.MQTT:
         config = store.get_mqtt_config()
         if config is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="MQTT configuration not provided. Save broker settings before updating helpers.",
+                detail="MQTT configuration not provided. Save broker settings before updating entities.",
             )
 
         try:
-            await asyncio.to_thread(publish_discovery_config, config, helper)
-            await asyncio.to_thread(publish_availability, config, helper, True)
+            await asyncio.to_thread(publish_discovery_config, config, entity)
+            await asyncio.to_thread(publish_availability, config, entity, True)
         except MQTTError as exc:
-            logger.warning("Failed to publish MQTT discovery payload during helper update: %s", exc)
+            logger.warning("Failed to publish MQTT discovery payload during entity update: %s", exc)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Unexpected error publishing MQTT discovery payload during helper update")
+            logger.exception("Unexpected error publishing MQTT discovery payload during entity update")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    if helper.entity_type == EntityTransportType.HASSEMS:
-        await notifier.helper_updated(helper)
-    return helper
+    if entity.entity_type == EntityTransportType.HASSEMS:
+        await notifier.entity_updated(entity)
+    return entity
 @api_router.delete(
-    "/inputs/{slug}",
+    "/entities/{slug}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_store)) -> Response:
-    record = store.get_helper(slug)
+async def delete_entity(slug: str, store: ManagedEntityStore = Depends(get_store)) -> Response:
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
 
-    store.delete_helper(slug)
+    store.delete_entity(slug)
 
-    if record.helper.entity_type != EntityTransportType.MQTT:
-        if record.helper.entity_type == EntityTransportType.HASSEMS:
-            await notifier.helper_deleted(record.helper)
+    if record.entity.entity_type != EntityTransportType.MQTT:
+        if record.entity.entity_type == EntityTransportType.HASSEMS:
+            await notifier.entity_deleted(record.entity)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     config = store.get_mqtt_config()
@@ -304,8 +304,8 @@ async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_s
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     try:
-        await asyncio.to_thread(publish_availability, config, record.helper, False)
-        await asyncio.to_thread(clear_discovery_config, config, record.helper)
+        await asyncio.to_thread(publish_availability, config, record.entity, False)
+        await asyncio.to_thread(clear_discovery_config, config, record.entity)
     except MQTTError as exc:
         logger.warning("Failed to clear MQTT discovery payload: %s", exc)
     except Exception as exc:  # noqa: BLE001
@@ -314,28 +314,28 @@ async def delete_input_helper(slug: str, store: InputHelperStore = Depends(get_s
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@api_router.get("/inputs/{slug}/history", response_model=List[HistoryPoint])
-def get_helper_history(slug: str, store: InputHelperStore = Depends(get_store)) -> List[HistoryPoint]:
-    record = store.get_helper(slug)
+@api_router.get("/entities/{slug}/history", response_model=List[HistoryPoint])
+def get_entity_history(slug: str, store: ManagedEntityStore = Depends(get_store)) -> List[HistoryPoint]:
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
     return store.list_history(slug)
 
 
-@api_router.put("/inputs/{slug}/history/{history_id}", response_model=HistoryPoint)
-def update_helper_history_point(
+@api_router.put("/entities/{slug}/history/{history_id}", response_model=HistoryPoint)
+def update_entity_history_point(
     slug: str,
     history_id: int,
     request: HistoryPointUpdate,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> HistoryPoint:
-    record = store.get_helper(slug)
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
 
-    helper = record.helper
+    entity = record.entity
     try:
-        coerced = coerce_helper_value(helper.type, request.value, helper.options)
+        coerced = coerce_entity_value(entity.type, request.value, entity.options)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -356,34 +356,34 @@ def update_helper_history_point(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
 
 
-@api_router.delete("/inputs/{slug}/history/{history_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_helper_history_point(
+@api_router.delete("/entities/{slug}/history/{history_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_entity_history_point(
     slug: str,
     history_id: int,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> Response:
-    record = store.get_helper(slug)
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
 
     try:
         store.delete_history_point(slug, history_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found.") from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-@api_router.post("/inputs/{slug}/set", response_model=InputHelper)
-async def set_helper_value(
+@api_router.post("/entities/{slug}/set", response_model=ManagedEntity)
+async def set_entity_value(
     slug: str,
     request: SetValueRequest,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
     client: Optional[HomeAssistantClient] = Depends(get_optional_client),
-) -> InputHelper:
-    record = store.get_helper(slug)
+) -> ManagedEntity:
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
 
     try:
-        coerced = coerce_helper_value(record.helper.type, request.value, record.helper.options)
+        coerced = coerce_entity_value(record.entity.type, request.value, record.entity.options)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -394,14 +394,14 @@ async def set_helper_value(
     cutoff = datetime.now(timezone.utc) - HISTORICAL_THRESHOLD
     is_historic = measured_at_utc <= cutoff
 
-    if client is not None and record.helper.entity_type == EntityTransportType.MQTT:
+    if client is not None and record.entity.entity_type == EntityTransportType.MQTT:
         try:
-            await client.set_helper_value(record.helper, coerced)
+            await client.set_entity_value(record.entity, coerced)
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text or exc.response.reason_phrase
             raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
 
-    if record.helper.entity_type == EntityTransportType.MQTT:
+    if record.entity.entity_type == EntityTransportType.MQTT:
         mqtt_config = store.get_mqtt_config()
         if mqtt_config is None:
             raise HTTPException(
@@ -410,98 +410,98 @@ async def set_helper_value(
             )
 
         try:
-            await asyncio.to_thread(publish_value, mqtt_config, record.helper, coerced, measured_at)
+            await asyncio.to_thread(publish_value, mqtt_config, record.entity, coerced, measured_at)
         except MQTTError as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    helper_after = store.set_last_value(slug, coerced, measured_at=measured_at)
+    entity_after = store.set_last_value(slug, coerced, measured_at=measured_at)
     last_measured_after: Optional[datetime] = None
-    if helper_after.last_measured_at is not None:
-        last_measured_after = helper_after.last_measured_at
+    if entity_after.last_measured_at is not None:
+        last_measured_after = entity_after.last_measured_at
         if last_measured_after.tzinfo is None:
             last_measured_after = last_measured_after.replace(tzinfo=timezone.utc)
         else:
             last_measured_after = last_measured_after.astimezone(timezone.utc)
     should_notify = last_measured_after == measured_at_utc
-    if should_notify and helper_after.entity_type == EntityTransportType.HASSEMS:
-        await notifier.helper_value(
-            helper_after,
+    if should_notify and entity_after.entity_type == EntityTransportType.HASSEMS:
+        await notifier.entity_value(
+            entity_after,
             value=coerced,
             measured_at=measured_at,
             historic=is_historic,
-            historic_cursor=helper_after.history_cursor,
+            historic_cursor=entity_after.history_cursor,
         )
-    return helper_after
+    return entity_after
 
 
-@api_router.get("/integrations/home-assistant/helpers", response_model=List[InputHelper])
-def integration_list_helpers(
-    store: InputHelperStore = Depends(get_store),
+@api_router.get("/integrations/home-assistant/entities", response_model=List[ManagedEntity])
+def integration_list_entities(
+    store: ManagedEntityStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
-) -> List[InputHelper]:
-    return store.list_helpers_by_type(
+) -> List[ManagedEntity]:
+    return store.list_entities_by_kind(
         EntityTransportType.HASSEMS, only_enabled=True
     )
 
 
-@api_router.get("/integrations/home-assistant/helpers/{slug}", response_model=InputHelper)
-def integration_get_helper(
+@api_router.get("/integrations/home-assistant/entities/{slug}", response_model=ManagedEntity)
+def integration_get_entity(
     slug: str,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
-) -> InputHelper:
-    record = store.get_helper(slug)
+) -> ManagedEntity:
+    record = store.get_entity(slug)
     if (
         record is None
-        or record.helper.entity_type != EntityTransportType.HASSEMS
-        or not record.helper.ha_enabled
+        or record.entity.entity_type != EntityTransportType.HASSEMS
+        or not record.entity.ha_enabled
     ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
-    return record.helper
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
+    return record.entity
 
 
 @api_router.get(
-    "/integrations/home-assistant/helpers/{slug}/history",
+    "/integrations/home-assistant/entities/{slug}/history",
     response_model=List[HistoryPoint],
 )
 def integration_get_history(
     slug: str,
     full: bool = Query(default=False),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
     _: ApiUser = Depends(require_api_user),
 ) -> List[HistoryPoint]:
-    record = store.get_helper(slug)
+    record = store.get_entity(slug)
     if (
         record is None
-        or record.helper.entity_type != EntityTransportType.HASSEMS
-        or not record.helper.ha_enabled
+        or record.entity.entity_type != EntityTransportType.HASSEMS
+        or not record.entity.ha_enabled
     ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
     limit = 0 if full else 200
     return store.list_history(slug, limit=limit)
 
 
 @api_router.post(
-    "/integrations/home-assistant/helpers/{slug}/set",
-    response_model=InputHelper,
+    "/integrations/home-assistant/entities/{slug}/set",
+    response_model=ManagedEntity,
 )
-async def integration_set_helper_value(
+async def integration_set_entity_value(
     slug: str,
     request: SetValueRequest,
     _: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
     client: Optional[HomeAssistantClient] = Depends(get_optional_client),
-) -> InputHelper:
-    record = store.get_helper(slug)
+) -> ManagedEntity:
+    record = store.get_entity(slug)
     if (
         record is None
-        or record.helper.entity_type != EntityTransportType.HASSEMS
-        or not record.helper.ha_enabled
+        or record.entity.entity_type != EntityTransportType.HASSEMS
+        or not record.entity.ha_enabled
     ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
-    return await set_helper_value(slug, request, store=store, client=client)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
+    return await set_entity_value(slug, request, store=store, client=client)
 
 
 @api_router.get(
@@ -510,7 +510,7 @@ async def integration_set_helper_value(
 )
 def integration_list_webhooks(
     user: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> List[WebhookSubscription]:
     target_user_id = None if user.is_superuser else user.id
     return store.list_webhook_subscriptions(target_user_id)
@@ -524,7 +524,7 @@ def integration_list_webhooks(
 def integration_register_webhook(
     payload: WebhookRegistration,
     user: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> WebhookSubscription:
     try:
         return store.save_webhook_subscription(user.id, payload)
@@ -540,7 +540,7 @@ def integration_register_webhook(
 def integration_delete_webhook(
     subscription_id: int,
     user: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> Response:
     target_user_id = None if user.is_superuser else user.id
     try:
@@ -555,7 +555,7 @@ def integration_delete_webhook(
     response_model=List[IntegrationConnectionSummary],
 )
 def integration_list_connections(
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> List[IntegrationConnectionSummary]:
     return store.list_integration_connections()
 
@@ -566,7 +566,7 @@ def integration_list_connections(
 )
 def integration_get_connection(
     entry_id: str,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> IntegrationConnectionDetail:
     record = store.get_integration_connection(entry_id)
     if record is None:
@@ -583,7 +583,7 @@ def integration_get_connection(
 )
 def integration_get_connection_history(
     entry_id: str,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> List[IntegrationConnectionHistoryItem]:
     try:
         return store.list_integration_connection_history(entry_id)
@@ -598,7 +598,7 @@ def integration_get_connection_history(
 def integration_upsert_connection(
     payload: IntegrationConnectionCreate,
     user: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> IntegrationConnectionDetail:
     try:
         return store.save_integration_connection(user, payload)
@@ -614,7 +614,7 @@ def integration_upsert_connection(
 def integration_delete_connection(
     entry_id: str,
     user: ApiUser = Depends(require_api_user),
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
 ) -> Response:
     try:
         store.delete_integration_connection(
@@ -628,40 +628,40 @@ def integration_delete_connection(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@api_router.get("/inputs/{slug}/state", response_model=HelperState)
-async def get_helper_state(
+@api_router.get("/entities/{slug}/state", response_model=EntityState)
+async def get_entity_state(
     slug: str,
-    store: InputHelperStore = Depends(get_store),
+    store: ManagedEntityStore = Depends(get_store),
     client: HomeAssistantClient = Depends(get_client),
-) -> HelperState:
-    record = store.get_helper(slug)
+) -> EntityState:
+    record = store.get_entity(slug)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Helper '{slug}' not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity '{slug}' not found.")
 
-    helper = record.helper
-    if helper.entity_type != EntityTransportType.MQTT:
+    entity = record.entity
+    if entity.entity_type != EntityTransportType.MQTT:
         attributes: Dict[str, Any] = {
-            "entity_type": helper.entity_type.value,
+            "entity_type": entity.entity_type.value,
         }
-        if helper.unit_of_measurement:
-            attributes["unit_of_measurement"] = helper.unit_of_measurement
-        if helper.device_class:
-            attributes["device_class"] = helper.device_class
-        state_value = helper.last_value
-        return HelperState(
-            entity_id=helper.entity_id,
+        if entity.unit_of_measurement:
+            attributes["unit_of_measurement"] = entity.unit_of_measurement
+        if entity.device_class:
+            attributes["device_class"] = entity.device_class
+        state_value = entity.last_value
+        return EntityState(
+            entity_id=entity.entity_id,
             state="" if state_value is None else str(state_value),
-            last_changed=helper.last_measured_at,
-            last_updated=helper.updated_at,
+            last_changed=entity.last_measured_at,
+            last_updated=entity.updated_at,
             attributes=attributes,
         )
 
     try:
-        state = await client.get_state(helper.entity_id)
+        state = await client.get_state(entity.entity_id)
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text or exc.response.reason_phrase
         raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
-    return HelperState(**state)
+    return EntityState(**state)
 
 
 @app.on_event("shutdown")

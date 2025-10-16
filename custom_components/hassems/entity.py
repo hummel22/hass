@@ -4,9 +4,9 @@ import logging
 from typing import Any, Dict, Optional
 
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.entities.device_registry import DeviceInfo
+from homeassistant.entities.dispatcher import async_dispatcher_connect
+from homeassistant.entities.update_coordinator import CoordinatorEntity
 
 from .coordinator import HASSEMSCoordinator
 from .const import (
@@ -31,53 +31,53 @@ class HASSEMSEntity(CoordinatorEntity[Dict[str, Dict[str, Any]]]):
     def __init__(self, coordinator: HASSEMSCoordinator, slug: str) -> None:
         super().__init__(coordinator)
         self._slug = slug
-        helper = self.helper
-        unique_id = helper.get("unique_id") if helper else None
+        entity = self.entity
+        unique_id = entity.get("unique_id") if entity else None
         self._attr_unique_id = unique_id or slug
-        self._attr_name = helper.get("name") if helper else None
+        self._attr_name = entity.get("name") if entity else None
 
     @property
-    def helper(self) -> Optional[Dict[str, Any]]:
-        return self.coordinator.helper(self._slug)
+    def entity(self) -> Optional[Dict[str, Any]]:
+        return self.coordinator.entity(self._slug)
 
     @property
     def available(self) -> bool:
-        return self.helper is not None
+        return self.entity is not None
 
     @property
     def device_info(self) -> Optional[DeviceInfo]:
-        helper = self.helper
-        if helper is None:
+        entity = self.entity
+        if entity is None:
             return None
-        identifiers = {(DOMAIN, helper.get("device_id") or helper["slug"])}
-        for identifier in helper.get("device_identifiers") or []:
+        identifiers = {(DOMAIN, entity.get("device_id") or entity["slug"])}
+        for identifier in entity.get("device_identifiers") or []:
             identifiers.add((DOMAIN, identifier))
         return DeviceInfo(
             identifiers=identifiers,
-            name=helper.get("device_name") or helper.get("name"),
-            manufacturer=helper.get("device_manufacturer") or "HASSEMS",
-            model=helper.get("device_model"),
-            sw_version=helper.get("device_sw_version"),
+            name=entity.get("device_name") or entity.get("name"),
+            manufacturer=entity.get("device_manufacturer") or "HASSEMS",
+            model=entity.get("device_model"),
+            sw_version=entity.get("device_sw_version"),
         )
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
-        helper = self.helper
+        entity = self.entity
         attributes: Dict[str, Any] = {}
-        if helper:
-            measured_at = helper.get("last_measured_at")
+        if entity:
+            measured_at = entity.get("last_measured_at")
             if measured_at:
                 attributes[ATTR_LAST_MEASURED] = measured_at
-            statistics_mode = helper.get(ATTR_STATISTICS_MODE)
+            statistics_mode = entity.get(ATTR_STATISTICS_MODE)
             if statistics_mode:
                 attributes[ATTR_STATISTICS_MODE] = statistics_mode
-            history_cursor = helper.get("history_cursor")
+            history_cursor = entity.get("history_cursor")
             if history_cursor:
                 attributes[ATTR_HISTORY_CURSOR] = history_cursor
-            cursor_events = helper.get("history_cursor_events") or []
+            cursor_events = entity.get("history_cursor_events") or []
             if cursor_events:
                 attributes[ATTR_HISTORY_CURSOR_EVENTS] = cursor_events
-        history = self.coordinator.helper_history(self._slug)
+        history = self.coordinator.entity_history(self._slug)
         if history:
             attributes[ATTR_HISTORY] = history[-50:]
         return attributes

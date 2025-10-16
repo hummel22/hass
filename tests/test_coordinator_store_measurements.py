@@ -48,7 +48,7 @@ async def test_store_measurements_today_uses_recorder(monkeypatch: pytest.Monkey
         func(*args)
 
     coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
-    coordinator._helpers["test"] = {
+    coordinator._entities["test"] = {
         "slug": "test",
         "entity_type": "hassems",
         "unit_of_measurement": "kWh",
@@ -109,7 +109,7 @@ async def test_store_measurements_recent_states_only(monkeypatch: pytest.MonkeyP
         func(*args)
 
     coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
-    coordinator._helpers["test"] = {
+    coordinator._entities["test"] = {
         "slug": "test",
         "entity_type": "hassems",
         "unit_of_measurement": "kWh",
@@ -175,7 +175,7 @@ async def test_store_measurements_historic_statistics_only(
         func(*args)
 
     coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
-    coordinator._helpers["test"] = {
+    coordinator._entities["test"] = {
         "slug": "test",
         "entity_type": "hassems",
         "unit_of_measurement": "kWh",
