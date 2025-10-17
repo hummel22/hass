@@ -603,18 +603,29 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 len(entries_states_only),
                 slug,
             )
-            await self.hass.async_add_executor_job(
-                self._write_measurements_direct,
-                instance,
-                entity_id,
-                entries_states_only,
-                True,
-            )
-            _LOGGER.debug(
-                "Finished writing %s historic measurements for %s",
-                len(entries_states_only),
-                slug,
-            )
+            try:
+                await self.hass.async_add_executor_job(
+                    self._write_measurements_direct,
+                    instance,
+                    entity_id,
+                    entries_states_only,
+                    True,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Error writing historic measurements for %s (%s rows) to recorder: %s",
+                    slug,
+                    len(entries_states_only),
+                    err,
+                    exc_info=True,
+                )
+                raise
+            else:
+                _LOGGER.debug(
+                    "Finished writing %s historic measurements for %s",
+                    len(entries_states_only),
+                    slug,
+                )
 
         if processed_for_statistics:
             _LOGGER.debug("Triggering statistics refresh for %s", slug)
@@ -631,157 +642,167 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
 
         session = instance.get_session()
-        with session_scope(session=session) as scoped_session:
-            if not states_only:
-                event_type = (
-                    scoped_session.query(EventTypes)
-                    .filter(EventTypes.event_type == EVENT_STATE_CHANGED)
+        try:
+            with session_scope(session=session) as scoped_session:
+                if not states_only:
+                    event_type = (
+                        scoped_session.query(EventTypes)
+                        .filter(EventTypes.event_type == EVENT_STATE_CHANGED)
+                        .one_or_none()
+                    )
+                    if event_type is None:
+                        event_type = EventTypes(event_type=EVENT_STATE_CHANGED)
+                        scoped_session.add(event_type)
+                        scoped_session.flush()
+                else:
+                    event_type = None
+    
+                states_meta = (
+                    scoped_session.query(StatesMeta)
+                    .filter(StatesMeta.entity_id == entity_id)
                     .one_or_none()
                 )
-                if event_type is None:
-                    event_type = EventTypes(event_type=EVENT_STATE_CHANGED)
-                    scoped_session.add(event_type)
+                if states_meta is None:
+                    states_meta = StatesMeta(entity_id=entity_id)
+                    scoped_session.add(states_meta)
                     scoped_session.flush()
-            else:
-                event_type = None
-
-            states_meta = (
-                scoped_session.query(StatesMeta)
-                .filter(StatesMeta.entity_id == entity_id)
-                .one_or_none()
-            )
-            if states_meta is None:
-                states_meta = StatesMeta(entity_id=entity_id)
-                scoped_session.add(states_meta)
-                scoped_session.flush()
-
-            metadata_id = states_meta.metadata_id
-
-            last_state = (
-                scoped_session.query(States)
-                .filter(States.metadata_id == metadata_id)
-                .order_by(States.last_updated_ts.desc())
-                .limit(1)
-                .one_or_none()
-            )
-
-            if last_state is not None:
-                last_state_obj = last_state.to_native(validate_entity_id=False)
-            else:
-                last_state_obj = None
-
-            previous_state_dict: Dict[str, Any] | None = (
-                last_state_obj.as_dict() if last_state_obj is not None else None
-            )
-            previous_state_id = last_state.state_id if last_state is not None else None
-            previous_state_value = (
-                last_state_obj.state if last_state_obj is not None else None
-            )
-            if last_state is None:
-                previous_last_changed_ts: float | None = None
-            elif last_state.last_changed_ts is not None:
-                previous_last_changed_ts = last_state.last_changed_ts
-            else:
-                previous_last_changed_ts = last_state.last_updated_ts
-
-            for entry in entries:
-                timestamp: datetime = dt_util.as_utc(entry["timestamp"])
-                timestamp_ts = dt_util.utc_to_timestamp(timestamp)
-                state_str: str = entry["state"]
-                attributes: Dict[str, Any] = entry["attributes"]
-
-                if (
-                    previous_state_value is not None
-                    and previous_state_value == state_str
-                    and previous_last_changed_ts is not None
-                ):
-                    last_changed_ts = previous_last_changed_ts
+    
+                metadata_id = states_meta.metadata_id
+    
+                last_state = (
+                    scoped_session.query(States)
+                    .filter(States.metadata_id == metadata_id)
+                    .order_by(States.last_updated_ts.desc())
+                    .limit(1)
+                    .one_or_none()
+                )
+    
+                if last_state is not None:
+                    last_state_obj = last_state.to_native(validate_entity_id=False)
                 else:
-                    last_changed_ts = timestamp_ts
-
-                last_changed_dt = dt_util.utc_from_timestamp(last_changed_ts)
-                new_state_dict = {
-                    "entity_id": entity_id,
-                    "state": state_str,
-                    "attributes": attributes,
-                    "last_changed": last_changed_dt.isoformat(),
-                    "last_updated": timestamp.isoformat(),
-                }
-
-                if not states_only and event_type is not None:
-                    event_data = {
-                        ATTR_ENTITY_ID: entity_id,
-                        "old_state": previous_state_dict,
-                        "new_state": new_state_dict,
+                    last_state_obj = None
+    
+                previous_state_dict: Dict[str, Any] | None = (
+                    last_state_obj.as_dict() if last_state_obj is not None else None
+                )
+                previous_state_id = last_state.state_id if last_state is not None else None
+                previous_state_value = (
+                    last_state_obj.state if last_state_obj is not None else None
+                )
+                if last_state is None:
+                    previous_last_changed_ts: float | None = None
+                elif last_state.last_changed_ts is not None:
+                    previous_last_changed_ts = last_state.last_changed_ts
+                else:
+                    previous_last_changed_ts = last_state.last_updated_ts
+    
+                for entry in entries:
+                    timestamp: datetime = dt_util.as_utc(entry["timestamp"])
+                    timestamp_ts = dt_util.utc_to_timestamp(timestamp)
+                    state_str: str = entry["state"]
+                    attributes: Dict[str, Any] = entry["attributes"]
+    
+                    if (
+                        previous_state_value is not None
+                        and previous_state_value == state_str
+                        and previous_last_changed_ts is not None
+                    ):
+                        last_changed_ts = previous_last_changed_ts
+                    else:
+                        last_changed_ts = timestamp_ts
+    
+                    last_changed_dt = dt_util.utc_from_timestamp(last_changed_ts)
+                    new_state_dict = {
+                        "entity_id": entity_id,
+                        "state": state_str,
+                        "attributes": attributes,
+                        "last_changed": last_changed_dt.isoformat(),
+                        "last_updated": timestamp.isoformat(),
                     }
-
-                    event_data_row = EventData(
+    
+                    if not states_only and event_type is not None:
+                        event_data = {
+                            ATTR_ENTITY_ID: entity_id,
+                            "old_state": previous_state_dict,
+                            "new_state": new_state_dict,
+                        }
+    
+                        event_data_row = EventData(
+                            hash=None,
+                            shared_data=json.dumps(
+                                event_data, sort_keys=True, default=str
+                            ),
+                        )
+                        scoped_session.add(event_data_row)
+                        scoped_session.flush()
+    
+                        event_row = Events(
+                            event_type=None,
+                            event_data=None,
+                            origin=None,
+                            origin_idx=1,
+                            time_fired=timestamp,
+                            time_fired_ts=timestamp_ts,
+                            context_id=None,
+                            context_user_id=None,
+                            context_parent_id=None,
+                            data_id=event_data_row.data_id,
+                            context_id_bin=None,
+                            context_user_id_bin=None,
+                            context_parent_id_bin=None,
+                            event_type_id=event_type.event_type_id,
+                        )
+                        scoped_session.add(event_row)
+                        scoped_session.flush()
+                        event_id = event_row.event_id
+                    else:
+                        event_id = None
+    
+                    attributes_row = StateAttributes(
                         hash=None,
-                        shared_data=json.dumps(
-                            event_data, sort_keys=True, default=str
-                        ),
+                        shared_attrs=json.dumps(attributes, sort_keys=True, default=str),
                     )
-                    scoped_session.add(event_data_row)
+                    scoped_session.add(attributes_row)
                     scoped_session.flush()
-
-                    event_row = Events(
-                        event_type=None,
-                        event_data=None,
-                        origin=None,
-                        origin_idx=1,
-                        time_fired=timestamp,
-                        time_fired_ts=timestamp_ts,
+    
+                    states_row = States(
+                        entity_id=entity_id,
+                        state=state_str,
+                        attributes=None,
+                        event_id=event_id,
+                        last_changed=None,
+                        last_changed_ts=None
+                        if last_changed_ts == timestamp_ts
+                        else last_changed_ts,
+                        last_updated=None,
+                        last_updated_ts=timestamp_ts,
+                        old_state_id=previous_state_id,
+                        attributes_id=attributes_row.attributes_id,
                         context_id=None,
                         context_user_id=None,
                         context_parent_id=None,
-                        data_id=event_data_row.data_id,
+                        origin_idx=1,
                         context_id_bin=None,
                         context_user_id_bin=None,
                         context_parent_id_bin=None,
-                        event_type_id=event_type.event_type_id,
+                        metadata_id=metadata_id,
                     )
-                    scoped_session.add(event_row)
+                    scoped_session.add(states_row)
                     scoped_session.flush()
-                    event_id = event_row.event_id
-                else:
-                    event_id = None
-
-                attributes_row = StateAttributes(
-                    hash=None,
-                    shared_attrs=json.dumps(attributes, sort_keys=True, default=str),
-                )
-                scoped_session.add(attributes_row)
-                scoped_session.flush()
-
-                states_row = States(
-                    entity_id=entity_id,
-                    state=state_str,
-                    attributes=None,
-                    event_id=event_id,
-                    last_changed=None,
-                    last_changed_ts=None
-                    if last_changed_ts == timestamp_ts
-                    else last_changed_ts,
-                    last_updated=None,
-                    last_updated_ts=timestamp_ts,
-                    old_state_id=previous_state_id,
-                    attributes_id=attributes_row.attributes_id,
-                    context_id=None,
-                    context_user_id=None,
-                    context_parent_id=None,
-                    origin_idx=1,
-                    context_id_bin=None,
-                    context_user_id_bin=None,
-                    context_parent_id_bin=None,
-                    metadata_id=metadata_id,
-                )
-                scoped_session.add(states_row)
-                scoped_session.flush()
-
-                previous_state_dict = new_state_dict
-                previous_state_id = states_row.state_id
-                previous_state_value = state_str
-                previous_last_changed_ts = last_changed_ts
+    
+                    previous_state_dict = new_state_dict
+                    previous_state_id = states_row.state_id
+                    previous_state_value = state_str
+                    previous_last_changed_ts = last_changed_ts
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Error while writing %s recorder rows for %s: %s",
+                len(entries),
+                entity_id,
+                err,
+                exc_info=True,
+            )
+            raise
 
     async def _async_process_history_cursor(
         self,
@@ -1008,16 +1029,28 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 points[0][0].isoformat(),
                 points[-1][0].isoformat(),
             )
-        statistics = self._calculate_hourly_statistics(points, mode)
+        statistics = self._calculate_hourly_statistics(
+            points,
+            mode,
+            history_window=(hist_start, hist_end),
+        )
+        stats_count = len(statistics)
         if statistics:
             stats_start = statistics[0]["start"].isoformat()
             stats_end = statistics[-1]["start"].isoformat()
             _LOGGER.debug(
-                "Computed %s hourly statistics rows for %s covering %s to %s",
-                len(statistics),
+                "Computed %s hourly statistics rows for %s covering %s to %s (mode=%s)",
+                stats_count,
                 slug,
                 stats_start,
                 stats_end,
+                mode,
+            )
+        else:
+            _LOGGER.debug(
+                "No hourly statistics rows computed for %s using mode=%s",
+                slug,
+                mode,
             )
         try:
             instance = recorder.get_instance(self.hass)
@@ -1042,7 +1075,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             "unit_class": None,
         }
         _LOGGER.debug(
-            "Submitting %s statistics rows for %s", len(statistics), slug
+            "Submitting %s statistics rows for %s (mode=%s)",
+            stats_count,
+            slug,
+            mode,
         )
         first_start = statistics[0]["start"].isoformat()
         last_start = statistics[-1]["start"].isoformat()
@@ -1052,7 +1088,29 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             first_start,
             last_start,
         )
-        async_add_external_statistics(self.hass, metadata, statistics)
+        try:
+            _LOGGER.debug(
+                "Writing %s long-term statistics rows for %s (mode=%s) to recorder",
+                stats_count,
+                slug,
+                mode,
+            )
+            async_add_external_statistics(self.hass, metadata, statistics)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Error writing long-term statistics for %s (mode=%s): %s",
+                slug,
+                mode,
+                err,
+                exc_info=True,
+            )
+            raise
+        else:
+            _LOGGER.debug(
+                "Finished writing %s long-term statistics rows for %s",
+                stats_count,
+                slug,
+            )
 
     def _parse_measurement_points(
         self, history: List[Dict[str, Any]]
@@ -1097,13 +1155,32 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         return deduped
 
     def _calculate_hourly_statistics(
-        self, points: List[Tuple[datetime, float]], mode: str
+        self,
+        points: List[Tuple[datetime, float]],
+        mode: str,
+        history_window: Tuple[datetime | None, datetime | None] | None = None,
     ) -> List[StatisticData]:
         if not points:
             return []
 
         processed = list(points)
         normalized_mode = mode if mode in {"linear", "step", "point"} else "linear"
+        start_anchor = processed[0][0]
+        end_anchor = processed[-1][0]
+        if history_window is not None:
+            window_start, window_end = history_window
+            if window_start is not None:
+                start_anchor = window_start
+            if window_end is not None:
+                end_anchor = window_end
+        start_hour = start_anchor.replace(minute=0, second=0, microsecond=0)
+        if end_anchor > start_anchor:
+            effective_end = end_anchor - timedelta(microseconds=1)
+        else:
+            effective_end = end_anchor
+        end_hour = effective_end.replace(minute=0, second=0, microsecond=0)
+        if end_hour < start_hour:
+            end_hour = start_hour
         if normalized_mode == "point":
             hour_buckets: Dict[datetime, Dict[str, Any]] = {}
             for timestamp, value in processed:
@@ -1136,12 +1213,49 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                         "state": state_value,
                     }
                 )
+            if statistics:
+                filled: Dict[datetime, StatisticData] = {
+                    stat["start"]: stat for stat in statistics
+                }
+            else:
+                filled = {}
+            cursor = start_hour
+            while cursor <= end_hour:
+                if cursor not in filled:
+                    filled[cursor] = {
+                        "start": cursor,
+                        "mean": 0.0,
+                        "min": 0.0,
+                        "max": 0.0,
+                        "state": 0.0,
+                    }
+                cursor += timedelta(hours=1)
+            statistics = [
+                filled_hour
+                for filled_hour in sorted(filled.values(), key=lambda item: item["start"])
+            ]
             return statistics
         if normalized_mode == "step" and processed:
             now = dt_util.utcnow()
             last_time = processed[-1][0]
             if now > last_time:
                 processed.append((now, processed[-1][1]))
+        if normalized_mode == "step" and len(processed) == 1:
+            statistics: List[StatisticData] = []
+            cursor = start_hour
+            single_value = float(processed[0][1])
+            while cursor <= end_hour:
+                statistics.append(
+                    {
+                        "start": cursor,
+                        "mean": single_value,
+                        "min": single_value,
+                        "max": single_value,
+                        "state": single_value,
+                    }
+                )
+                cursor += timedelta(hours=1)
+            return statistics
         if len(processed) < 2:
             return []
         hour_stats: Dict[datetime, Dict[str, Any]] = {}
@@ -1222,7 +1336,127 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 statistics[0]["start"].isoformat(),
                 statistics[-1]["start"].isoformat(),
             )
+        statistics = [
+            stat
+            for stat in statistics
+            if start_hour <= stat["start"] <= end_hour
+        ]
+        stats_by_hour: Dict[datetime, StatisticData] = {
+            stat["start"]: stat for stat in statistics
+        }
+        cursor = start_hour
+        while cursor <= end_hour:
+            if cursor not in stats_by_hour:
+                if normalized_mode == "linear":
+                    interpolated = self._interpolate_linear_hour(
+                        processed, cursor, cursor + timedelta(hours=1)
+                    )
+                else:
+                    interpolated = self._interpolate_step_hour(
+                        processed, cursor, cursor + timedelta(hours=1)
+                    )
+                if interpolated is not None:
+                    stats_by_hour[cursor] = interpolated
+            cursor += timedelta(hours=1)
+        if stats_by_hour:
+            statistics = [
+                stats_by_hour[hour]
+                for hour in sorted(stats_by_hour, key=lambda item: item)
+            ]
         return statistics
+
+    def _interpolate_linear_hour(
+        self,
+        points: List[Tuple[datetime, float]],
+        hour_start: datetime,
+        hour_end: datetime,
+    ) -> StatisticData | None:
+        if not points:
+            return None
+        if len(points) == 1:
+            value = float(points[0][1])
+            return {
+                "start": hour_start,
+                "mean": value,
+                "min": value,
+                "max": value,
+                "state": value,
+            }
+        start_value = self._linear_value_from_points(points, hour_start)
+        end_value = self._linear_value_from_points(points, hour_end)
+        min_value = min(start_value, end_value)
+        max_value = max(start_value, end_value)
+        mean_value = (start_value + end_value) / 2.0
+        return {
+            "start": hour_start,
+            "mean": mean_value,
+            "min": min_value,
+            "max": max_value,
+            "state": end_value,
+        }
+
+    def _interpolate_step_hour(
+        self,
+        points: List[Tuple[datetime, float]],
+        hour_start: datetime,
+        hour_end: datetime,
+    ) -> StatisticData | None:
+        if not points:
+            return None
+        start_value = self._step_value_from_points(points, hour_start)
+        end_value = self._step_value_from_points(points, hour_end)
+        min_value = min(start_value, end_value)
+        max_value = max(start_value, end_value)
+        return {
+            "start": hour_start,
+            "mean": start_value,
+            "min": min_value,
+            "max": max_value,
+            "state": end_value,
+        }
+
+    def _linear_value_from_points(
+        self, points: List[Tuple[datetime, float]], target: datetime
+    ) -> float:
+        if len(points) == 1:
+            return float(points[0][1])
+        if target <= points[0][0]:
+            start_time, start_value = points[0]
+            end_time, end_value = points[1]
+        elif target >= points[-1][0]:
+            start_time, start_value = points[-2]
+            end_time, end_value = points[-1]
+        else:
+            start_time = points[0][0]
+            start_value = points[0][1]
+            end_time = points[1][0]
+            end_value = points[1][1]
+            for index in range(len(points) - 1):
+                segment_start, segment_value = points[index]
+                segment_end, segment_end_value = points[index + 1]
+                if segment_start <= target <= segment_end:
+                    start_time = segment_start
+                    start_value = segment_value
+                    end_time = segment_end
+                    end_value = segment_end_value
+                    break
+        return float(
+            self._value_at("linear", start_time, start_value, end_time, end_value, target)
+        )
+
+    def _step_value_from_points(
+        self, points: List[Tuple[datetime, float]], target: datetime
+    ) -> float:
+        if target <= points[0][0]:
+            return float(points[0][1])
+        for index in range(len(points) - 1):
+            start_time, start_value = points[index]
+            end_time, end_value = points[index + 1]
+            if target <= end_time:
+                return float(
+                    self._value_at("step", start_time, start_value, end_time, end_value, target)
+                )
+        return float(points[-1][1])
 
     @staticmethod
     def _history_window(
