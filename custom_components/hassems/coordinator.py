@@ -242,7 +242,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 _LOGGER.warning("Unexpected error loading history for %s: %s", slug, result)
                 self._history[slug] = []
             else:
-                entity_id = self._sensor_entity_id(slug)
+                entity_id = self._statistics_entity_id(slug)
                 normalized = self._normalize_history_records(
                     result,
                     slug=slug,
@@ -280,7 +280,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 raise ConfigEntryAuthFailed(str(exc)) from exc
             except HASSEMSError as exc:
                 raise HomeAssistantError(str(exc)) from exc
-            entity_id = self._sensor_entity_id(slug)
+            entity_id = self._statistics_entity_id(slug)
             normalized = self._normalize_history_records(
                 history,
                 slug=slug,
@@ -433,18 +433,22 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         if not entity_id:
             return
         self._entity_ids[slug] = entity_id
+        if self._history.get(slug):
+            self.hass.async_create_task(
+                self._async_backfill_history_for_entity(slug)
+            )
 
     def unregister_entity(self, slug: str) -> None:
         self._entity_ids.pop(slug, None)
 
-    def _sensor_entity_id(self, slug: str) -> str | None:
+    def _statistics_entity_id(self, slug: str) -> str | None:
         entity_id = self._entity_ids.get(slug)
         if not entity_id:
             return None
         domain, sep, object_id = entity_id.partition(".")
         if sep != "." or not domain or not object_id:
             return None
-        if domain != "sensor":
+        if domain not in {"sensor", "number"}:
             return None
         return entity_id
 
@@ -476,13 +480,19 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             self.entry = updated_entry
         self._history_cursors_dirty = False
 
+    async def _async_backfill_history_for_entity(self, slug: str) -> None:
+        history = self._history.get(slug)
+        if not history:
+            return
+        await self._async_store_measurements(slug, history, force=True)
+
     async def _async_store_measurements(
         self, slug: str, measurements: List[Dict[str, Any]], *, force: bool = False
     ) -> None:
         entity = self._entities.get(slug)
         if not entity:
             return
-        entity_id = self._sensor_entity_id(slug)
+        entity_id = self._statistics_entity_id(slug)
         if not entity_id:
             return
         try:
@@ -892,7 +902,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             _LOGGER.warning("Unexpected error reloading history for %s: %s", slug, exc)
             return False
 
-        entity_id = self._sensor_entity_id(slug)
+        entity_id = self._statistics_entity_id(slug)
         normalized = self._normalize_history_records(
             history,
             slug=slug,
@@ -951,7 +961,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         if not entries:
             return []
         if slug and entity_id is None:
-            entity_id = self._sensor_entity_id(slug)
+            entity_id = self._statistics_entity_id(slug)
         _LOGGER.debug(
             "Normalizing %s history entries for %s (entity_id=%s)",
             len(entries),
@@ -1010,7 +1020,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
         if entity.get("state_class") != "measurement":
             return
-        entity_id = self._sensor_entity_id(slug)
+        entity_id = self._statistics_entity_id(slug)
         if not entity_id:
             return
         _LOGGER.debug(

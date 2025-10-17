@@ -144,6 +144,70 @@ async def test_store_measurements_recent_states_only(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_store_measurements_accepts_number_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant(asyncio.get_running_loop())
+    recorder_instance = SimpleNamespace(is_running=True)
+
+    monkeypatch.setattr(
+        "custom_components.hassems.coordinator.recorder.get_instance",
+        lambda hass: recorder_instance,
+    )
+    monkeypatch.setattr(
+        "custom_components.hassems.coordinator.recorder.is_entity_recorded",
+        lambda hass, entity_id: True,
+    )
+
+    direct_calls: List[Any] = []
+
+    def fake_write(
+        instance: Any,
+        entity_id: str,
+        entries: List[Dict[str, Any]],
+        states_only: bool = False,
+    ) -> None:
+        direct_calls.append((entries, states_only))
+
+    async def fake_add_executor_job(func: Any, *args: Any) -> None:
+        func(*args)
+
+    coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
+    coordinator._entities["test"] = {
+        "slug": "test",
+        "entity_type": "hassems",
+        "unit_of_measurement": "kWh",
+    }
+    coordinator.register_entity("test", "number.test")
+    coordinator._recorded_measurements["test"] = {}
+    stats_mock = AsyncMock()
+    monkeypatch.setattr(
+        coordinator,
+        "_async_update_statistics",
+        stats_mock,
+    )
+    monkeypatch.setattr(coordinator, "_write_measurements_direct", fake_write)
+    monkeypatch.setattr(hass, "async_add_executor_job", fake_add_executor_job)
+
+    measured = datetime.now(timezone.utc) - timedelta(days=2)
+    await coordinator._async_store_measurements(
+        "test",
+        [
+            {
+                "measured_at": measured.isoformat(),
+                "recorded_at": (datetime.now(timezone.utc)).isoformat(),
+                "value": 5,
+            }
+        ],
+    )
+
+    assert stats_mock.await_count == 1
+    assert direct_calls, "Expected number entities to write via recorder"
+
+
+@pytest.mark.asyncio
 async def test_store_measurements_historic_statistics_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -205,6 +269,42 @@ async def test_store_measurements_historic_statistics_only(
 
     assert not direct_calls, "Historic values should not create state rows"
     assert stats_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_register_entity_backfills_existing_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant(asyncio.get_running_loop())
+    coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
+    slug = "system-test-1"
+    coordinator._history[slug] = [
+        {
+            "measured_at": datetime.now(timezone.utc).isoformat(),
+            "value": 1,
+        }
+    ]
+
+    store_mock = AsyncMock()
+    monkeypatch.setattr(coordinator, "_async_store_measurements", store_mock)
+
+    created_tasks: list[asyncio.Task] = []
+
+    def fake_async_create_task(coro):
+        task = hass.loop.create_task(coro)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(hass, "async_create_task", fake_async_create_task, raising=False)
+
+    coordinator.register_entity(slug, "number.system_test_1")
+
+    if created_tasks:
+        await asyncio.gather(*created_tasks)
+
+    store_mock.assert_awaited_once_with(slug, coordinator._history[slug], force=True)
 
 
 @pytest.mark.asyncio
