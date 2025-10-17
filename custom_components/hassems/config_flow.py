@@ -35,6 +35,7 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             base_url = user_input.get(CONF_BASE_URL)
             token = user_input.get(CONF_TOKEN)
             if base_url:
+                base_url = self._normalize_base_url(base_url)
                 defaults_base_url = base_url
             if token:
                 defaults_token = token
@@ -178,14 +179,24 @@ class HASSEMSFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
-    def _unique_id_from_url(base_url: str) -> str:
+    def _normalize_base_url(base_url: str) -> str:
+        base_url = base_url.strip()
+        if not base_url:
+            return base_url
         parsed = urlparse(base_url)
+        if parsed.scheme:
+            return base_url
+        return f"http://{base_url}"
+
+    @staticmethod
+    def _unique_id_from_url(base_url: str) -> str:
+        parsed = urlparse(HASSEMSFlowHandler._normalize_base_url(base_url))
         host = parsed.hostname or base_url
         return host.lower()
 
     @staticmethod
     def _entry_title(base_url: str) -> str:
-        parsed = urlparse(base_url)
+        parsed = urlparse(HASSEMSFlowHandler._normalize_base_url(base_url))
         return parsed.hostname or base_url
 
     def _get_entry_for_reauth(self) -> config_entries.ConfigEntry | None:
