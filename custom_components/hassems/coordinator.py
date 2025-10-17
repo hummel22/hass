@@ -603,18 +603,29 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 len(entries_states_only),
                 slug,
             )
-            await self.hass.async_add_executor_job(
-                self._write_measurements_direct,
-                instance,
-                entity_id,
-                entries_states_only,
-                True,
-            )
-            _LOGGER.debug(
-                "Finished writing %s historic measurements for %s",
-                len(entries_states_only),
-                slug,
-            )
+            try:
+                await self.hass.async_add_executor_job(
+                    self._write_measurements_direct,
+                    instance,
+                    entity_id,
+                    entries_states_only,
+                    True,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Error writing historic measurements for %s (%s rows) to recorder: %s",
+                    slug,
+                    len(entries_states_only),
+                    err,
+                    exc_info=True,
+                )
+                raise
+            else:
+                _LOGGER.debug(
+                    "Finished writing %s historic measurements for %s",
+                    len(entries_states_only),
+                    slug,
+                )
 
         if processed_for_statistics:
             _LOGGER.debug("Triggering statistics refresh for %s", slug)
@@ -631,157 +642,167 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
 
         session = instance.get_session()
-        with session_scope(session=session) as scoped_session:
-            if not states_only:
-                event_type = (
-                    scoped_session.query(EventTypes)
-                    .filter(EventTypes.event_type == EVENT_STATE_CHANGED)
+        try:
+            with session_scope(session=session) as scoped_session:
+                if not states_only:
+                    event_type = (
+                        scoped_session.query(EventTypes)
+                        .filter(EventTypes.event_type == EVENT_STATE_CHANGED)
+                        .one_or_none()
+                    )
+                    if event_type is None:
+                        event_type = EventTypes(event_type=EVENT_STATE_CHANGED)
+                        scoped_session.add(event_type)
+                        scoped_session.flush()
+                else:
+                    event_type = None
+    
+                states_meta = (
+                    scoped_session.query(StatesMeta)
+                    .filter(StatesMeta.entity_id == entity_id)
                     .one_or_none()
                 )
-                if event_type is None:
-                    event_type = EventTypes(event_type=EVENT_STATE_CHANGED)
-                    scoped_session.add(event_type)
+                if states_meta is None:
+                    states_meta = StatesMeta(entity_id=entity_id)
+                    scoped_session.add(states_meta)
                     scoped_session.flush()
-            else:
-                event_type = None
-
-            states_meta = (
-                scoped_session.query(StatesMeta)
-                .filter(StatesMeta.entity_id == entity_id)
-                .one_or_none()
-            )
-            if states_meta is None:
-                states_meta = StatesMeta(entity_id=entity_id)
-                scoped_session.add(states_meta)
-                scoped_session.flush()
-
-            metadata_id = states_meta.metadata_id
-
-            last_state = (
-                scoped_session.query(States)
-                .filter(States.metadata_id == metadata_id)
-                .order_by(States.last_updated_ts.desc())
-                .limit(1)
-                .one_or_none()
-            )
-
-            if last_state is not None:
-                last_state_obj = last_state.to_native(validate_entity_id=False)
-            else:
-                last_state_obj = None
-
-            previous_state_dict: Dict[str, Any] | None = (
-                last_state_obj.as_dict() if last_state_obj is not None else None
-            )
-            previous_state_id = last_state.state_id if last_state is not None else None
-            previous_state_value = (
-                last_state_obj.state if last_state_obj is not None else None
-            )
-            if last_state is None:
-                previous_last_changed_ts: float | None = None
-            elif last_state.last_changed_ts is not None:
-                previous_last_changed_ts = last_state.last_changed_ts
-            else:
-                previous_last_changed_ts = last_state.last_updated_ts
-
-            for entry in entries:
-                timestamp: datetime = dt_util.as_utc(entry["timestamp"])
-                timestamp_ts = dt_util.utc_to_timestamp(timestamp)
-                state_str: str = entry["state"]
-                attributes: Dict[str, Any] = entry["attributes"]
-
-                if (
-                    previous_state_value is not None
-                    and previous_state_value == state_str
-                    and previous_last_changed_ts is not None
-                ):
-                    last_changed_ts = previous_last_changed_ts
+    
+                metadata_id = states_meta.metadata_id
+    
+                last_state = (
+                    scoped_session.query(States)
+                    .filter(States.metadata_id == metadata_id)
+                    .order_by(States.last_updated_ts.desc())
+                    .limit(1)
+                    .one_or_none()
+                )
+    
+                if last_state is not None:
+                    last_state_obj = last_state.to_native(validate_entity_id=False)
                 else:
-                    last_changed_ts = timestamp_ts
-
-                last_changed_dt = dt_util.utc_from_timestamp(last_changed_ts)
-                new_state_dict = {
-                    "entity_id": entity_id,
-                    "state": state_str,
-                    "attributes": attributes,
-                    "last_changed": last_changed_dt.isoformat(),
-                    "last_updated": timestamp.isoformat(),
-                }
-
-                if not states_only and event_type is not None:
-                    event_data = {
-                        ATTR_ENTITY_ID: entity_id,
-                        "old_state": previous_state_dict,
-                        "new_state": new_state_dict,
+                    last_state_obj = None
+    
+                previous_state_dict: Dict[str, Any] | None = (
+                    last_state_obj.as_dict() if last_state_obj is not None else None
+                )
+                previous_state_id = last_state.state_id if last_state is not None else None
+                previous_state_value = (
+                    last_state_obj.state if last_state_obj is not None else None
+                )
+                if last_state is None:
+                    previous_last_changed_ts: float | None = None
+                elif last_state.last_changed_ts is not None:
+                    previous_last_changed_ts = last_state.last_changed_ts
+                else:
+                    previous_last_changed_ts = last_state.last_updated_ts
+    
+                for entry in entries:
+                    timestamp: datetime = dt_util.as_utc(entry["timestamp"])
+                    timestamp_ts = dt_util.utc_to_timestamp(timestamp)
+                    state_str: str = entry["state"]
+                    attributes: Dict[str, Any] = entry["attributes"]
+    
+                    if (
+                        previous_state_value is not None
+                        and previous_state_value == state_str
+                        and previous_last_changed_ts is not None
+                    ):
+                        last_changed_ts = previous_last_changed_ts
+                    else:
+                        last_changed_ts = timestamp_ts
+    
+                    last_changed_dt = dt_util.utc_from_timestamp(last_changed_ts)
+                    new_state_dict = {
+                        "entity_id": entity_id,
+                        "state": state_str,
+                        "attributes": attributes,
+                        "last_changed": last_changed_dt.isoformat(),
+                        "last_updated": timestamp.isoformat(),
                     }
-
-                    event_data_row = EventData(
+    
+                    if not states_only and event_type is not None:
+                        event_data = {
+                            ATTR_ENTITY_ID: entity_id,
+                            "old_state": previous_state_dict,
+                            "new_state": new_state_dict,
+                        }
+    
+                        event_data_row = EventData(
+                            hash=None,
+                            shared_data=json.dumps(
+                                event_data, sort_keys=True, default=str
+                            ),
+                        )
+                        scoped_session.add(event_data_row)
+                        scoped_session.flush()
+    
+                        event_row = Events(
+                            event_type=None,
+                            event_data=None,
+                            origin=None,
+                            origin_idx=1,
+                            time_fired=timestamp,
+                            time_fired_ts=timestamp_ts,
+                            context_id=None,
+                            context_user_id=None,
+                            context_parent_id=None,
+                            data_id=event_data_row.data_id,
+                            context_id_bin=None,
+                            context_user_id_bin=None,
+                            context_parent_id_bin=None,
+                            event_type_id=event_type.event_type_id,
+                        )
+                        scoped_session.add(event_row)
+                        scoped_session.flush()
+                        event_id = event_row.event_id
+                    else:
+                        event_id = None
+    
+                    attributes_row = StateAttributes(
                         hash=None,
-                        shared_data=json.dumps(
-                            event_data, sort_keys=True, default=str
-                        ),
+                        shared_attrs=json.dumps(attributes, sort_keys=True, default=str),
                     )
-                    scoped_session.add(event_data_row)
+                    scoped_session.add(attributes_row)
                     scoped_session.flush()
-
-                    event_row = Events(
-                        event_type=None,
-                        event_data=None,
-                        origin=None,
-                        origin_idx=1,
-                        time_fired=timestamp,
-                        time_fired_ts=timestamp_ts,
+    
+                    states_row = States(
+                        entity_id=entity_id,
+                        state=state_str,
+                        attributes=None,
+                        event_id=event_id,
+                        last_changed=None,
+                        last_changed_ts=None
+                        if last_changed_ts == timestamp_ts
+                        else last_changed_ts,
+                        last_updated=None,
+                        last_updated_ts=timestamp_ts,
+                        old_state_id=previous_state_id,
+                        attributes_id=attributes_row.attributes_id,
                         context_id=None,
                         context_user_id=None,
                         context_parent_id=None,
-                        data_id=event_data_row.data_id,
+                        origin_idx=1,
                         context_id_bin=None,
                         context_user_id_bin=None,
                         context_parent_id_bin=None,
-                        event_type_id=event_type.event_type_id,
+                        metadata_id=metadata_id,
                     )
-                    scoped_session.add(event_row)
+                    scoped_session.add(states_row)
                     scoped_session.flush()
-                    event_id = event_row.event_id
-                else:
-                    event_id = None
-
-                attributes_row = StateAttributes(
-                    hash=None,
-                    shared_attrs=json.dumps(attributes, sort_keys=True, default=str),
-                )
-                scoped_session.add(attributes_row)
-                scoped_session.flush()
-
-                states_row = States(
-                    entity_id=entity_id,
-                    state=state_str,
-                    attributes=None,
-                    event_id=event_id,
-                    last_changed=None,
-                    last_changed_ts=None
-                    if last_changed_ts == timestamp_ts
-                    else last_changed_ts,
-                    last_updated=None,
-                    last_updated_ts=timestamp_ts,
-                    old_state_id=previous_state_id,
-                    attributes_id=attributes_row.attributes_id,
-                    context_id=None,
-                    context_user_id=None,
-                    context_parent_id=None,
-                    origin_idx=1,
-                    context_id_bin=None,
-                    context_user_id_bin=None,
-                    context_parent_id_bin=None,
-                    metadata_id=metadata_id,
-                )
-                scoped_session.add(states_row)
-                scoped_session.flush()
-
-                previous_state_dict = new_state_dict
-                previous_state_id = states_row.state_id
-                previous_state_value = state_str
-                previous_last_changed_ts = last_changed_ts
+    
+                    previous_state_dict = new_state_dict
+                    previous_state_id = states_row.state_id
+                    previous_state_value = state_str
+                    previous_last_changed_ts = last_changed_ts
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Error while writing %s recorder rows for %s: %s",
+                len(entries),
+                entity_id,
+                err,
+                exc_info=True,
+            )
+            raise
 
     async def _async_process_history_cursor(
         self,
@@ -1013,15 +1034,23 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             mode,
             history_window=(hist_start, hist_end),
         )
+        stats_count = len(statistics)
         if statistics:
             stats_start = statistics[0]["start"].isoformat()
             stats_end = statistics[-1]["start"].isoformat()
             _LOGGER.debug(
-                "Computed %s hourly statistics rows for %s covering %s to %s",
-                len(statistics),
+                "Computed %s hourly statistics rows for %s covering %s to %s (mode=%s)",
+                stats_count,
                 slug,
                 stats_start,
                 stats_end,
+                mode,
+            )
+        else:
+            _LOGGER.debug(
+                "No hourly statistics rows computed for %s using mode=%s",
+                slug,
+                mode,
             )
         try:
             instance = recorder.get_instance(self.hass)
@@ -1046,7 +1075,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             "unit_class": None,
         }
         _LOGGER.debug(
-            "Submitting %s statistics rows for %s", len(statistics), slug
+            "Submitting %s statistics rows for %s (mode=%s)",
+            stats_count,
+            slug,
+            mode,
         )
         first_start = statistics[0]["start"].isoformat()
         last_start = statistics[-1]["start"].isoformat()
@@ -1056,7 +1088,29 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             first_start,
             last_start,
         )
-        async_add_external_statistics(self.hass, metadata, statistics)
+        try:
+            _LOGGER.debug(
+                "Writing %s long-term statistics rows for %s (mode=%s) to recorder",
+                stats_count,
+                slug,
+                mode,
+            )
+            async_add_external_statistics(self.hass, metadata, statistics)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Error writing long-term statistics for %s (mode=%s): %s",
+                slug,
+                mode,
+                err,
+                exc_info=True,
+            )
+            raise
+        else:
+            _LOGGER.debug(
+                "Finished writing %s long-term statistics rows for %s",
+                stats_count,
+                slug,
+            )
 
     def _parse_measurement_points(
         self, history: List[Dict[str, Any]]
