@@ -508,6 +508,17 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             entity_id,
             force,
         )
+        start_dt, end_dt = self._history_window(measurements)
+        if start_dt and end_dt:
+            historic_count = sum(1 for item in measurements if item.get("historic"))
+            _LOGGER.debug(
+                "Measurement window for %s spans %s to %s (%s/%s historic entries)",
+                slug,
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+                historic_count,
+                len(measurements),
+            )
 
         entries_states_only: List[Dict[str, Any]] = []
         processed_for_statistics = False
@@ -598,6 +609,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 entity_id,
                 entries_states_only,
                 True,
+            )
+            _LOGGER.debug(
+                "Finished writing %s historic measurements for %s",
+                len(entries_states_only),
+                slug,
             )
 
         if processed_for_statistics:
@@ -845,6 +861,25 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         _LOGGER.debug(
             "Reloaded history for %s with %s records", slug, len(normalized)
         )
+        history_list = history or []
+        start_dt, end_dt = self._history_window(history_list)
+        cursor_hint = entity.get("history_cursor")
+        if start_dt and end_dt:
+            _LOGGER.debug(
+                "HASSEMS history fetch for %s returned %s rows covering %s to %s (cursor=%s)",
+                slug,
+                len(history_list),
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+                cursor_hint,
+            )
+        else:
+            _LOGGER.debug(
+                "HASSEMS history fetch for %s returned %s rows without timestamps (cursor=%s)",
+                slug,
+                len(history_list),
+                cursor_hint,
+            )
         if normalized:
             await self._async_store_measurements(slug, normalized, force=True)
         await self._async_update_statistics(
@@ -887,6 +922,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             _LOGGER.debug(
                 "Truncated normalized history to last %s points", len(ordered_keys)
             )
+        if ordered_keys:
+            _LOGGER.debug(
+                "Normalized history window spans %s to %s (%s unique points)",
+                ordered_keys[0],
+                ordered_keys[-1],
+                len(ordered_keys),
+            )
         return [dedup[key] for key in ordered_keys]
 
     async def _async_update_statistics(
@@ -914,6 +956,16 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             history_override is not None,
         )
         history = history_override if history_override is not None else self._history.get(slug)
+        if history:
+            hist_start, hist_end = self._history_window(history)
+            if hist_start and hist_end:
+                _LOGGER.debug(
+                    "Statistics history window for %s spans %s to %s (%s records)",
+                    slug,
+                    hist_start.isoformat(),
+                    hist_end.isoformat(),
+                    len(history),
+                )
         if not history:
             try:
                 instance = recorder.get_instance(self.hass)
@@ -949,7 +1001,24 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             mode,
             len(points),
         )
+        if points:
+            _LOGGER.debug(
+                "Measurement points for %s cover %s to %s",
+                slug,
+                points[0][0].isoformat(),
+                points[-1][0].isoformat(),
+            )
         statistics = self._calculate_hourly_statistics(points, mode)
+        if statistics:
+            stats_start = statistics[0]["start"].isoformat()
+            stats_end = statistics[-1]["start"].isoformat()
+            _LOGGER.debug(
+                "Computed %s hourly statistics rows for %s covering %s to %s",
+                len(statistics),
+                slug,
+                stats_start,
+                stats_end,
+            )
         try:
             instance = recorder.get_instance(self.hass)
         except KeyError:
@@ -974,6 +1043,14 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         }
         _LOGGER.debug(
             "Submitting %s statistics rows for %s", len(statistics), slug
+        )
+        first_start = statistics[0]["start"].isoformat()
+        last_start = statistics[-1]["start"].isoformat()
+        _LOGGER.debug(
+            "Submitting statistics window for %s covering %s to %s",
+            slug,
+            first_start,
+            last_start,
         )
         async_add_external_statistics(self.hass, metadata, statistics)
 
@@ -1137,7 +1214,37 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                     "state": state_value,
                 }
             )
+        if statistics:
+            _LOGGER.debug(
+                "Calculated %s statistics buckets for mode=%s spanning %s to %s",
+                len(statistics),
+                normalized_mode,
+                statistics[0]["start"].isoformat(),
+                statistics[-1]["start"].isoformat(),
+            )
         return statistics
+
+    @staticmethod
+    def _history_window(
+        entries: List[Dict[str, Any]],
+        *,
+        key: str = "measured_at",
+    ) -> Tuple[datetime | None, datetime | None]:
+        timestamps: List[datetime] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get(key)
+            if not value:
+                continue
+            dt_value = dt_util.parse_datetime(value)
+            if dt_value is None:
+                continue
+            timestamps.append(dt_util.as_utc(dt_value))
+        if not timestamps:
+            return None, None
+        timestamps.sort()
+        return timestamps[0], timestamps[-1]
 
     @staticmethod
     def _value_at(
