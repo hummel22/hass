@@ -1008,7 +1008,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 points[0][0].isoformat(),
                 points[-1][0].isoformat(),
             )
-        statistics = self._calculate_hourly_statistics(points, mode)
+        statistics = self._calculate_hourly_statistics(
+            points,
+            mode,
+            history_window=(hist_start, hist_end),
+        )
         if statistics:
             stats_start = statistics[0]["start"].isoformat()
             stats_end = statistics[-1]["start"].isoformat()
@@ -1097,13 +1101,32 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         return deduped
 
     def _calculate_hourly_statistics(
-        self, points: List[Tuple[datetime, float]], mode: str
+        self,
+        points: List[Tuple[datetime, float]],
+        mode: str,
+        history_window: Tuple[datetime | None, datetime | None] | None = None,
     ) -> List[StatisticData]:
         if not points:
             return []
 
         processed = list(points)
         normalized_mode = mode if mode in {"linear", "step", "point"} else "linear"
+        start_anchor = processed[0][0]
+        end_anchor = processed[-1][0]
+        if history_window is not None:
+            window_start, window_end = history_window
+            if window_start is not None:
+                start_anchor = window_start
+            if window_end is not None:
+                end_anchor = window_end
+        start_hour = start_anchor.replace(minute=0, second=0, microsecond=0)
+        if end_anchor > start_anchor:
+            effective_end = end_anchor - timedelta(microseconds=1)
+        else:
+            effective_end = end_anchor
+        end_hour = effective_end.replace(minute=0, second=0, microsecond=0)
+        if end_hour < start_hour:
+            end_hour = start_hour
         if normalized_mode == "point":
             hour_buckets: Dict[datetime, Dict[str, Any]] = {}
             for timestamp, value in processed:
@@ -1136,12 +1159,49 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                         "state": state_value,
                     }
                 )
+            if statistics:
+                filled: Dict[datetime, StatisticData] = {
+                    stat["start"]: stat for stat in statistics
+                }
+            else:
+                filled = {}
+            cursor = start_hour
+            while cursor <= end_hour:
+                if cursor not in filled:
+                    filled[cursor] = {
+                        "start": cursor,
+                        "mean": 0.0,
+                        "min": 0.0,
+                        "max": 0.0,
+                        "state": 0.0,
+                    }
+                cursor += timedelta(hours=1)
+            statistics = [
+                filled_hour
+                for filled_hour in sorted(filled.values(), key=lambda item: item["start"])
+            ]
             return statistics
         if normalized_mode == "step" and processed:
             now = dt_util.utcnow()
             last_time = processed[-1][0]
             if now > last_time:
                 processed.append((now, processed[-1][1]))
+        if normalized_mode == "step" and len(processed) == 1:
+            statistics: List[StatisticData] = []
+            cursor = start_hour
+            single_value = float(processed[0][1])
+            while cursor <= end_hour:
+                statistics.append(
+                    {
+                        "start": cursor,
+                        "mean": single_value,
+                        "min": single_value,
+                        "max": single_value,
+                        "state": single_value,
+                    }
+                )
+                cursor += timedelta(hours=1)
+            return statistics
         if len(processed) < 2:
             return []
         hour_stats: Dict[datetime, Dict[str, Any]] = {}
@@ -1222,7 +1282,127 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 statistics[0]["start"].isoformat(),
                 statistics[-1]["start"].isoformat(),
             )
+        statistics = [
+            stat
+            for stat in statistics
+            if start_hour <= stat["start"] <= end_hour
+        ]
+        stats_by_hour: Dict[datetime, StatisticData] = {
+            stat["start"]: stat for stat in statistics
+        }
+        cursor = start_hour
+        while cursor <= end_hour:
+            if cursor not in stats_by_hour:
+                if normalized_mode == "linear":
+                    interpolated = self._interpolate_linear_hour(
+                        processed, cursor, cursor + timedelta(hours=1)
+                    )
+                else:
+                    interpolated = self._interpolate_step_hour(
+                        processed, cursor, cursor + timedelta(hours=1)
+                    )
+                if interpolated is not None:
+                    stats_by_hour[cursor] = interpolated
+            cursor += timedelta(hours=1)
+        if stats_by_hour:
+            statistics = [
+                stats_by_hour[hour]
+                for hour in sorted(stats_by_hour, key=lambda item: item)
+            ]
         return statistics
+
+    def _interpolate_linear_hour(
+        self,
+        points: List[Tuple[datetime, float]],
+        hour_start: datetime,
+        hour_end: datetime,
+    ) -> StatisticData | None:
+        if not points:
+            return None
+        if len(points) == 1:
+            value = float(points[0][1])
+            return {
+                "start": hour_start,
+                "mean": value,
+                "min": value,
+                "max": value,
+                "state": value,
+            }
+        start_value = self._linear_value_from_points(points, hour_start)
+        end_value = self._linear_value_from_points(points, hour_end)
+        min_value = min(start_value, end_value)
+        max_value = max(start_value, end_value)
+        mean_value = (start_value + end_value) / 2.0
+        return {
+            "start": hour_start,
+            "mean": mean_value,
+            "min": min_value,
+            "max": max_value,
+            "state": end_value,
+        }
+
+    def _interpolate_step_hour(
+        self,
+        points: List[Tuple[datetime, float]],
+        hour_start: datetime,
+        hour_end: datetime,
+    ) -> StatisticData | None:
+        if not points:
+            return None
+        start_value = self._step_value_from_points(points, hour_start)
+        end_value = self._step_value_from_points(points, hour_end)
+        min_value = min(start_value, end_value)
+        max_value = max(start_value, end_value)
+        return {
+            "start": hour_start,
+            "mean": start_value,
+            "min": min_value,
+            "max": max_value,
+            "state": end_value,
+        }
+
+    def _linear_value_from_points(
+        self, points: List[Tuple[datetime, float]], target: datetime
+    ) -> float:
+        if len(points) == 1:
+            return float(points[0][1])
+        if target <= points[0][0]:
+            start_time, start_value = points[0]
+            end_time, end_value = points[1]
+        elif target >= points[-1][0]:
+            start_time, start_value = points[-2]
+            end_time, end_value = points[-1]
+        else:
+            start_time = points[0][0]
+            start_value = points[0][1]
+            end_time = points[1][0]
+            end_value = points[1][1]
+            for index in range(len(points) - 1):
+                segment_start, segment_value = points[index]
+                segment_end, segment_end_value = points[index + 1]
+                if segment_start <= target <= segment_end:
+                    start_time = segment_start
+                    start_value = segment_value
+                    end_time = segment_end
+                    end_value = segment_end_value
+                    break
+        return float(
+            self._value_at("linear", start_time, start_value, end_time, end_value, target)
+        )
+
+    def _step_value_from_points(
+        self, points: List[Tuple[datetime, float]], target: datetime
+    ) -> float:
+        if target <= points[0][0]:
+            return float(points[0][1])
+        for index in range(len(points) - 1):
+            start_time, start_value = points[index]
+            end_time, end_value = points[index + 1]
+            if target <= end_time:
+                return float(
+                    self._value_at("step", start_time, start_value, end_time, end_value, target)
+                )
+        return float(points[-1][1])
 
     @staticmethod
     def _history_window(

@@ -205,3 +205,128 @@ async def test_store_measurements_historic_statistics_only(
 
     assert not direct_calls, "Historic values should not create state rows"
     assert stats_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_point_statistics_fill_missing_hours() -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant(asyncio.get_running_loop())
+    coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
+
+    base = datetime(2024, 3, 10, 0, 15, tzinfo=timezone.utc)
+    history = [
+        {"measured_at": base.isoformat(), "value": 5},
+        {
+            "measured_at": (base + timedelta(hours=3, minutes=5)).isoformat(),
+            "value": 7,
+        },
+    ]
+
+    points = coordinator._parse_measurement_points(history)
+    statistics = coordinator._calculate_hourly_statistics(points, "point")
+
+    assert len(statistics) == 4
+    starts = [item["start"] for item in statistics]
+    assert starts[0] == base.replace(minute=0, second=0, microsecond=0)
+    assert starts[-1] == (base + timedelta(hours=3)).replace(
+        minute=0, second=0, microsecond=0
+    )
+
+    stat_map = {item["start"]: item for item in statistics}
+    gap_hour = base.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    zero_stat = stat_map[gap_hour]
+    assert zero_stat["mean"] == 0.0
+    assert zero_stat["min"] == 0.0
+    assert zero_stat["max"] == 0.0
+    assert zero_stat["state"] == 0.0
+
+    first_hour = stat_map[starts[0]]
+    assert first_hour["mean"] == 5.0
+    assert first_hour["min"] == 5.0
+    assert first_hour["max"] == 5.0
+    assert first_hour["state"] == 5
+
+
+@pytest.mark.asyncio
+async def test_linear_statistics_interpolate_full_window() -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant(asyncio.get_running_loop())
+    coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
+
+    base = datetime(2024, 5, 1, 0, 0, tzinfo=timezone.utc)
+    history = [
+        {"measured_at": base.isoformat(), "value": 0},
+        {"measured_at": (base + timedelta(hours=2)).isoformat(), "value": 20},
+    ]
+
+    points = coordinator._parse_measurement_points(history)
+    window_end = base + timedelta(hours=4)
+    statistics = coordinator._calculate_hourly_statistics(
+        points,
+        "linear",
+        history_window=(base, window_end),
+    )
+
+    assert len(statistics) == 4
+    starts = [item["start"] for item in statistics]
+    assert starts == [
+        base + timedelta(hours=offset)
+        for offset in range(4)
+    ]
+
+    stat_map = {item["start"]: item for item in statistics}
+    first_hour = stat_map[base]
+    assert first_hour["mean"] == pytest.approx(5.0)
+    assert first_hour["min"] == pytest.approx(0.0)
+    assert first_hour["max"] == pytest.approx(10.0)
+    assert first_hour["state"] == pytest.approx(10.0)
+
+    third_hour = stat_map[base + timedelta(hours=2)]
+    assert third_hour["mean"] == pytest.approx(20.0)
+    assert third_hour["min"] == pytest.approx(20.0)
+    assert third_hour["max"] == pytest.approx(20.0)
+    assert third_hour["state"] == pytest.approx(20.0)
+
+    fourth_hour = stat_map[base + timedelta(hours=3)]
+    assert fourth_hour["mean"] == pytest.approx(20.0)
+    assert fourth_hour["state"] == pytest.approx(20.0)
+
+
+@pytest.mark.asyncio
+async def test_step_statistics_propagate_forward() -> None:
+    from homeassistant.core import HomeAssistant
+
+    hass = HomeAssistant(asyncio.get_running_loop())
+    coordinator = HASSEMSCoordinator(hass, client=AsyncMock(), entry=DummyConfigEntry())
+
+    base = datetime(2024, 6, 1, 0, 30, tzinfo=timezone.utc)
+    history = [
+        {"measured_at": base.isoformat(), "value": 4},
+        {"measured_at": (base + timedelta(hours=1)).isoformat(), "value": 7},
+    ]
+
+    points = coordinator._parse_measurement_points(history)
+    window_start = base - timedelta(minutes=30)
+    window_end = base + timedelta(hours=3)
+    statistics = coordinator._calculate_hourly_statistics(
+        points,
+        "step",
+        history_window=(window_start, window_end),
+    )
+
+    assert len(statistics) == 4
+    stat_map = {item["start"]: item for item in statistics}
+
+    first_hour_start = window_start.replace(minute=0, second=0, microsecond=0)
+    first_hour = stat_map[first_hour_start]
+    assert first_hour["mean"] == pytest.approx(4.0)
+    assert first_hour["state"] == pytest.approx(4.0)
+
+    final_hour_start = first_hour_start + timedelta(hours=3)
+    final_hour = stat_map[final_hour_start]
+    assert final_hour["mean"] == pytest.approx(7.0)
+    assert final_hour["min"] == pytest.approx(7.0)
+    assert final_hour["max"] == pytest.approx(7.0)
+    assert final_hour["state"] == pytest.approx(7.0)

@@ -20,6 +20,24 @@ hassems_pkg = sys.modules.setdefault(
 )
 if not hasattr(hassems_pkg, "__path__"):
     hassems_pkg.__path__ = [str(ROOT / "custom_components" / "hassems")]
+
+aiohttp_pkg = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
+if not hasattr(aiohttp_pkg, "web"):
+    web_module = types.ModuleType("aiohttp.web")
+    sys.modules["aiohttp.web"] = web_module
+    aiohttp_pkg.web = web_module
+if not hasattr(aiohttp_pkg, "ClientSession"):
+    class _DummyClientSession:  # pragma: no cover - test stub only
+        pass
+
+    aiohttp_pkg.ClientSession = _DummyClientSession
+if not hasattr(aiohttp_pkg, "ClientError"):
+    aiohttp_pkg.ClientError = Exception
+if not hasattr(aiohttp_pkg, "ClientResponse"):
+    class _DummyClientResponse:  # pragma: no cover - test stub only
+        pass
+
+    aiohttp_pkg.ClientResponse = _DummyClientResponse
 try:
     from homeassistant.components.recorder import statistics as recorder_statistics
 except Exception:  # noqa: BLE001
