@@ -242,10 +242,18 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 _LOGGER.warning("Unexpected error loading history for %s: %s", slug, result)
                 self._history[slug] = []
             else:
-                normalized = self._normalize_history_records(result)
+                entity_id = self._sensor_entity_id(slug)
+                normalized = self._normalize_history_records(
+                    result,
+                    slug=slug,
+                    entity_id=entity_id,
+                )
                 self._history[slug] = normalized
                 _LOGGER.debug(
-                    "Loaded %s normalized history records for %s", len(normalized), slug
+                    "Loaded %s normalized history records for %s (entity_id=%s)",
+                    len(normalized),
+                    slug,
+                    entity_id,
                 )
             if self._history.get(slug):
                 await self._async_store_measurements(slug, self._history[slug])
@@ -272,11 +280,19 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 raise ConfigEntryAuthFailed(str(exc)) from exc
             except HASSEMSError as exc:
                 raise HomeAssistantError(str(exc)) from exc
-            normalized = self._normalize_history_records(history)
+            entity_id = self._sensor_entity_id(slug)
+            normalized = self._normalize_history_records(
+                history,
+                slug=slug,
+                entity_id=entity_id,
+            )
             self._history[slug] = normalized
             if normalized:
                 _LOGGER.debug(
-                    "Fetched %s history points on-demand for %s", len(normalized), slug
+                    "Fetched %s history points on-demand for %s (entity_id=%s)",
+                    len(normalized),
+                    slug,
+                    entity_id,
                 )
                 await self._async_store_measurements(slug, normalized)
         return list(self._history.get(slug, []))
@@ -876,19 +892,28 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             _LOGGER.warning("Unexpected error reloading history for %s: %s", slug, exc)
             return False
 
-        normalized = self._normalize_history_records(history)
+        entity_id = self._sensor_entity_id(slug)
+        normalized = self._normalize_history_records(
+            history,
+            slug=slug,
+            entity_id=entity_id,
+        )
         self._history[slug] = normalized
         self._recorded_measurements.pop(slug, None)
         _LOGGER.debug(
-            "Reloaded history for %s with %s records", slug, len(normalized)
+            "Reloaded history for %s (entity_id=%s) with %s records",
+            slug,
+            entity_id,
+            len(normalized),
         )
         history_list = history or []
         start_dt, end_dt = self._history_window(history_list)
         cursor_hint = entity.get("history_cursor")
         if start_dt and end_dt:
             _LOGGER.debug(
-                "HASSEMS history fetch for %s returned %s rows covering %s to %s (cursor=%s)",
+                "HASSEMS history fetch for %s (entity_id=%s) returned %s rows covering %s to %s (cursor=%s)",
                 slug,
+                entity_id,
                 len(history_list),
                 start_dt.isoformat(),
                 end_dt.isoformat(),
@@ -896,8 +921,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             )
         else:
             _LOGGER.debug(
-                "HASSEMS history fetch for %s returned %s rows without timestamps (cursor=%s)",
+                "HASSEMS history fetch for %s (entity_id=%s) returned %s rows without timestamps (cursor=%s)",
                 slug,
+                entity_id,
                 len(history_list),
                 cursor_hint,
             )
@@ -908,16 +934,29 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             full_refresh=True,
             history_override=normalized,
         )
-        _LOGGER.debug("Completed history reload workflow for %s", slug)
+        _LOGGER.debug(
+            "Completed history reload workflow for %s (entity_id=%s)",
+            slug,
+            entity_id,
+        )
         return True
 
     def _normalize_history_records(
-        self, entries: List[Dict[str, Any]] | None
+        self,
+        entries: List[Dict[str, Any]] | None,
+        *,
+        slug: str | None = None,
+        entity_id: str | None = None,
     ) -> List[Dict[str, Any]]:
         if not entries:
             return []
+        if slug and entity_id is None:
+            entity_id = self._sensor_entity_id(slug)
         _LOGGER.debug(
-            "Normalizing %s history entries", len(entries)
+            "Normalizing %s history entries for %s (entity_id=%s)",
+            len(entries),
+            slug or "<unknown>",
+            entity_id or "<unknown>",
         )
         dedup: Dict[str, Dict[str, Any]] = {}
         for item in entries:
@@ -941,11 +980,16 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         if len(ordered_keys) > MAX_HISTORY_POINTS:
             ordered_keys = ordered_keys[-MAX_HISTORY_POINTS:]
             _LOGGER.debug(
-                "Truncated normalized history to last %s points", len(ordered_keys)
+                "Truncated normalized history for %s (entity_id=%s) to last %s points",
+                slug or "<unknown>",
+                entity_id or "<unknown>",
+                len(ordered_keys),
             )
         if ordered_keys:
             _LOGGER.debug(
-                "Normalized history window spans %s to %s (%s unique points)",
+                "Normalized history window for %s (entity_id=%s) spans %s to %s (%s unique points)",
+                slug or "<unknown>",
+                entity_id or "<unknown>",
                 ordered_keys[0],
                 ordered_keys[-1],
                 len(ordered_keys),
@@ -981,8 +1025,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             hist_start, hist_end = self._history_window(history)
             if hist_start and hist_end:
                 _LOGGER.debug(
-                    "Statistics history window for %s spans %s to %s (%s records)",
+                    "Statistics history window for %s (entity_id=%s) spans %s to %s (%s records)",
                     slug,
+                    entity_id,
                     hist_start.isoformat(),
                     hist_end.isoformat(),
                     len(history),
@@ -997,7 +1042,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             if full_refresh:
                 await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
                 _LOGGER.debug(
-                    "Cleared statistics for %s because no history available", slug
+                    "Cleared statistics for %s (entity_id=%s) because no history available",
+                    slug,
+                    entity_id,
                 )
             return
         points = self._parse_measurement_points(history)
@@ -1011,21 +1058,24 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                     return
                 await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
                 _LOGGER.debug(
-                    "Cleared statistics for %s because no valid points were parsed",
+                    "Cleared statistics for %s (entity_id=%s) because no valid points were parsed",
                     slug,
+                    entity_id,
                 )
             return
         mode = str(entity.get("statistics_mode") or "linear").strip().lower()
         _LOGGER.debug(
-            "Calculating statistics for %s using mode=%s with %s points",
+            "Calculating statistics for %s (entity_id=%s) using mode=%s with %s points",
             slug,
+            entity_id,
             mode,
             len(points),
         )
         if points:
             _LOGGER.debug(
-                "Measurement points for %s cover %s to %s",
+                "Measurement points for %s (entity_id=%s) cover %s to %s",
                 slug,
+                entity_id,
                 points[0][0].isoformat(),
                 points[-1][0].isoformat(),
             )
@@ -1039,17 +1089,19 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             stats_start = statistics[0]["start"].isoformat()
             stats_end = statistics[-1]["start"].isoformat()
             _LOGGER.debug(
-                "Computed %s hourly statistics rows for %s covering %s to %s (mode=%s)",
+                "Computed %s hourly statistics rows for %s (entity_id=%s) covering %s to %s (mode=%s)",
                 stats_count,
                 slug,
+                entity_id,
                 stats_start,
                 stats_end,
                 mode,
             )
         else:
             _LOGGER.debug(
-                "No hourly statistics rows computed for %s using mode=%s",
+                "No hourly statistics rows computed for %s (entity_id=%s) using mode=%s",
                 slug,
+                entity_id,
                 mode,
             )
         try:
@@ -1060,9 +1112,17 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             return
         if full_refresh:
             await self.hass.async_add_executor_job(clear_statistics, instance, [entity_id])
-            _LOGGER.debug("Cleared existing statistics for %s before reload", slug)
+            _LOGGER.debug(
+                "Cleared existing statistics for %s (entity_id=%s) before reload",
+                slug,
+                entity_id,
+            )
         if not statistics:
-            _LOGGER.debug("No statistics generated for %s; skipping submission", slug)
+            _LOGGER.debug(
+                "No statistics generated for %s (entity_id=%s); skipping submission",
+                slug,
+                entity_id,
+            )
             return
 
         metadata: StatisticMetaData = {
@@ -1075,31 +1135,35 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             "unit_class": None,
         }
         _LOGGER.debug(
-            "Submitting %s statistics rows for %s (mode=%s)",
+            "Submitting %s statistics rows for %s (entity_id=%s mode=%s)",
             stats_count,
             slug,
+            entity_id,
             mode,
         )
         first_start = statistics[0]["start"].isoformat()
         last_start = statistics[-1]["start"].isoformat()
         _LOGGER.debug(
-            "Submitting statistics window for %s covering %s to %s",
+            "Submitting statistics window for %s (entity_id=%s) covering %s to %s",
             slug,
+            entity_id,
             first_start,
             last_start,
         )
         try:
             _LOGGER.debug(
-                "Writing %s long-term statistics rows for %s (mode=%s) to recorder",
+                "Writing %s long-term statistics rows for %s (entity_id=%s mode=%s) to recorder",
                 stats_count,
                 slug,
+                entity_id,
                 mode,
             )
             async_add_external_statistics(self.hass, metadata, statistics)
         except Exception as err:  # noqa: BLE001
             _LOGGER.error(
-                "Error writing long-term statistics for %s (mode=%s): %s",
+                "Error writing long-term statistics for %s (entity_id=%s mode=%s): %s",
                 slug,
+                entity_id,
                 mode,
                 err,
                 exc_info=True,
@@ -1107,9 +1171,11 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             raise
         else:
             _LOGGER.debug(
-                "Finished writing %s long-term statistics rows for %s",
+                "Finished writing %s long-term statistics rows for %s (entity_id=%s mode=%s)",
                 stats_count,
                 slug,
+                entity_id,
+                mode,
             )
 
     def _parse_measurement_points(
