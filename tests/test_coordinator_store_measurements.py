@@ -8,7 +8,10 @@ from typing import Any, Dict, List
 import pytest
 from unittest.mock import AsyncMock
 
-from custom_components.hassems.coordinator import HASSEMSCoordinator
+from custom_components.hassems.coordinator import (
+    HASSEMSCoordinator,
+    _coerce_previous_state,
+)
 
 
 class DummyConfigEntry:
@@ -430,3 +433,39 @@ async def test_step_statistics_propagate_forward() -> None:
     assert final_hour["min"] == pytest.approx(7.0)
     assert final_hour["max"] == pytest.approx(7.0)
     assert final_hour["state"] == pytest.approx(7.0)
+
+
+def test_coerce_previous_state_recovers_missing_entity_id() -> None:
+    class DummyState:
+        def __init__(self) -> None:
+            self.state_id = 12
+            self.state = "42"
+            self.entity_id = ""
+            self.last_changed_ts = None
+            self.last_updated_ts = 1_600_000_000.0
+
+        @property
+        def attributes_as_dict(self) -> Dict[str, Any]:
+            return {"unit_of_measurement": "kWh"}
+
+        def to_native(self, validate_entity_id: bool = False) -> Any:
+            raise ValueError("Invalid entity ID ")
+
+    state = DummyState()
+    states_meta = SimpleNamespace(entity_id="number.test")
+
+    previous_state_dict, value, last_changed = _coerce_previous_state(
+        state,
+        states_meta,
+        "number.test",
+    )
+
+    assert previous_state_dict is not None
+    assert previous_state_dict["entity_id"] == "number.test"
+    assert previous_state_dict["state"] == "42"
+    expected_iso = datetime.fromtimestamp(
+        state.last_updated_ts, tz=timezone.utc
+    ).isoformat()
+    assert previous_state_dict["last_updated"] == expected_iso
+    assert value == "42"
+    assert last_changed == state.last_updated_ts
