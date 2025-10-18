@@ -439,6 +439,9 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         self._entities[slug] = entity
         self._pending_discoveries.discard(slug)
 
+        backfill_required = False
+        incoming_cursor_str: Optional[str] = None
+
         if event == EVENT_ENTITY_VALUE:
             data_payload = payload.get("data") or {}
             measurement = data_payload.get("measured_at")
@@ -446,6 +449,10 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             historic_flag = bool(data_payload.get("historic"))
             cursor_override = data_payload.get("historic_cursor")
             recorded_at = data_payload.get("recorded_at")
+            if cursor_override is not None:
+                incoming_cursor_str = str(cursor_override)
+            elif entity.get("history_cursor") is not None:
+                incoming_cursor_str = str(entity.get("history_cursor"))
             _LOGGER.debug(
                 "Received measurement for %s - measured_at=%s value=%s historic=%s cursor=%s",
                 slug,
@@ -455,20 +462,45 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 cursor_override or entity.get("history_cursor"),
             )
             history = self._history.setdefault(slug, [])
-            history.append({
+            history_entry = {
                 "value": value,
                 "measured_at": measurement,
                 "recorded_at": recorded_at,
                 "historic": historic_flag,
                 "historic_cursor": cursor_override or entity.get("history_cursor"),
                 "history_cursor": entity.get("history_cursor"),
-            })
+            }
+            history.append(history_entry)
             if len(history) > MAX_HISTORY_POINTS:
                 del history[:-MAX_HISTORY_POINTS]
-            if measurement:
-                await self._async_store_measurements(slug, [history[-1]])
 
-        await self._async_process_history_cursor(slug, entity)
+            if measurement:
+                dt_value = dt_util.parse_datetime(measurement)
+                if dt_value is not None:
+                    measured_local = dt_util.as_local(dt_util.as_utc(dt_value))
+                    today_local = dt_util.now().date()
+                    measured_date = measured_local.date()
+                    stored_cursor = self._history_cursors.get(slug)
+                    history_cursor_changed = (
+                        incoming_cursor_str is not None
+                        and stored_cursor != incoming_cursor_str
+                    )
+                    if measured_date != today_local and history_cursor_changed:
+                        backfill_required = True
+                        _LOGGER.debug(
+                            "Deferring immediate measurement write for %s (measured_at=%s)"
+                            " pending history reload",
+                            slug,
+                            measurement,
+                        )
+                if not backfill_required:
+                    await self._async_store_measurements(slug, [history_entry])
+
+        await self._async_process_history_cursor(
+            slug,
+            entity,
+            backfill_only=backfill_required,
+        )
         self._save_history_cursors_if_needed()
 
         allowed_slugs = set(self._select_allowed_slugs(self._entities))
@@ -799,7 +831,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
 
                 for entry in entries:
                     timestamp: datetime = dt_util.as_utc(entry["timestamp"])
-                    timestamp_ts = dt_util.utc_to_timestamp(timestamp)
+                    timestamp_ts = timestamp.timestamp()
                     state_str: str = entry["state"]
                     attributes: Dict[str, Any] = entry["attributes"]
     
@@ -911,6 +943,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
         entity: Dict[str, Any],
         *,
         force_reload: bool = False,
+        backfill_only: bool = False,
     ) -> None:
         if entity.get("entity_type") != "hassems":
             if slug in self._history_cursors:
@@ -940,7 +973,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             stored,
             force_reload,
         )
-        if stored is None and not force_reload:
+        if stored is None and not force_reload and not backfill_only:
             self._history_cursors[slug] = cursor_str
             self._mark_history_cursors_dirty()
             _LOGGER.debug(
@@ -951,7 +984,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
             _LOGGER.debug("History cursor unchanged for %s; skipping reload", slug)
             return
 
-        success = await self._async_reload_history(slug)
+        success = await self._async_reload_history(slug, backfill_only=backfill_only)
         if not success:
             _LOGGER.debug("History reload failed for %s", slug)
             return
@@ -962,7 +995,7 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 "Updated stored history cursor for %s to %s", slug, cursor_str
             )
 
-    async def _async_reload_history(self, slug: str) -> bool:
+    async def _async_reload_history(self, slug: str, *, backfill_only: bool = False) -> bool:
         entity = self._entities.get(slug)
         if not entity:
             return False
@@ -1012,8 +1045,13 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                 len(history_list),
                 cursor_hint,
             )
-        if normalized:
+        if normalized and not backfill_only:
             await self._async_store_measurements(slug, normalized, force=True)
+        elif normalized and backfill_only:
+            _LOGGER.debug(
+                "Skipping recorder history write for %s due to backfill-only reload",
+                slug,
+            )
         await self._async_update_statistics(
             slug,
             full_refresh=True,
