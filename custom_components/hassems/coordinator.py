@@ -5,7 +5,7 @@ import json
 import logging
 import math
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from aiohttp import web
@@ -64,6 +64,86 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_HISTORY_POINTS = 10000
 HISTORY_HORIZON_DAYS = 10
+
+
+def _coerce_previous_state(
+    last_state: Optional[States],
+    states_meta: StatesMeta,
+    entity_id: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[float]]:
+    """Convert a recorder row into a dictionary without requiring a stored entity id."""
+
+    if last_state is None:
+        return None, None, None
+
+    try:
+        last_state_obj = last_state.to_native(validate_entity_id=False)
+    except ValueError:
+        fallback_entity_id = (
+            getattr(last_state, "entity_id", None)
+            or getattr(states_meta, "entity_id", None)
+            or entity_id
+        )
+
+        if not fallback_entity_id:
+            _LOGGER.debug(
+                "Discarding recorder state %s because entity_id is missing",
+                getattr(last_state, "state_id", None),
+            )
+            return None, None, None
+
+        attributes: Dict[str, Any] = {}
+        if hasattr(last_state, "attributes_as_dict"):
+            try:
+                attributes = last_state.attributes_as_dict  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Failed to decode attributes for recorder state %s",
+                    getattr(last_state, "state_id", None),
+                    exc_info=True,
+                )
+
+        last_changed_ts = getattr(last_state, "last_changed_ts", None)
+        if last_changed_ts is None:
+            last_changed_ts = getattr(last_state, "last_updated_ts", None)
+
+        last_updated_ts = getattr(last_state, "last_updated_ts", None)
+
+        def _iso(ts: Optional[float]) -> Optional[str]:
+            if ts is None:
+                return None
+            converter = getattr(dt_util, "utc_from_timestamp", None)
+            if callable(converter):
+                dt_value = converter(ts)
+            else:
+                dt_value = datetime.fromtimestamp(ts, tz=timezone.utc)
+            return dt_value.isoformat()
+
+        last_changed_iso = _iso(last_changed_ts)
+        last_updated_iso = _iso(last_updated_ts) or last_changed_iso
+
+        previous_state_dict = {
+            "entity_id": fallback_entity_id,
+            "state": getattr(last_state, "state", None),
+            "attributes": attributes,
+            "last_changed": last_changed_iso,
+            "last_updated": last_updated_iso,
+        }
+
+        _LOGGER.debug(
+            "Recovered recorder state %s using metadata entity_id %s",
+            getattr(last_state, "state_id", None),
+            fallback_entity_id,
+        )
+
+        return previous_state_dict, getattr(last_state, "state", None), last_changed_ts
+
+    last_changed_ts = (
+        last_state.last_changed_ts
+        if last_state.last_changed_ts is not None
+        else last_state.last_updated_ts
+    )
+    return last_state_obj.as_dict(), last_state_obj.state, last_changed_ts
 
 
 class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
@@ -703,25 +783,20 @@ class HASSEMSCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):
                     .one_or_none()
                 )
     
-                if last_state is not None:
-                    last_state_obj = last_state.to_native(validate_entity_id=False)
-                else:
-                    last_state_obj = None
-    
-                previous_state_dict: Dict[str, Any] | None = (
-                    last_state_obj.as_dict() if last_state_obj is not None else None
-                )
+                (
+                    previous_state_dict,
+                    previous_state_value,
+                    previous_last_changed_ts,
+                ) = _coerce_previous_state(last_state, states_meta, entity_id)
                 previous_state_id = last_state.state_id if last_state is not None else None
-                previous_state_value = (
-                    last_state_obj.state if last_state_obj is not None else None
-                )
-                if last_state is None:
-                    previous_last_changed_ts: float | None = None
-                elif last_state.last_changed_ts is not None:
-                    previous_last_changed_ts = last_state.last_changed_ts
-                else:
-                    previous_last_changed_ts = last_state.last_updated_ts
-    
+                if previous_state_value is None and last_state is not None:
+                    previous_state_value = last_state.state
+                if previous_last_changed_ts is None and last_state is not None:
+                    if last_state.last_changed_ts is not None:
+                        previous_last_changed_ts = last_state.last_changed_ts
+                    else:
+                        previous_last_changed_ts = last_state.last_updated_ts
+
                 for entry in entries:
                     timestamp: datetime = dt_util.as_utc(entry["timestamp"])
                     timestamp_ts = dt_util.utc_to_timestamp(timestamp)
