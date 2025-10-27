@@ -4,13 +4,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+
+import paho.mqtt.client as mqtt
 
 from .hass_client import HomeAssistantClient, HomeAssistantError, HomeAssistantSettings
 from .logging_config import setup_logging
@@ -20,10 +24,20 @@ from .models import (
     DomainEntry,
     DomainSelectionRequest,
     EntitiesResponse,
+    DataPointRequest,
+    EntityCreateRequest,
+    EntityDataPoint,
+    EntityDetailResponse,
+    EntityUpdateRequest,
+    ManagedEntity,
+    MQTTConfig,
+    MQTTConfigResponse,
+    MQTTTestRequest,
+    MQTTTestResponse,
     WhitelistEntryRequest,
     WhitelistResponse,
 )
-from .storage import DataRepository
+from .storage import DataRepository, SQLiteRepository
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -46,6 +60,7 @@ settings = HomeAssistantSettings(
 )
 
 repository = DataRepository(DATA_DIR)
+database = SQLiteRepository(DATA_DIR / "app.db")
 hass_client = HomeAssistantClient(settings)
 
 app = FastAPI(title="Home Assistant Helper", version="1.0.0")
@@ -66,6 +81,91 @@ def translate_error(exc: HomeAssistantError) -> HTTPException:
         status_code = exc.status_code
     return HTTPException(status_code=status_code, detail=str(exc))
 
+
+class MQTTConnectionError(Exception):
+    """Raised when MQTT operations fail."""
+
+
+def _build_mqtt_client(config: Dict[str, Any]) -> tuple[mqtt.Client, str, int]:
+    host = (config.get("host") or "").strip()
+    if not host:
+        raise MQTTConnectionError("MQTT host is not configured.")
+
+    port_raw = config.get("port") or 1883
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError) as exc:
+        raise MQTTConnectionError("MQTT port must be a number.") from exc
+    if not (1 <= port <= 65535):
+        raise MQTTConnectionError("MQTT port must be between 1 and 65535.")
+
+    client_id = (config.get("client_id") or "").strip()
+    if client_id:
+        client = mqtt.Client(client_id=client_id, clean_session=True, protocol=mqtt.MQTTv311)
+    else:
+        client = mqtt.Client(
+            client_id=f"hass-helper-{uuid.uuid4().hex[:10]}",
+            clean_session=True,
+            protocol=mqtt.MQTTv311,
+        )
+
+    username = (config.get("username") or "").strip()
+    if username:
+        client.username_pw_set(username=username, password=config.get("password"))
+
+    return client, host, port
+
+
+def _resolve_entity_topic(entity: Dict[str, Any], config: Dict[str, Any]) -> str:
+    topic = (entity.get("topic") or "").strip()
+    if topic:
+        return topic
+
+    entity_id = (entity.get("entity_id") or "").strip()
+    if not entity_id:
+        raise MQTTConnectionError("Entity does not have a valid identifier.")
+
+    prefix = (config.get("topic_prefix") or "").strip().strip("/")
+    entity_topic = entity_id.replace(".", "/")
+    if prefix:
+        return f"{prefix}/{entity_topic}"
+    return entity_topic
+
+
+def _test_mqtt_connection(config: Dict[str, Any]) -> None:
+    client, host, port = _build_mqtt_client(config)
+    try:
+        result = client.connect(host, port, keepalive=10)
+        if result != 0:
+            raise MQTTConnectionError(f"MQTT connection failed with code {result}.")
+        client.loop_start()
+        client.loop_stop()
+    except OSError as exc:
+        raise MQTTConnectionError(str(exc)) from exc
+    finally:
+        with suppress(Exception):
+            client.disconnect()
+
+
+def _publish_entity_value(config: Dict[str, Any], entity: Dict[str, Any], value: str) -> None:
+    client, host, port = _build_mqtt_client(config)
+    topic = _resolve_entity_topic(entity, config)
+    try:
+        result = client.connect(host, port, keepalive=30)
+        if result != 0:
+            raise MQTTConnectionError(f"MQTT connection failed with code {result}.")
+        client.loop_start()
+        message = client.publish(topic, payload=value)
+        message.wait_for_publish(timeout=5)
+        if not message.is_published():
+            raise MQTTConnectionError("Message delivery timed out.")
+    except OSError as exc:
+        raise MQTTConnectionError(str(exc)) from exc
+    finally:
+        with suppress(Exception):
+            client.loop_stop()
+        with suppress(Exception):
+            client.disconnect()
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
@@ -518,3 +618,119 @@ async def ingest_entities() -> EntitiesResponse:
 @app.post("/api/entities/refresh", response_model=EntitiesResponse, include_in_schema=False)
 async def refresh_entities() -> EntitiesResponse:
     return await _ingest_entities()
+
+
+@app.get("/api/mqtt/config", response_model=MQTTConfigResponse)
+async def get_mqtt_config() -> MQTTConfigResponse:
+    config = await asyncio.to_thread(database.get_mqtt_config)
+    return MQTTConfigResponse(**config)
+
+
+@app.post("/api/mqtt/config", response_model=MQTTConfigResponse)
+async def save_mqtt_config(payload: MQTTConfig) -> MQTTConfigResponse:
+    try:
+        config = await asyncio.to_thread(database.save_mqtt_config, payload.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MQTTConfigResponse(**config)
+
+
+@app.post("/api/mqtt/test", response_model=MQTTTestResponse)
+async def test_mqtt_connection_endpoint(payload: MQTTTestRequest) -> MQTTTestResponse:
+    try:
+        await asyncio.to_thread(_test_mqtt_connection, payload.dict())
+    except MQTTConnectionError as exc:
+        return MQTTTestResponse(success=False, message=str(exc))
+    except Exception:  # pragma: no cover - unexpected errors
+        logger.exception("Unexpected MQTT connection error")
+        return MQTTTestResponse(success=False, message="Failed to connect to MQTT broker.")
+    return MQTTTestResponse(success=True, message="Connection successful.")
+
+
+@app.get("/api/managed/entities", response_model=List[ManagedEntity])
+async def list_managed_entities() -> List[ManagedEntity]:
+    records = await asyncio.to_thread(database.list_entities)
+    return [ManagedEntity(**record) for record in records]
+
+
+@app.post(
+    "/api/managed/entities",
+    response_model=EntityDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_managed_entity(payload: EntityCreateRequest) -> EntityDetailResponse:
+    try:
+        record = await asyncio.to_thread(database.create_entity, payload.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return EntityDetailResponse(**record)
+
+
+@app.get("/api/managed/entities/{entity_id}", response_model=EntityDetailResponse)
+async def get_managed_entity(entity_id: str) -> EntityDetailResponse:
+    record = await asyncio.to_thread(database.get_entity, entity_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
+    return EntityDetailResponse(**record)
+
+
+@app.put("/api/managed/entities/{entity_id}", response_model=EntityDetailResponse)
+async def update_managed_entity(
+    entity_id: str, payload: EntityUpdateRequest
+) -> EntityDetailResponse:
+    try:
+        record = await asyncio.to_thread(database.update_entity, entity_id, payload.dict(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found") from None
+    return EntityDetailResponse(**record)
+
+
+@app.delete(
+    "/api/managed/entities/{entity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_managed_entity(entity_id: str) -> Response:
+    try:
+        await asyncio.to_thread(database.delete_entity, entity_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found") from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
+    "/api/managed/entities/{entity_id}/publish",
+    response_model=EntityDataPoint,
+)
+async def publish_entity_data_point(
+    entity_id: str, payload: DataPointRequest
+) -> EntityDataPoint:
+    value = (payload.value or "").strip()
+    if not value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A value is required.")
+
+    entity = await asyncio.to_thread(database.get_entity, entity_id)
+    if entity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
+
+    config = await asyncio.to_thread(database.get_mqtt_config)
+    try:
+        await asyncio.to_thread(_publish_entity_value, config, entity, value)
+    except MQTTConnectionError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception:  # pragma: no cover - unexpected publish errors
+        logger.exception("Failed to publish MQTT message", extra={"entity_id": entity_id})
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to publish value to MQTT broker.",
+        ) from None
+
+    try:
+        point = await asyncio.to_thread(database.add_data_point, entity["entity_id"], value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found") from None
+
+    return EntityDataPoint(**point)
