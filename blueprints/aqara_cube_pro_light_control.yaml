@@ -33,6 +33,7 @@ blueprint:
         boolean:
     side_1_light:
       name: Side 1 light
+      default: null
       selector:
         entity:
           domain: light
@@ -41,7 +42,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -52,6 +56,7 @@ blueprint:
         boolean:
     side_2_light:
       name: Side 2 light
+      default: null
       selector:
         entity:
           domain: light
@@ -60,7 +65,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -71,6 +79,7 @@ blueprint:
         boolean:
     side_3_light:
       name: Side 3 light
+      default: null
       selector:
         entity:
           domain: light
@@ -79,7 +88,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -90,6 +102,7 @@ blueprint:
         boolean:
     side_4_light:
       name: Side 4 light
+      default: null
       selector:
         entity:
           domain: light
@@ -98,7 +111,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -109,6 +125,7 @@ blueprint:
         boolean:
     side_5_light:
       name: Side 5 light
+      default: null
       selector:
         entity:
           domain: light
@@ -117,7 +134,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -128,6 +148,7 @@ blueprint:
         boolean:
     side_6_light:
       name: Side 6 light
+      default: null
       selector:
         entity:
           domain: light
@@ -136,7 +157,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -225,17 +249,17 @@ action:
         {% endif %}
       active_light: >-
         {% if side == 1 %}
-          {{ side_1_light }}
+          {{ side_1_light if side_1_light else none }}
         {% elif side == 2 %}
-          {{ side_2_light }}
+          {{ side_2_light if side_2_light else none }}
         {% elif side == 3 %}
-          {{ side_3_light }}
+          {{ side_3_light if side_3_light else none }}
         {% elif side == 4 %}
-          {{ side_4_light }}
+          {{ side_4_light if side_4_light else none }}
         {% elif side == 5 %}
-          {{ side_5_light }}
+          {{ side_5_light if side_5_light else none }}
         {% elif side == 6 %}
-          {{ side_6_light }}
+          {{ side_6_light if side_6_light else none }}
         {% else %}
           none
         {% endif %}
