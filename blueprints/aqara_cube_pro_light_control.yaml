@@ -42,7 +42,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -62,7 +65,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -82,7 +88,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -102,7 +111,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -122,7 +134,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
@@ -142,7 +157,10 @@ blueprint:
       description: >
         List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
         Leave empty to disable color cycling for this side.
-      default: []
+      default:
+        - [0.7, 0.298]
+        - [0.172, 0.746]
+        - [0.404, 0.39]
       selector:
         object:
 
