@@ -64,11 +64,11 @@ variables:
   double_targets: !input double_targets
   hold_targets: !input hold_targets
 
-triggers: !input button_triggers
+trigger: !input button_triggers
 
-conditions: []
+condition: []
 
-actions:
+action:
   - choose:
       - conditions:
           - condition: template
