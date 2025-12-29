@@ -27,3 +27,10 @@ Turns entities on at sunset (with optional offsets) and off at sunrise. Works wi
 and fans and allows specifying ±HH:MM:SS offsets for precise timing.
 
 [![Import Sunrise/Sunset Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/on_off_sunrise_sunset.yaml)
+
+## Aqara Cube Pro per-side light control
+
+Uses Aqara Cube Pro MQTT device actions to control per-side lights. Tap toggles the configured
+light, shake cycles through a per-side XY color list, and rotation adjusts brightness.
+
+[![Import Aqara Cube Pro Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_cube_pro_light_control.yaml)
