@@ -1,0 +1,341 @@
+blueprint:
+  name: Aqara Cube Pro - Per-side light control
+  description: >
+    Use an Aqara Cube Pro (MQTT device actions) to control lights per cube side.
+    Tap toggles the configured light, shake cycles through a per-side color list,
+    and rotate adjusts brightness. Each side can be enabled or disabled, and the
+    color list can be empty if you only want toggle/brightness control.
+  domain: automation
+  input:
+    cube_device:
+      name: Aqara Cube Pro device
+      selector:
+        device:
+          integration: mqtt
+
+    side_sensor:
+      name: Cube side sensor
+      description: Sensor that reports the current side number (1-6).
+      selector:
+        entity:
+          domain: sensor
+    angle_sensor:
+      name: Cube action angle sensor
+      description: Sensor that reports the current rotation angle.
+      selector:
+        entity:
+          domain: sensor
+
+    side_1_enabled:
+      name: Enable side 1
+      default: true
+      selector:
+        boolean:
+    side_1_light:
+      name: Side 1 light
+      selector:
+        entity:
+          domain: light
+    side_1_colors:
+      name: Side 1 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+    side_2_enabled:
+      name: Enable side 2
+      default: true
+      selector:
+        boolean:
+    side_2_light:
+      name: Side 2 light
+      selector:
+        entity:
+          domain: light
+    side_2_colors:
+      name: Side 2 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+    side_3_enabled:
+      name: Enable side 3
+      default: true
+      selector:
+        boolean:
+    side_3_light:
+      name: Side 3 light
+      selector:
+        entity:
+          domain: light
+    side_3_colors:
+      name: Side 3 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+    side_4_enabled:
+      name: Enable side 4
+      default: true
+      selector:
+        boolean:
+    side_4_light:
+      name: Side 4 light
+      selector:
+        entity:
+          domain: light
+    side_4_colors:
+      name: Side 4 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+    side_5_enabled:
+      name: Enable side 5
+      default: true
+      selector:
+        boolean:
+    side_5_light:
+      name: Side 5 light
+      selector:
+        entity:
+          domain: light
+    side_5_colors:
+      name: Side 5 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+    side_6_enabled:
+      name: Enable side 6
+      default: true
+      selector:
+        boolean:
+    side_6_light:
+      name: Side 6 light
+      selector:
+        entity:
+          domain: light
+    side_6_colors:
+      name: Side 6 color cycle (xy pairs)
+      description: >
+        List of xy color pairs, e.g. [[0.7,0.298],[0.172,0.746],[0.404,0.39]].
+        Leave empty to disable color cycling for this side.
+      default: []
+      selector:
+        object:
+
+mode: restart
+
+trigger:
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: tap
+    id: tap
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: shake
+    id: shake
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: flip_to_side
+    id: flip_to_side
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: side_up
+    id: side_up
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: rotate_right
+    id: rotate_right
+  - platform: device
+    domain: mqtt
+    device_id: !input cube_device
+    type: action
+    subtype: rotate_left
+    id: rotate_left
+
+condition: []
+
+action:
+  - variables:
+      side_entity: !input side_sensor
+      angle_entity: !input angle_sensor
+      side_1_enabled: !input side_1_enabled
+      side_1_light: !input side_1_light
+      side_1_colors: !input side_1_colors
+      side_2_enabled: !input side_2_enabled
+      side_2_light: !input side_2_light
+      side_2_colors: !input side_2_colors
+      side_3_enabled: !input side_3_enabled
+      side_3_light: !input side_3_light
+      side_3_colors: !input side_3_colors
+      side_4_enabled: !input side_4_enabled
+      side_4_light: !input side_4_light
+      side_4_colors: !input side_4_colors
+      side_5_enabled: !input side_5_enabled
+      side_5_light: !input side_5_light
+      side_5_colors: !input side_5_colors
+      side_6_enabled: !input side_6_enabled
+      side_6_light: !input side_6_light
+      side_6_colors: !input side_6_colors
+      side: "{{ states(side_entity) | int(0) }}"
+      angle: "{{ states(angle_entity) | float(0) }}"
+      trigger_id: "{{ trigger.id }}"
+      side_enabled: >-
+        {% if side == 1 %}
+          {{ side_1_enabled }}
+        {% elif side == 2 %}
+          {{ side_2_enabled }}
+        {% elif side == 3 %}
+          {{ side_3_enabled }}
+        {% elif side == 4 %}
+          {{ side_4_enabled }}
+        {% elif side == 5 %}
+          {{ side_5_enabled }}
+        {% elif side == 6 %}
+          {{ side_6_enabled }}
+        {% else %}
+          false
+        {% endif %}
+      active_light: >-
+        {% if side == 1 %}
+          {{ side_1_light }}
+        {% elif side == 2 %}
+          {{ side_2_light }}
+        {% elif side == 3 %}
+          {{ side_3_light }}
+        {% elif side == 4 %}
+          {{ side_4_light }}
+        {% elif side == 5 %}
+          {{ side_5_light }}
+        {% elif side == 6 %}
+          {{ side_6_light }}
+        {% else %}
+          none
+        {% endif %}
+      side_colors: >-
+        {% if side == 1 %}
+          {{ side_1_colors }}
+        {% elif side == 2 %}
+          {{ side_2_colors }}
+        {% elif side == 3 %}
+          {{ side_3_colors }}
+        {% elif side == 4 %}
+          {{ side_4_colors }}
+        {% elif side == 5 %}
+          {{ side_5_colors }}
+        {% elif side == 6 %}
+          {{ side_6_colors }}
+        {% else %}
+          []
+        {% endif %}
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ side_enabled and active_light != none }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger_id == 'tap' }}"
+                sequence:
+                  - action: light.toggle
+                    target:
+                      entity_id: "{{ active_light }}"
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger_id == 'shake' }}"
+                  - condition: template
+                    value_template: "{{ side_colors | length > 0 }}"
+                sequence:
+                  - variables:
+                      cur_xy: >-
+                        {{ state_attr(active_light, 'xy_color')
+                           or (side_colors[0] if (side_colors | length > 0) else [0.404, 0.39]) }}
+                      cur_x: "{{ cur_xy[0] | float(0.404) }}"
+                      cur_y: "{{ cur_xy[1] | float(0.39) }}"
+                      match_index: >-
+                        {% set ns = namespace(found=-1) %}
+                        {% for pair in side_colors %}
+                          {% if pair | length == 2 %}
+                            {% set x = pair[0] | float %}
+                            {% set y = pair[1] | float %}
+                            {% if (cur_x - x) | abs < 0.02 and (cur_y - y) | abs < 0.02 %}
+                              {% set ns.found = loop.index0 %}
+                            {% endif %}
+                          {% endif %}
+                        {% endfor %}
+                        {{ ns.found }}
+                      next_index: >-
+                        {% if match_index == -1 %}
+                          0
+                        {% else %}
+                          {{ (match_index + 1) % (side_colors | length) }}
+                        {% endif %}
+                      next_xy: "{{ side_colors[next_index] }}"
+                  - action: light.turn_on
+                    target:
+                      entity_id: "{{ active_light }}"
+                    data:
+                      xy_color:
+                        - "{{ next_xy[0] | float }}"
+                        - "{{ next_xy[1] | float }}"
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger_id in ['rotate_right','rotate_left'] }}"
+                sequence:
+                  - variables:
+                      delta_pct: "{{ ((angle | float(0) | abs) / 10) * 2.5 }}"
+                      cur_bri: "{{ state_attr(active_light, 'brightness') | int(0) }}"
+                      cur_pct: >-
+                        {% if cur_bri > 0 %}
+                          {{ (cur_bri / 255 * 100) }}
+                        {% else %}
+                          50
+                        {% endif %}
+                      new_pct: >-
+                        {% set base = cur_pct | float(0) %}
+                        {% if trigger_id == 'rotate_right' %}
+                          {% set v = base + delta_pct %}
+                        {% else %}
+                          {% set v = base - delta_pct %}
+                        {% endif %}
+                        {% if v < 1 %}
+                          1
+                        {% elif v > 100 %}
+                          100
+                        {% else %}
+                          {{ v }}
+                        {% endif %}
+                  - action: light.turn_on
+                    target:
+                      entity_id: "{{ active_light }}"
+                    data:
+                      brightness_pct: "{{ new_pct | int }}"
