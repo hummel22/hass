@@ -1,0 +1,93 @@
+blueprint:
+  name: Aqara Button(s) — Toggle targets on single / double / hold
+  description: >
+    Add one or many Aqara button triggers (single/double/hold) and toggle different
+    target lists per action. Works across integrations by using a Trigger selector:
+    set each trigger's ID to: single, double, or hold.
+  domain: automation
+
+  input:
+    button_triggers:
+      name: Button triggers (one or many)
+      description: >
+        Add triggers for your Aqara button(s) here.
+        IMPORTANT: Set each trigger's "Trigger ID" to one of:
+        - single
+        - double
+        - hold
+
+        You can add multiple devices; just add more triggers and reuse the same IDs.
+      selector:
+        trigger:
+
+    single_targets:
+      name: Targets to toggle on SINGLE press
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+
+    double_targets:
+      name: Targets to toggle on DOUBLE press
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+
+    hold_targets:
+      name: Targets to toggle on HOLD
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+
+mode: queued
+max: 10
+
+variables:
+  single_targets: !input single_targets
+  double_targets: !input double_targets
+  hold_targets: !input hold_targets
+
+trigger: !input button_triggers
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'single' and (single_targets | length > 0) }}"
+        sequence:
+          - action: homeassistant.toggle
+            target: !input single_targets
+
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'double' and (double_targets | length > 0) }}"
+        sequence:
+          - action: homeassistant.toggle
+            target: !input double_targets
+
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'hold' and (hold_targets | length > 0) }}"
+        sequence:
+          - action: homeassistant.toggle
+            target: !input hold_targets
+    default: []
