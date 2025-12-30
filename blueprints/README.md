@@ -30,6 +30,8 @@ and fans and allows specifying ±HH:MM:SS offsets for precise timing.
 
 ## Aqara Button toggle actions
 
+**In order for the actions to show up, you must perform them at least once per device. (single click, double click, and hold)**
+
 Set up Aqara button triggers and toggle different targets for single, double, and hold presses.
 
 ![Aqara button example settings](imgs/aqara_button_settings.png)
