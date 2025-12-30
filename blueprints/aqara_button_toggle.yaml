@@ -3,7 +3,7 @@ blueprint:
   description: >
     Add one or many Aqara button triggers (single/double/hold) and toggle different
     target lists per action. Works across integrations by using a Trigger selector:
-    set each trigger's ID to: single, double, or hold.
+    uses payload/subtype for the action; Trigger ID is optional for legacy setups.
   domain: automation
 
   input:
@@ -11,7 +11,9 @@ blueprint:
       name: Button triggers (one or many)
       description: >
         Add triggers for your Aqara button(s) here.
-        IMPORTANT: Set each trigger's "Trigger ID" to one of:
+        IMPORTANT: The action is resolved from payload (MQTT) or subtype
+        (device trigger). Trigger ID is optional for legacy configs.
+        If you need it, set each trigger's "Trigger ID" to one of:
         - single
         - double
         - hold
@@ -63,6 +65,7 @@ variables:
   single_targets: !input single_targets
   double_targets: !input double_targets
   hold_targets: !input hold_targets
+  action_kind: "{{ trigger.payload | default(trigger.subtype) | default(trigger.id) }}"
 
 trigger: !input button_triggers
 
@@ -72,21 +75,21 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'single' and (single_targets | length > 0) }}"
+            value_template: "{{ action_kind == 'single' and (single_targets | length > 0) }}"
         sequence:
           - action: homeassistant.toggle
             target: !input single_targets
 
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'double' and (double_targets | length > 0) }}"
+            value_template: "{{ action_kind == 'double' and (double_targets | length > 0) }}"
         sequence:
           - action: homeassistant.toggle
             target: !input double_targets
 
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'hold' and (hold_targets | length > 0) }}"
+            value_template: "{{ action_kind == 'hold' and (hold_targets | length > 0) }}"
         sequence:
           - action: homeassistant.toggle
             target: !input hold_targets
