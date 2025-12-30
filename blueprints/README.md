@@ -28,11 +28,21 @@ and fans and allows specifying ±HH:MM:SS offsets for precise timing.
 
 [![Import Sunrise/Sunset Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/on_off_sunrise_sunset.yaml)
 
+## Aqara Button toggle actions
+
+Set up Aqara button triggers and toggle different targets for single, double, and hold presses.
+
+![Aqara button example settings](imgs/aqara_button_settings.png)
+
+[![Import Aqara Button Toggle Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_button_toggle.yaml)
+
 ## Aqara Cube Pro per-side light control
 
 Uses Aqara Cube Pro MQTT device actions to control per-side lights. Tap toggles the configured
 light, shake cycles through a per-side XY color list, and rotation adjusts brightness. When
 configuring, choose the Cube Pro MQTT device plus its "Side" sensor (current face number 1-6)
 and "Action angle" sensor (rotation delta) so actions map to the intended side.
+
+![Aqara Cube Pro example settings](imgs/cube_settings.png)
 
 [![Import Aqara Cube Pro Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_cube_pro_light_control.yaml)
