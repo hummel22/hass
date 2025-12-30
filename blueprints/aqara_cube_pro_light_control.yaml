@@ -4,24 +4,33 @@ blueprint:
     Use an Aqara Cube Pro (MQTT device actions) to control lights per cube side.
     Tap toggles the configured light, shake cycles through a per-side color list,
     and rotate adjusts brightness. Each side can be enabled or disabled, and the
-    color list can be empty if you only want toggle/brightness control.
+    color list can be empty if you only want toggle/brightness control. Select
+    the Cube Pro MQTT device plus the matching "Side" and "Action angle" sensors
+    from that device so the automation can map actions to the active face.
   domain: automation
   input:
     cube_device:
       name: Aqara Cube Pro device
+      description: >
+        Select the Cube Pro device (MQTT integration) that emits tap/shake/rotate
+        actions.
       selector:
         device:
           integration: mqtt
 
     side_sensor:
       name: Cube side sensor
-      description: Sensor that reports the current side number (1-6).
+      description: >
+        Select the "Side" sensor entity from the Cube Pro device that reports
+        the current face number (1-6).
       selector:
         entity:
           domain: sensor
     angle_sensor:
       name: Cube action angle sensor
-      description: Sensor that reports the current rotation angle.
+      description: >
+        Select the "Action angle" sensor entity from the Cube Pro device; this
+        value determines how far a rotate action adjusts brightness.
       selector:
         entity:
           domain: sensor
