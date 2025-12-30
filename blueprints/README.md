@@ -31,6 +31,8 @@ and fans and allows specifying ±HH:MM:SS offsets for precise timing.
 ## Aqara Cube Pro per-side light control
 
 Uses Aqara Cube Pro MQTT device actions to control per-side lights. Tap toggles the configured
-light, shake cycles through a per-side XY color list, and rotation adjusts brightness.
+light, shake cycles through a per-side XY color list, and rotation adjusts brightness. When
+configuring, choose the Cube Pro MQTT device plus its "Side" sensor (current face number 1-6)
+and "Action angle" sensor (rotation delta) so actions map to the intended side.
 
 [![Import Aqara Cube Pro Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_cube_pro_light_control.yaml)
