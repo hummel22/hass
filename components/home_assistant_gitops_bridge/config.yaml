@@ -1,0 +1,37 @@
+name: Home Assistant GitOps Bridge
+slug: ha_gitops_bridge
+description: >-
+  Track Home Assistant configuration changes in Git with an ingress UI, webhook
+  pull support, and persistent notifications.
+version: 0.1.0
+url: https://example.com/home-assistant-gitops-bridge
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+init: false
+ingress: true
+ingress_port: 0
+panel_title: GitOps Bridge
+panel_icon: mdi:source-repository
+homeassistant_api: true
+map:
+  - config:rw
+options:
+  remote_url: ""
+  remote_branch: main
+  notification_enabled: true
+  webhook_enabled: false
+  webhook_path: pull
+  poll_interval_minutes: 15
+  merge_automations: true
+schema:
+  remote_url: str?
+  remote_branch: str
+  notification_enabled: bool
+  webhook_enabled: bool
+  webhook_path: str
+  poll_interval_minutes: int?
+  merge_automations: bool
