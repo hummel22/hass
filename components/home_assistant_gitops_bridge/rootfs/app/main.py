@@ -520,7 +520,15 @@ async def handle_pull() -> list[str]:
     result = run_git(["pull", "--ff-only", "origin", OPTIONS.remote_branch], check=False)
     if result.returncode != 0:
         raise HTTPException(status_code=400, detail=result.stderr.strip() or "Pull failed")
-    changed_files = run_git(["diff", "--name-only", "ORIG_HEAD", "HEAD"], check=False).stdout.splitlines()
+    pull_output = f"{result.stdout}\n{result.stderr}".lower()
+    if "already up to date" in pull_output:
+        return []
+    previous_head = run_git(["rev-parse", "HEAD@{1}"], check=False)
+    if previous_head.returncode != 0:
+        return []
+    changed_files = run_git(
+        ["diff", "--name-only", previous_head.stdout.strip(), "HEAD"], check=False
+    ).stdout.splitlines()
     domains = list_changed_domains(changed_files)
     for domain in domains:
         await call_service(domain, "reload")
