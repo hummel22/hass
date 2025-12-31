@@ -137,7 +137,10 @@ def ensure_repo() -> None:
     if (CONFIG_DIR / ".git").exists():
         return
     ensure_gitignore()
-    run_git(["init"])
+    init_result = run_git(["init", "-b", OPTIONS.remote_branch], check=False)
+    if init_result.returncode != 0:
+        run_git(["init"])
+        run_git(["branch", "-M", OPTIONS.remote_branch])
     run_git(["add", "-A"])
     run_git(["commit", "-m", "Initial Home Assistant configuration"], check=False)
 
