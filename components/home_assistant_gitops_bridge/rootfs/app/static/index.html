@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Home Assistant GitOps Bridge</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 24px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    h1 { margin-bottom: 8px; }
+    section {
+      background: #111827;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+    }
+    button {
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    pre {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    ul { padding-left: 18px; }
+    label { display: block; margin-top: 8px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Home Assistant GitOps Bridge</h1>
+  <p>Monitor configuration changes, stage and commit updates, and sync with GitHub.</p>
+
+  <section>
+    <h2>Status</h2>
+    <button onclick="loadStatus()">Refresh</button>
+    <div id="status"></div>
+  </section>
+
+  <section>
+    <h2>Commit</h2>
+    <label>Commit message</label>
+    <input type="text" id="commit-message" placeholder="Describe your change" />
+    <button onclick="commitAll()">Commit all changes</button>
+  </section>
+
+  <section>
+    <h2>Remote Sync</h2>
+    <button onclick="pullChanges()">Pull</button>
+    <button onclick="pushChanges()">Push</button>
+    <div id="remote-status"></div>
+  </section>
+
+  <section>
+    <h2>Automation Merge</h2>
+    <button onclick="mergeAutomations()">Merge automations</button>
+    <button onclick="syncAutomations()">Sync from markers</button>
+  </section>
+
+  <script>
+    async function loadStatus() {
+      const response = await fetch('/api/status');
+      const data = await response.json();
+      const status = document.getElementById('status');
+      status.innerHTML = `
+        <p><strong>Remote:</strong> ${data.remote || 'Not configured'}</p>
+        <p><strong>Pending:</strong> ${data.pending.length}</p>
+        <h3>Pending files</h3>
+        <ul>${data.pending.map(item => `<li>${item}</li>`).join('') || '<li>None</li>'}</ul>
+        <h3>Git status</h3>
+        <ul>${data.changes.map(change => `<li>${change.status} ${change.path}</li>`).join('') || '<li>Clean</li>'}</ul>
+        <h3>Recent commits</h3>
+        <ul>${data.commits.map(commit => `<li>${commit.sha} ${commit.subject} (${commit.date})</li>`).join('') || '<li>No commits yet</li>'}</ul>
+      `;
+    }
+
+    async function commitAll() {
+      const message = document.getElementById('commit-message').value.trim();
+      if (!message) {
+        alert('Please enter a commit message.');
+        return;
+      }
+      const response = await fetch('/api/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+      const data = await response.json();
+      alert(data.status || data.detail);
+      loadStatus();
+    }
+
+    async function pullChanges() {
+      const response = await fetch('/api/pull', { method: 'POST' });
+      const data = await response.json();
+      document.getElementById('remote-status').innerText = data.status || data.detail;
+      loadStatus();
+    }
+
+    async function pushChanges() {
+      const response = await fetch('/api/push', { method: 'POST' });
+      const data = await response.json();
+      document.getElementById('remote-status').innerText = data.status || data.detail;
+      loadStatus();
+    }
+
+    async function mergeAutomations() {
+      const response = await fetch('/api/automation/merge', { method: 'POST' });
+      const data = await response.json();
+      alert(`Merged: ${data.files.join(', ')}`);
+      loadStatus();
+    }
+
+    async function syncAutomations() {
+      const response = await fetch('/api/automation/sync', { method: 'POST' });
+      const data = await response.json();
+      alert(`Synced: ${data.files.join(', ')}`);
+      loadStatus();
+    }
+
+    loadStatus();
+  </script>
+</body>
+</html>
