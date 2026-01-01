@@ -24,6 +24,13 @@ ingress UI to stage/commit changes, and syncs with GitHub via SSH.
 4. Use the UI to commit and push changes.
 5. Enable the webhook and/or periodic checks if desired.
 
+## GitOps config file
+
+The add-on writes a GitOps config file into your repository at `/config/.gitops.yaml`.
+It mirrors all add-on options so they can be tracked in Git and reviewed in pull requests.
+If you edit `/config/.gitops.yaml`, restart the add-on to apply changes.
+Commit this file along with the rest of your Home Assistant configuration.
+
 ## Manual Git setup
 
 If you already manage `/config` with Git, the add-on will detect the existing repository and will not re-initialize or overwrite it. It will keep using your `.gitignore` and history.
@@ -50,3 +57,18 @@ When `webhook_enabled` is true, POST to `/api/webhook/<webhook_path>` to trigger
 
 The add-on can merge `automations/*.yaml` into `automations.yaml` with comment markers. Use
 `Sync from markers` in the UI to write changes back into individual files.
+
+### Folder convention
+
+Use the split-automation convention Home Assistant already supports:
+
+- Put automation packages in `/config/automations/*.yaml`.
+- Each file should contain a list of automations (the same format as `automations.yaml`).
+- The add-on manages only the sections wrapped in `# BEGIN automations/...` and `# END ...`.
+
+### Sync behavior
+
+- When files under `automations/` change, the add-on rebuilds the matching marker blocks in
+  `automations.yaml` and leaves any non-package content untouched.
+- When you edit marker blocks inside `automations.yaml`, use `Sync from markers` to push
+  updates back to the package files. Commit both files together.

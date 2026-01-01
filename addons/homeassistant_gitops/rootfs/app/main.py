@@ -22,6 +22,7 @@ from watchdog.observers import Observer
 
 CONFIG_DIR = Path("/config")
 OPTIONS_PATH = Path("/data/options.json")
+GITOPS_CONFIG_PATH = CONFIG_DIR / ".gitops.yaml"
 SSH_DIR = CONFIG_DIR / ".ssh"
 GITIGNORE_TEMPLATE = Path("/app/gitignore_example")
 WATCH_EXTENSIONS = {".yaml", ".yml"}
@@ -40,10 +41,69 @@ class Options:
     merge_automations: bool
 
 
-def load_options() -> Options:
+def _parse_bool(value: str) -> bool | None:
+    lowered = value.lower()
+    if lowered in {"true", "yes", "on"}:
+        return True
+    if lowered in {"false", "no", "off"}:
+        return False
+    return None
+
+
+def load_gitops_config() -> dict[str, Any]:
+    if not GITOPS_CONFIG_PATH.exists():
+        return {}
     data: dict[str, Any] = {}
-    if OPTIONS_PATH.exists():
-        data = json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+    for line in GITOPS_CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            continue
+        key, raw_value = stripped.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip().strip('"').strip("'")
+        if not key:
+            continue
+        if value.lower() in {"null", "none"}:
+            data[key] = None
+            continue
+        parsed_bool = _parse_bool(value)
+        if parsed_bool is not None:
+            data[key] = parsed_bool
+            continue
+        if value.isdigit():
+            data[key] = int(value)
+            continue
+        data[key] = value
+    return data
+
+
+def _quote_yaml(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f"\"{escaped}\""
+
+
+def render_gitops_config(options: Options) -> str:
+    lines = [
+        "# Home Assistant GitOps Bridge configuration",
+        f"remote_url: {_quote_yaml(options.remote_url or '')}",
+        f"remote_branch: {_quote_yaml(options.remote_branch)}",
+        f"notification_enabled: {'true' if options.notification_enabled else 'false'}",
+        f"webhook_enabled: {'true' if options.webhook_enabled else 'false'}",
+        f"webhook_path: {_quote_yaml(options.webhook_path)}",
+        f"poll_interval_minutes: {options.poll_interval_minutes if options.poll_interval_minutes is not None else 'null'}",
+        f"merge_automations: {'true' if options.merge_automations else 'false'}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def write_gitops_config(options: Options) -> None:
+    content = render_gitops_config(options)
+    GITOPS_CONFIG_PATH.write_text(content, encoding="utf-8")
+
+
+def _build_options(data: dict[str, Any]) -> Options:
     return Options(
         remote_url=data.get("remote_url") or None,
         remote_branch=data.get("remote_branch", "main"),
@@ -53,6 +113,16 @@ def load_options() -> Options:
         poll_interval_minutes=data.get("poll_interval_minutes", 15),
         merge_automations=bool(data.get("merge_automations", True)),
     )
+
+
+def load_options() -> Options:
+    if not GITOPS_CONFIG_PATH.exists():
+        seed: dict[str, Any] = {}
+        if OPTIONS_PATH.exists():
+            seed = json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+        write_gitops_config(_build_options(seed))
+    data = load_gitops_config()
+    return _build_options(data)
 
 
 OPTIONS = load_options()
@@ -170,6 +240,12 @@ def ensure_repo() -> None:
     run_git(["commit", "-m", "Initial Home Assistant configuration"], check=False)
 
 
+def ensure_gitops_config() -> None:
+    if GITOPS_CONFIG_PATH.exists():
+        return
+    write_gitops_config(OPTIONS)
+
+
 def ensure_remote() -> None:
     if not OPTIONS.remote_url:
         return
@@ -261,20 +337,71 @@ def list_changed_domains(paths: Iterable[str]) -> set[str]:
     return domains
 
 
-def merge_automations() -> list[str]:
+def _build_automation_blocks() -> dict[str, list[str]]:
     automations_dir = CONFIG_DIR / "automations"
     if not automations_dir.exists():
-        return []
-    merged_path = CONFIG_DIR / "automations.yaml"
-    entries: list[str] = []
+        return {}
+    entries: dict[str, list[str]] = {}
     for file_path in sorted(automations_dir.glob("*.y*ml")):
         contents = file_path.read_text(encoding="utf-8")
-        entries.append(f"# BEGIN {file_path.relative_to(CONFIG_DIR)}")
-        entries.append(contents.rstrip())
-        entries.append(f"# END {file_path.relative_to(CONFIG_DIR)}")
-        entries.append("")
-    merged_path.write_text("\n".join(entries).strip() + "\n", encoding="utf-8")
-    return [str(merged_path.relative_to(CONFIG_DIR))]
+        rel_path = str(file_path.relative_to(CONFIG_DIR))
+        block = [
+            f"# BEGIN {rel_path}",
+            contents.rstrip(),
+            f"# END {rel_path}",
+            "",
+        ]
+        entries[rel_path] = block
+    return entries
+
+
+def merge_automations() -> list[str]:
+    blocks = _build_automation_blocks()
+    if not blocks:
+        return []
+    merged_path = CONFIG_DIR / "automations.yaml"
+    existing_lines: list[str] = []
+    if merged_path.exists():
+        existing_lines = merged_path.read_text(encoding="utf-8").splitlines()
+    if not existing_lines:
+        new_content = "\n".join(
+            line for block in blocks.values() for line in block
+        ).strip() + "\n"
+        merged_path.write_text(new_content, encoding="utf-8")
+        return [str(merged_path.relative_to(CONFIG_DIR))]
+
+    output: list[str] = []
+    used_blocks: set[str] = set()
+    index = 0
+    while index < len(existing_lines):
+        line = existing_lines[index]
+        if line.startswith("# BEGIN "):
+            marker = line.replace("# BEGIN ", "", 1).strip()
+            index += 1
+            while index < len(existing_lines) and not existing_lines[index].startswith("# END "):
+                index += 1
+            if index < len(existing_lines):
+                index += 1
+            block = blocks.get(marker)
+            if block:
+                output.extend(block)
+                used_blocks.add(marker)
+            continue
+        output.append(line)
+        index += 1
+
+    remaining = [block for key, block in blocks.items() if key not in used_blocks]
+    if remaining:
+        if output and output[-1].strip():
+            output.append("")
+        for block in remaining:
+            output.extend(block)
+    new_content = "\n".join(output).strip() + "\n"
+    old_content = "\n".join(existing_lines).strip() + "\n"
+    if new_content != old_content:
+        merged_path.write_text(new_content, encoding="utf-8")
+        return [str(merged_path.relative_to(CONFIG_DIR))]
+    return []
 
 
 def update_source_from_markers() -> list[str]:
@@ -312,6 +439,53 @@ def update_source_from_markers() -> list[str]:
     flush()
     return updated
 
+
+CONFIG_KEYS = {
+    "remote_url",
+    "remote_branch",
+    "notification_enabled",
+    "webhook_enabled",
+    "webhook_path",
+    "poll_interval_minutes",
+    "merge_automations",
+}
+
+
+def _coerce_config_value(key: str, value: Any) -> Any:
+    if key in {"notification_enabled", "webhook_enabled", "merge_automations"}:
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"{key} must be true or false")
+    if key in {"remote_url", "remote_branch", "webhook_path"}:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        raise ValueError(f"{key} must be a string")
+    if key == "poll_interval_minutes":
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        raise ValueError("poll_interval_minutes must be an integer or null")
+    raise ValueError(f"Unsupported config key: {key}")
+
+
+def load_config_data() -> dict[str, Any]:
+    if not GITOPS_CONFIG_PATH.exists():
+        write_gitops_config(OPTIONS)
+    return load_gitops_config()
+
+
+def apply_config_update(payload: dict[str, Any]) -> dict[str, Any]:
+    data = load_config_data()
+    for key, value in payload.items():
+        if key not in CONFIG_KEYS:
+            raise ValueError(f"Unsupported config key: {key}")
+        data[key] = _coerce_config_value(key, value)
+    updated = _build_options(data)
+    write_gitops_config(updated)
+    return load_gitops_config()
 
 class PendingTracker:
     def __init__(self) -> None:
@@ -383,10 +557,9 @@ tracker = PendingTracker()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    ensure_gitops_config()
     ensure_repo()
     ensure_remote()
-    if OPTIONS.merge_automations:
-        merge_automations()
     tracker.set_loop(asyncio.get_running_loop())
     observer = Observer()
     handler = ConfigEventHandler(tracker)
@@ -428,8 +601,24 @@ async def api_status() -> JSONResponse:
             "changes": git_status(),
             "commits": git_log(),
             "remote": OPTIONS.remote_url,
+            "merge_automations": OPTIONS.merge_automations,
+            "gitops_config_path": str(GITOPS_CONFIG_PATH),
         }
     )
+
+
+@app.get("/api/config")
+async def api_config() -> JSONResponse:
+    return JSONResponse({"config": load_config_data(), "requires_restart": True})
+
+
+@app.post("/api/config")
+async def api_update_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    try:
+        updated = apply_config_update(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"status": "updated", "config": updated, "requires_restart": True})
 
 
 @app.get("/api/diff")
@@ -527,12 +716,16 @@ async def api_public_key() -> JSONResponse:
 
 @app.post("/api/automation/merge")
 async def api_merge_automations() -> JSONResponse:
+    if not OPTIONS.merge_automations:
+        raise HTTPException(status_code=400, detail="Automation merge is disabled")
     changed = merge_automations()
     return JSONResponse({"status": "merged", "files": changed})
 
 
 @app.post("/api/automation/sync")
 async def api_sync_automations() -> JSONResponse:
+    if not OPTIONS.merge_automations:
+        raise HTTPException(status_code=400, detail="Automation merge is disabled")
     changed = update_source_from_markers()
     return JSONResponse({"status": "synced", "files": changed})
 
@@ -569,6 +762,10 @@ async def handle_pull() -> list[str]:
     changed_files = run_git(
         ["diff", "--name-only", previous_head.stdout.strip(), "HEAD"], check=False
     ).stdout.splitlines()
+    if OPTIONS.merge_automations and any(
+        path.lower().startswith("automations/") for path in changed_files
+    ):
+        changed_files.extend(merge_automations())
     domains = list_changed_domains(changed_files)
     for domain in domains:
         await call_service(domain, "reload")

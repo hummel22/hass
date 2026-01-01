@@ -58,6 +58,24 @@
   </section>
 
   <section>
+    <h2>Configuration</h2>
+    <p>Configuration changes are saved to <code>.gitops.yaml</code> and require an add-on restart.</p>
+    <label>Remote URL</label>
+    <input type="text" id="config-remote-url" placeholder="git@github.com:user/ha-config.git" />
+    <label>Remote branch</label>
+    <input type="text" id="config-remote-branch" placeholder="main" />
+    <label>Webhook path</label>
+    <input type="text" id="config-webhook-path" placeholder="pull" />
+    <label>Poll interval minutes</label>
+    <input type="text" id="config-poll-interval" placeholder="15" />
+    <label><input type="checkbox" id="config-notifications" /> Enable notifications</label>
+    <label><input type="checkbox" id="config-webhook-enabled" /> Enable webhook</label>
+    <label><input type="checkbox" id="config-merge-automations" /> Enable automation builder</label>
+    <button onclick="saveConfig()">Save configuration</button>
+    <div id="config-status"></div>
+  </section>
+
+  <section>
     <h2>Commit</h2>
     <label>Commit message</label>
     <input type="text" id="commit-message" placeholder="Describe your change" />
@@ -73,8 +91,14 @@
 
   <section>
     <h2>Automation Merge</h2>
-    <button onclick="mergeAutomations()">Merge automations</button>
-    <button onclick="syncAutomations()">Sync from markers</button>
+    <p>
+      The automation builder keeps <code>automations.yaml</code> in sync with
+      files under <code>automations/</code>. Only sections wrapped in
+      <code># BEGIN automations/...</code> and <code># END ...</code> are managed.
+    </p>
+    <p id="automation-status"></p>
+    <button id="merge-btn" onclick="mergeAutomations()">Merge automations</button>
+    <button id="sync-btn" onclick="syncAutomations()">Sync from markers</button>
   </section>
 
   <script>
@@ -84,6 +108,7 @@
       const status = document.getElementById('status');
       status.innerHTML = `
         <p><strong>Remote:</strong> ${data.remote || 'Not configured'}</p>
+        <p><strong>GitOps config:</strong> ${data.gitops_config_path || 'Not configured'}</p>
         <p><strong>Pending:</strong> ${data.pending.length}</p>
         <h3>Pending files</h3>
         <ul>${data.pending.map(item => `<li>${item}</li>`).join('') || '<li>None</li>'}</ul>
@@ -92,6 +117,55 @@
         <h3>Recent commits</h3>
         <ul>${data.commits.map(commit => `<li>${commit.sha} ${commit.subject} (${commit.date})</li>`).join('') || '<li>No commits yet</li>'}</ul>
       `;
+      const automationStatus = document.getElementById('automation-status');
+      const mergeEnabled = Boolean(data.merge_automations);
+      automationStatus.innerText = mergeEnabled
+        ? 'Automation builder is enabled.'
+        : 'Automation builder is disabled in add-on options.';
+      document.getElementById('merge-btn').disabled = !mergeEnabled;
+      document.getElementById('sync-btn').disabled = !mergeEnabled;
+    }
+
+    async function loadConfig() {
+      const response = await fetch('/api/config');
+      const data = await response.json();
+      const config = data.config || {};
+      document.getElementById('config-remote-url').value = config.remote_url || '';
+      document.getElementById('config-remote-branch').value = config.remote_branch || 'main';
+      document.getElementById('config-webhook-path').value = config.webhook_path || 'pull';
+      document.getElementById('config-poll-interval').value =
+        config.poll_interval_minutes === null || config.poll_interval_minutes === undefined
+          ? ''
+          : String(config.poll_interval_minutes);
+      document.getElementById('config-notifications').checked = Boolean(config.notification_enabled);
+      document.getElementById('config-webhook-enabled').checked = Boolean(config.webhook_enabled);
+      document.getElementById('config-merge-automations').checked = Boolean(config.merge_automations);
+    }
+
+    async function saveConfig() {
+      const pollValue = document.getElementById('config-poll-interval').value.trim();
+      const payload = {
+        remote_url: document.getElementById('config-remote-url').value.trim(),
+        remote_branch: document.getElementById('config-remote-branch').value.trim() || 'main',
+        webhook_path: document.getElementById('config-webhook-path').value.trim() || 'pull',
+        poll_interval_minutes: pollValue === '' ? null : Number(pollValue),
+        notification_enabled: document.getElementById('config-notifications').checked,
+        webhook_enabled: document.getElementById('config-webhook-enabled').checked,
+        merge_automations: document.getElementById('config-merge-automations').checked
+      };
+      if (Number.isNaN(payload.poll_interval_minutes)) {
+        document.getElementById('config-status').innerText = 'Poll interval must be a number or blank.';
+        return;
+      }
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      document.getElementById('config-status').innerText =
+        response.ok ? 'Saved. Restart the add-on to apply changes.' : (data.detail || 'Save failed.');
+      loadStatus();
     }
 
     async function commitAll() {
@@ -139,6 +213,7 @@
     }
 
     loadStatus();
+    loadConfig();
   </script>
 </body>
 </html>
