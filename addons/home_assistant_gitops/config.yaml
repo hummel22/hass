@@ -1,4 +1,4 @@
-name: Home Assistant GitOps Bridge
+name: Home Assistant GitOps 
 slug: ha_gitops_bridge
 description: >-
   Track Home Assistant configuration changes in Git with an ingress UI, webhook
@@ -14,7 +14,7 @@ arch:
 init: false
 ingress: true
 ingress_port: 0
-panel_title: GitOps Bridge
+panel_title: GitOps
 panel_icon: mdi:source-repository
 homeassistant_api: true
 map:

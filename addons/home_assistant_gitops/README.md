@@ -1,4 +1,4 @@
-# Home Assistant GitOps Bridge
+# Home Assistant GitOps
 
 The Home Assistant GitOps Bridge add-on tracks configuration changes in `/config`, exposes an
 ingress UI to stage/commit changes, and syncs with GitHub via SSH.
