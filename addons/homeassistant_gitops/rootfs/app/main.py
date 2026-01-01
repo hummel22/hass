@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import fnmatch
 import json
 import os
 import subprocess
@@ -22,36 +23,10 @@ from watchdog.observers import Observer
 CONFIG_DIR = Path("/config")
 OPTIONS_PATH = Path("/data/options.json")
 SSH_DIR = CONFIG_DIR / ".ssh"
-DEFAULT_GITIGNORE = [
-    ".storage/",
-    "secrets.yaml",
-    "known_devices.yaml",
-    "customize.yaml",
-    "groups.yaml",
-    "home-assistant.log",
-    "home-assistant_v2.db",
-    "home-assistant_v2.db-shm",
-    "home-assistant_v2.db-wal",
-    "*.png",
-    "*.jpg",
-    "*.jpeg",
-    "*.gif",
-    "*.db",
-    "www/",
-]
-IGNORED_FILENAMES = {
-    "secrets.yaml",
-    "known_devices.yaml",
-    "customize.yaml",
-    "groups.yaml",
-    "home-assistant.log",
-    "home-assistant_v2.db",
-    "home-assistant_v2.db-shm",
-    "home-assistant_v2.db-wal",
-}
-IGNORED_DIRS = {".storage", "www"}
+GITIGNORE_TEMPLATE = Path("/app/gitignore_example")
 WATCH_EXTENSIONS = {".yaml", ".yml"}
 DEBOUNCE_SECONDS = 0.6
+GITIGNORE_CACHE: tuple[float, list[tuple[bool, str, bool, bool, bool]]] | None = None
 
 
 @dataclass
@@ -118,14 +93,64 @@ def run_git(args: Iterable[str], check: bool = True) -> subprocess.CompletedProc
     )
 
 
+def load_gitignore_template() -> list[str]:
+    if not GITIGNORE_TEMPLATE.exists():
+        return []
+    lines = [
+        line.strip()
+        for line in GITIGNORE_TEMPLATE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    return lines
+
+
+def load_gitignore_patterns() -> list[tuple[bool, str, bool, bool, bool]]:
+    gitignore_path = CONFIG_DIR / ".gitignore"
+    if not gitignore_path.exists():
+        return []
+    patterns: list[tuple[bool, str, bool, bool, bool]] = []
+    for line in gitignore_path.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        negated = entry.startswith("!")
+        if negated:
+            entry = entry[1:].strip()
+            if not entry:
+                continue
+        is_dir = entry.endswith("/")
+        pattern = entry.rstrip("/") if is_dir else entry
+        is_glob = any(char in pattern for char in "*?[]")
+        is_path = "/" in pattern
+        patterns.append((negated, pattern, is_dir, is_path, is_glob))
+    return patterns
+
+
+def get_gitignore_patterns() -> list[tuple[bool, str, bool, bool, bool]]:
+    global GITIGNORE_CACHE
+    gitignore_path = CONFIG_DIR / ".gitignore"
+    try:
+        mtime = gitignore_path.stat().st_mtime
+    except FileNotFoundError:
+        return []
+    if GITIGNORE_CACHE and GITIGNORE_CACHE[0] == mtime:
+        return GITIGNORE_CACHE[1]
+    patterns = load_gitignore_patterns()
+    GITIGNORE_CACHE = (mtime, patterns)
+    return patterns
+
+
 def ensure_gitignore() -> None:
     gitignore_path = CONFIG_DIR / ".gitignore"
+    template_lines = load_gitignore_template()
     existing = set()
     if gitignore_path.exists():
         existing = {line.strip() for line in gitignore_path.read_text(encoding="utf-8").splitlines()}
-    new_lines = [entry for entry in DEFAULT_GITIGNORE if entry not in existing]
+    new_lines = [entry for entry in template_lines if entry not in existing]
     if not existing:
-        content = "\n".join(DEFAULT_GITIGNORE) + "\n"
+        if not template_lines:
+            return
+        content = "\n".join(template_lines) + "\n"
         gitignore_path.write_text(content, encoding="utf-8")
         return
     if new_lines:
@@ -202,9 +227,21 @@ def git_diff(path: str) -> str:
 
 
 def should_ignore(path: Path) -> bool:
-    if path.name in IGNORED_FILENAMES:
-        return True
-    if any(part in IGNORED_DIRS for part in path.parts):
+    rel = path.as_posix()
+    ignored = False
+    for negated, pattern, is_dir, is_path, is_glob in get_gitignore_patterns():
+        matched = False
+        if is_dir:
+            matched = pattern in path.parts
+        elif is_glob:
+            matched = fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(path.name, pattern)
+        elif is_path:
+            matched = rel == pattern
+        else:
+            matched = path.name == pattern
+        if matched:
+            ignored = not negated
+    if ignored:
         return True
     if path.suffix.lower() not in WATCH_EXTENSIONS:
         return True
