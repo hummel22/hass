@@ -1,5 +1,7 @@
 # Home Assistant GitOps
 
+Smarthome as Code initiative 
+
 The Home Assistant GitOps Bridge add-on tracks configuration changes in `/config`, exposes an
 ingress UI to stage/commit changes, and syncs with GitHub via SSH.
 
@@ -14,7 +16,7 @@ ingress UI to stage/commit changes, and syncs with GitHub via SSH.
 | `webhook_enabled` | Enable the webhook pull endpoint. | `false` |
 | `webhook_path` | Path segment for the webhook. | `pull` |
 | `poll_interval_minutes` | Periodic remote check interval in minutes. | `15` |
-| `merge_automations` | Generate a merged `automations.yaml` file from `automations/`. | `true` |
+| `yaml_modules_enabled` | Enable YAML Modules sync across package and one-off YAML files. | `true` |
 | `ui_theme` | UI theme preference (`light`, `dark`, or `system`). | `system` |
 
 ## Usage
@@ -27,10 +29,11 @@ ingress UI to stage/commit changes, and syncs with GitHub via SSH.
 
 ## GitOps config file
 
-The add-on writes a GitOps config file into your repository at `/config/.gitops.yaml`.
+The add-on writes a GitOps config file into your repository at `/config/.gitops/config.yaml`.
 It mirrors all add-on options so they can be tracked in Git and reviewed in pull requests.
-If you edit `/config/.gitops.yaml`, restart the add-on to apply changes.
+If you edit `/config/.gitops/config.yaml`, restart the add-on to apply changes.
 Commit this file along with the rest of your Home Assistant configuration.
+Legacy `/config/.gitops.yaml` files are migrated into the new folder on startup.
 
 ## Manual Git setup
 
@@ -54,22 +57,78 @@ To configure Git manually:
 
 When `webhook_enabled` is true, POST to `/api/webhook/<webhook_path>` to trigger a pull.
 
-## Automation merge workflow
+## YAML Modules workflow
 
-The add-on can merge `automations/*.yaml` into `automations.yaml` with comment markers. Use
-`Sync from markers` in the UI to write changes back into individual files.
+YAML Modules lets you keep configuration split across package modules and one-off files while
+still supporting Home Assistant domain files. The UI exposes a single action: **Sync modules**.
 
-### Folder convention
+Definitions:
 
-Use the split-automation convention Home Assistant already supports:
+- Build: write domain YAML from module files.
+- Update: write module files from domain YAML.
+- Sync: runs build and update with conflict rules (assigned modules win, unassigned changes stay
+  in unassigned files).
 
-- Put automation packages in `/config/automations/*.yaml`.
-- Each file should contain a list of automations (the same format as `automations.yaml`).
-- The add-on manages only the sections wrapped in `# BEGIN automations/...` and `# END ...`.
+### Folder convention (hybrid)
+
+Package modules (cohesive bundles):
+
+```
+/packages/wakeup/automation.yaml
+/packages/wakeup/helpers.yaml
+/packages/wakeup/template.yaml
+```
+
+One-offs (single-domain files):
+
+```
+/automations/dishwasher.yaml
+/scripts/water_plants.yaml
+/scenes/movie_time.yaml
+/templates/hvac.yaml
+/lovelace/living_room.yaml
+```
+
+Unassigned items created from the UI are stored in the one-off folder using the
+`*.unassigned.yaml` pattern, e.g. `automations/automations.unassigned.yaml`.
 
 ### Sync behavior
 
-- When files under `automations/` change, the add-on rebuilds the matching marker blocks in
-  `automations.yaml` and leaves any non-package content untouched.
-- When you edit marker blocks inside `automations.yaml`, use `Sync from markers` to push
-  updates back to the package files. Commit both files together.
+- Module files can live in `/packages/<module>/` or per-domain folders (hybrid layout).
+- Sync builds domain files like `automations.yaml`, `scripts.yaml`, and `scenes.yaml`.
+- Sync updates module files when domain files change (UI edits).
+- Missing automation/scene IDs are auto-injected; lovelace views use `path` if missing.
+- Helper modules (`helpers.yaml`) are split into per-helper-type domain files.
+- Lovelace YAML mode is supported via `ui-lovelace.yaml`.
+
+Helper module files should use helper types as top-level keys, for example:
+
+```
+input_boolean:
+  kitchen_motion:
+    name: Kitchen motion
+input_datetime:
+  wakeup_time:
+    name: Wakeup time
+```
+
+Lovelace module files can be either a list of views or a map with a `views` list plus metadata
+keys (the first module with metadata becomes the base).
+
+### GitOps mappings
+
+YAML Modules stores mapping and sync state under `/config/.gitops/`:
+
+- `mappings/*.yaml` tracks which items belong to which module files.
+- `sync-state.yaml` stores hashes used to detect changes.
+
+See `addons/homeassistant_gitops/docs/feature-checklist.md` for planned enhancements.
+
+## Development
+
+Use `uv` to run the service and tests locally:
+
+```
+uv run --project addons/homeassistant_gitops python addons/homeassistant_gitops/rootfs/app/main.py
+uv run --project addons/homeassistant_gitops --extra dev pytest addons/homeassistant_gitops/tests
+```

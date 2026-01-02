@@ -26,7 +26,7 @@ options:
   webhook_enabled: false
   webhook_path: pull
   poll_interval_minutes: 15
-  merge_automations: true
+  yaml_modules_enabled: true
   ui_theme: system
 schema:
   remote_url: str?
@@ -35,5 +35,5 @@ schema:
   webhook_enabled: bool
   webhook_path: str
   poll_interval_minutes: int?
-  merge_automations: bool
+  yaml_modules_enabled: bool
   ui_theme: str

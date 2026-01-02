@@ -24,7 +24,7 @@
         <button class="tab-btn is-active" data-tab="status" aria-controls="tab-status">Status</button>
         <button class="tab-btn" data-tab="git" aria-controls="tab-git">Git</button>
         <button class="tab-btn" data-tab="history" aria-controls="tab-history">History</button>
-        <button class="tab-btn" data-tab="enhancements" aria-controls="tab-enhancements">Enhancements</button>
+        <button class="tab-btn" data-tab="modules" aria-controls="tab-modules">YAML Modules</button>
       </nav>
       <button class="tab-btn icon-btn" data-tab="settings" aria-controls="tab-settings" aria-label="Settings">
         <span class="material-symbols-outlined">settings</span>
@@ -47,7 +47,7 @@
             <div class="card-header">Operator Overview</div>
             <p class="note">
               Status is the system landing page. Use Git for working tree diffs, staging, and commits.
-              Use History to review branches, commits, and switch state. Use Enhancements for automation tools.
+              Use History to review branches, commits, and switch state. Use YAML Modules for module sync.
             </p>
           </div>
         </div>
@@ -117,28 +117,43 @@
         </div>
       </section>
 
-      <section id="tab-enhancements" class="tab-panel" role="tabpanel">
-        <div class="settings-grid">
-          <div class="card">
-            <div class="card-header">Automations Enhancement</div>
+      <section id="tab-modules" class="tab-panel" role="tabpanel">
+        <div class="git-grid modules-grid">
+          <aside class="card module-sidebar">
+            <div class="card-header">Module Browser</div>
             <p class="note">
-              Automation enhancement tools keep <code>automations.yaml</code> aligned with the
-              <code>automations/</code> folder using marker blocks. Use these actions when you
-              want to rebuild or reconcile automation files.
+              Browse YAML Modules by package name (<code>packages/&lt;name&gt;/</code>) or domain
+              folders (<code>automations/</code>, <code>scripts/</code>, <code>scenes/</code>,
+              <code>templates/</code>, <code>helpers/</code>, <code>lovelace/</code>). UI-created
+              entries land in <code>*.unassigned.yaml</code>. Sync after edits to rebuild domain
+              files.
             </p>
-            <p id="automation-status" class="note"></p>
-            <div class="button-row">
-              <button id="merge-btn" class="btn">Merge automations</button>
-              <button id="sync-btn" class="btn">Sync from markers</button>
+            <label for="module-select">Select module</label>
+            <select id="module-select"></select>
+            <div id="module-file-list" class="commit-list"></div>
+            <div class="module-sidebar-footer">
+              <p id="modules-status" class="note"></p>
+              <div class="button-row">
+                <button id="modules-sync-btn" class="btn btn-primary">Sync modules</button>
+              </div>
             </div>
-          </div>
-          <div class="card">
-            <div class="card-header">Coming Enhancements</div>
-            <p class="note">
-              This space will grow with reusable components, generated dashboards, and enhanced
-              blueprints once core Git operations are standardized.
-            </p>
-          </div>
+          </aside>
+          <section class="card module-editor-card">
+            <div class="commit-header module-editor-header">
+              <div>
+                <div class="card-header">Module File</div>
+                <div id="module-file-meta" class="note">Select a module file to inspect and edit.</div>
+              </div>
+              <div class="button-row">
+                <button id="module-save-btn" class="btn btn-primary" disabled>Save file</button>
+                <button id="module-delete-btn" class="btn btn-danger" disabled>Delete file</button>
+              </div>
+            </div>
+            <div id="module-editor" class="module-editor">
+              <div class="module-editor-placeholder">Select a module file to start editing.</div>
+            </div>
+            <div id="module-editor-status" class="note"></div>
+          </section>
         </div>
       </section>
 
@@ -147,8 +162,8 @@
           <div class="card">
             <div class="card-header">Settings</div>
             <p class="note">
-              Settings are saved to <code>.gitops.yaml</code>. Restart the add-on to apply backend
-              changes. Theme updates apply immediately. Automation tools live in Enhancements.
+              Settings are saved to <code>.gitops/config.yaml</code>. Restart the add-on to apply backend
+              changes. Theme updates apply immediately. YAML Modules live in the YAML Modules tab.
             </p>
             <label>Remote URL</label>
             <input type="text" id="config-remote-url" placeholder="git@github.com:user/ha-config.git" />
@@ -171,7 +186,7 @@
             <div class="toggle-grid">
               <label><input type="checkbox" id="config-notifications" /> Enable notifications</label>
               <label><input type="checkbox" id="config-webhook-enabled" /> Enable webhook</label>
-              <label><input type="checkbox" id="config-merge-automations" /> Enable automation builder</label>
+              <label><input type="checkbox" id="config-yaml-modules" /> Enable YAML Modules</label>
             </div>
             <p class="note">Git user name and email are stored in the repo config used for commits.</p>
             <button id="save-config" class="btn btn-primary">Save configuration</button>
@@ -198,6 +213,19 @@
 
   <div id="toast" class="toast" role="status"></div>
 
+  <script>
+    window.MONACO_BASE = "https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min";
+    window.MonacoEnvironment = {
+      getWorkerUrl: function () {
+        const proxy = [
+          "self.MonacoEnvironment = { baseUrl: '" + window.MONACO_BASE + "/' };",
+          "importScripts('" + window.MONACO_BASE + "/vs/base/worker/workerMain.js');",
+        ].join("\n");
+        return "data:text/javascript;charset=utf-8," + encodeURIComponent(proxy);
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
   <script src="/static/app.js"></script>
 </body>

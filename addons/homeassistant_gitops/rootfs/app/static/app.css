@@ -474,6 +474,74 @@ button.tab-btn {
   margin-bottom: 16px;
 }
 
+.modules-grid {
+  align-items: start;
+}
+
+.module-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.module-sidebar .commit-list {
+  margin-top: 0;
+}
+
+.module-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-editor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.module-editor {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  height: clamp(320px, 60vh, 720px);
+  min-height: 320px;
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.module-editor-placeholder {
+  padding: 16px;
+  color: var(--muted);
+}
+
+.module-editor-textarea {
+  width: 100%;
+  height: 100%;
+  border: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 0.9rem;
+  padding: 16px;
+  outline: none;
+}
+
+.module-editor-textarea:disabled {
+  color: var(--muted);
+}
+
+#module-editor .monaco-editor,
+#module-editor .monaco-editor .overflow-guard {
+  height: 100%;
+}
+
+#module-editor-status {
+  margin-top: 4px;
+}
+
 pre {
   background: var(--surface-strong);
   border: 1px solid var(--border);

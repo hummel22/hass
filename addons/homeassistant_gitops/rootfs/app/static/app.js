@@ -1,4 +1,6 @@
 const MAX_DIFF_LINES = 400;
+const MONACO_BASE = window.MONACO_BASE || "https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min";
+const MODULES_REFRESH_INTERVAL_MS = 10000;
 
 const state = {
   diffMode: "all",
@@ -8,6 +10,12 @@ const state = {
   selectedBranch: null,
   commits: [],
   selectedCommit: null,
+  modulesIndex: [],
+  selectedModuleId: null,
+  selectedModuleFile: null,
+  moduleFileContent: "",
+  moduleFileDirty: false,
+  modulesStale: false,
 };
 
 const dom = {
@@ -38,7 +46,7 @@ const dom = {
   configPollInterval: document.getElementById("config-poll-interval"),
   configNotifications: document.getElementById("config-notifications"),
   configWebhookEnabled: document.getElementById("config-webhook-enabled"),
-  configMergeAutomations: document.getElementById("config-merge-automations"),
+  configYamlModules: document.getElementById("config-yaml-modules"),
   configTheme: document.getElementById("config-ui-theme"),
   saveConfig: document.getElementById("save-config"),
   configStatus: document.getElementById("config-status"),
@@ -49,13 +57,25 @@ const dom = {
   sshLoadBtn: document.getElementById("ssh-load-btn"),
   sshTestBtn: document.getElementById("ssh-test-btn"),
   sshTestStatus: document.getElementById("ssh-test-status"),
-  automationStatus: document.getElementById("automation-status"),
-  mergeBtn: document.getElementById("merge-btn"),
-  syncBtn: document.getElementById("sync-btn"),
+  modulesStatus: document.getElementById("modules-status"),
+  modulesSyncBtn: document.getElementById("modules-sync-btn"),
+  moduleSelect: document.getElementById("module-select"),
+  moduleFileList: document.getElementById("module-file-list"),
+  moduleFileMeta: document.getElementById("module-file-meta"),
+  moduleSaveBtn: document.getElementById("module-save-btn"),
+  moduleDeleteBtn: document.getElementById("module-delete-btn"),
+  moduleEditor: document.getElementById("module-editor"),
+  moduleEditorStatus: document.getElementById("module-editor-status"),
   toast: document.getElementById("toast"),
 };
 
 let toastTimer = null;
+let moduleEditor = null;
+let moduleEditorTextarea = null;
+let moduleEditorPromise = null;
+let moduleEditorSetting = false;
+let moduleRefreshTimer = null;
+let moduleIndexLoading = false;
 
 function qs(selector, scope = document) {
   return scope.querySelector(selector);
@@ -97,6 +117,28 @@ async function requestJSON(url, options = {}) {
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme || "system";
+  setEditorTheme();
+}
+
+function getEditorTheme() {
+  const theme = document.documentElement.dataset.theme;
+  if (theme === "dark") {
+    return "vs-dark";
+  }
+  if (theme === "light") {
+    return "vs";
+  }
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "vs-dark";
+  }
+  return "vs";
+}
+
+function setEditorTheme() {
+  if (!moduleEditor || !window.monaco || !window.monaco.editor) {
+    return;
+  }
+  window.monaco.editor.setTheme(getEditorTheme());
 }
 
 function setTab(tab) {
@@ -106,14 +148,46 @@ function setTab(tab) {
   qsa(".tab-panel").forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === `tab-${tab}`);
   });
+  if (tab === "modules" && moduleEditor) {
+    setTimeout(() => moduleEditor.layout(), 0);
+  }
+  if (tab === "modules") {
+    startModulesRefresh();
+  } else {
+    stopModulesRefresh();
+  }
 }
 
-function updateAutomationStatus(enabled) {
-  dom.automationStatus.textContent = enabled
-    ? "Automation builder is enabled."
-    : "Automation builder is disabled in add-on options.";
-  dom.mergeBtn.disabled = !enabled;
-  dom.syncBtn.disabled = !enabled;
+function isModulesTabActive() {
+  const panel = document.getElementById("tab-modules");
+  return panel ? panel.classList.contains("is-active") : false;
+}
+
+function startModulesRefresh() {
+  if (!moduleRefreshTimer) {
+    moduleRefreshTimer = setInterval(() => {
+      if (!isModulesTabActive()) {
+        return;
+      }
+      loadModulesIndex({ allowDirty: false });
+    }, MODULES_REFRESH_INTERVAL_MS);
+  }
+  loadModulesIndex({ allowDirty: false });
+}
+
+function stopModulesRefresh() {
+  if (!moduleRefreshTimer) {
+    return;
+  }
+  clearInterval(moduleRefreshTimer);
+  moduleRefreshTimer = null;
+}
+
+function updateModulesStatus(enabled) {
+  dom.modulesStatus.textContent = enabled
+    ? "YAML Modules sync is enabled."
+    : "YAML Modules sync is disabled in add-on options.";
+  dom.modulesSyncBtn.disabled = !enabled;
 }
 
 function renderSummaryItem(label, value) {
@@ -174,7 +248,7 @@ function renderStatus(data) {
     ? "Remote is not configured. Push and pull are disabled."
     : "";
 
-  updateAutomationStatus(Boolean(data.merge_automations));
+  updateModulesStatus(Boolean(data.yaml_modules_enabled));
 }
 
 function matchesDiffMode(change) {
@@ -597,7 +671,7 @@ async function loadConfig() {
         : String(config.poll_interval_minutes);
     dom.configNotifications.checked = Boolean(config.notification_enabled);
     dom.configWebhookEnabled.checked = Boolean(config.webhook_enabled);
-    dom.configMergeAutomations.checked = Boolean(config.merge_automations);
+    dom.configYamlModules.checked = Boolean(config.yaml_modules_enabled);
     dom.configTheme.value = config.ui_theme || "system";
     applyTheme(dom.configTheme.value);
   } catch (err) {
@@ -616,7 +690,7 @@ async function saveConfig() {
     poll_interval_minutes: pollValue === "" ? null : Number(pollValue),
     notification_enabled: dom.configNotifications.checked,
     webhook_enabled: dom.configWebhookEnabled.checked,
-    merge_automations: dom.configMergeAutomations.checked,
+    yaml_modules_enabled: dom.configYamlModules.checked,
     ui_theme: dom.configTheme.value,
   };
   if (Number.isNaN(payload.poll_interval_minutes)) {
@@ -700,20 +774,381 @@ async function testSshKey() {
   }
 }
 
-async function mergeAutomations() {
+function loadMonaco() {
+  if (window.monaco) {
+    return Promise.resolve(window.monaco);
+  }
+  if (!window.require) {
+    return Promise.reject(new Error("Editor loader is unavailable."));
+  }
+  if (!moduleEditorPromise) {
+    moduleEditorPromise = new Promise((resolve, reject) => {
+      window.require.config({ paths: { vs: `${MONACO_BASE}/vs` } });
+      window.require(
+        ["vs/editor/editor.main"],
+        () => resolve(window.monaco),
+        (err) => reject(err)
+      );
+    });
+  }
+  return moduleEditorPromise;
+}
+
+function createFallbackEditor() {
+  dom.moduleEditor.innerHTML = "";
+  const textarea = document.createElement("textarea");
+  textarea.className = "module-editor-textarea";
+  textarea.disabled = true;
+  textarea.placeholder = "Select a module file to start editing.";
+  textarea.addEventListener("input", () => {
+    if (moduleEditorSetting) {
+      return;
+    }
+    handleModuleEditorChange();
+  });
+  dom.moduleEditor.append(textarea);
+  moduleEditorTextarea = textarea;
+}
+
+function ensureModuleEditor() {
+  if (moduleEditor || moduleEditorTextarea || !dom.moduleEditor) {
+    return Promise.resolve();
+  }
+  return loadMonaco()
+    .then(() => {
+      dom.moduleEditor.innerHTML = "";
+      moduleEditor = window.monaco.editor.create(dom.moduleEditor, {
+        value: "",
+        language: "yaml",
+        theme: getEditorTheme(),
+        readOnly: true,
+        automaticLayout: true,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+      });
+      moduleEditor.onDidChangeModelContent(() => {
+        if (moduleEditorSetting) {
+          return;
+        }
+        handleModuleEditorChange();
+      });
+      dom.moduleEditorStatus.textContent = "";
+    })
+    .catch(() => {
+      createFallbackEditor();
+      dom.moduleEditorStatus.textContent =
+        "Editor failed to load. Using the basic text editor.";
+    });
+}
+
+function getModuleEditorValue() {
+  if (moduleEditor) {
+    return moduleEditor.getValue();
+  }
+  if (moduleEditorTextarea) {
+    return moduleEditorTextarea.value;
+  }
+  return "";
+}
+
+function setModuleEditorReadOnly(readOnly) {
+  if (moduleEditor) {
+    moduleEditor.updateOptions({ readOnly });
+  }
+  if (moduleEditorTextarea) {
+    moduleEditorTextarea.disabled = readOnly;
+  }
+}
+
+function setModuleEditorContent(content, markClean = true) {
+  const nextValue = content || "";
+  moduleEditorSetting = true;
+  if (moduleEditor) {
+    moduleEditor.setValue(nextValue);
+    requestAnimationFrame(() => moduleEditor && moduleEditor.layout());
+  } else if (moduleEditorTextarea) {
+    moduleEditorTextarea.value = nextValue;
+  } else if (dom.moduleEditor) {
+    dom.moduleEditor.innerHTML = `<div class="module-editor-placeholder">${nextValue
+      ? "Loading editor..."
+      : "Select a module file to start editing."}</div>`;
+  }
+  moduleEditorSetting = false;
+  if (markClean) {
+    state.moduleFileContent = nextValue;
+    setModuleDirty(false);
+  }
+}
+
+function handleModuleEditorChange() {
+  const current = getModuleEditorValue();
+  setModuleDirty(current !== state.moduleFileContent);
+}
+
+function updateModuleFileMeta() {
+  if (!dom.moduleFileMeta) {
+    return;
+  }
+  if (!state.selectedModuleFile) {
+    dom.moduleFileMeta.textContent = "Select a module file to inspect and edit.";
+    return;
+  }
+  const status = state.moduleFileDirty ? "Unsaved changes." : "Ready.";
+  dom.moduleFileMeta.textContent = `${state.selectedModuleFile} - ${status}`;
+}
+
+function setModuleDirty(isDirty) {
+  state.moduleFileDirty = isDirty;
+  dom.moduleSaveBtn.disabled = !state.selectedModuleFile || !isDirty;
+  updateModuleFileMeta();
+  if (!isDirty && state.modulesStale && isModulesTabActive()) {
+    state.modulesStale = false;
+    loadModulesIndex();
+  }
+}
+
+function clearModuleSelection() {
+  state.selectedModuleFile = null;
+  state.moduleFileContent = "";
+  state.moduleFileDirty = false;
+  dom.moduleSaveBtn.disabled = true;
+  dom.moduleDeleteBtn.disabled = true;
+  dom.moduleEditorStatus.textContent = "";
+  updateModuleFileMeta();
+  if (moduleEditor || moduleEditorTextarea) {
+    setModuleEditorContent("", true);
+    setModuleEditorReadOnly(true);
+  } else if (dom.moduleEditor) {
+    dom.moduleEditor.innerHTML =
+      "<div class=\"module-editor-placeholder\">Select a module file to start editing.</div>";
+  }
+}
+
+function confirmDiscardModuleChanges() {
+  if (!state.moduleFileDirty) {
+    return true;
+  }
+  const target = state.selectedModuleFile || "this file";
+  return window.confirm(`Discard unsaved changes to ${target}?`);
+}
+
+function getModuleById(moduleId) {
+  return state.modulesIndex.find((module) => module.id === moduleId);
+}
+
+function renderModuleSelect(modules) {
+  dom.moduleSelect.innerHTML = "";
+  if (!modules.length) {
+    dom.moduleSelect.disabled = true;
+    const option = document.createElement("option");
+    option.textContent = "No modules found";
+    dom.moduleSelect.append(option);
+    return;
+  }
+  dom.moduleSelect.disabled = false;
+  const nameCounts = modules.reduce((acc, module) => {
+    acc[module.name] = (acc[module.name] || 0) + 1;
+    return acc;
+  }, {});
+
+  const packages = modules.filter((module) => module.kind === "package");
+  const domains = modules.filter((module) => module.kind !== "package");
+
+  const appendGroup = (label, items) => {
+    if (!items.length) {
+      return;
+    }
+    const group = document.createElement("optgroup");
+    group.label = label;
+    items.forEach((module) => {
+      const option = document.createElement("option");
+      option.value = module.id;
+      const suffix = nameCounts[module.name] > 1 ? ` (${module.kind})` : "";
+      option.textContent = `${module.name}${suffix}`;
+      group.append(option);
+    });
+    dom.moduleSelect.append(group);
+  };
+
+  appendGroup("Packages", packages);
+  appendGroup("Domains", domains);
+}
+
+function renderModuleFileList(module) {
+  dom.moduleFileList.innerHTML = "";
+  if (!module || !module.files || !module.files.length) {
+    dom.moduleFileList.innerHTML =
+      "<div class=\"diff-placeholder\">No module files found.</div>";
+    return;
+  }
+  module.files.forEach((filePath) => {
+    const item = document.createElement("div");
+    item.className = "commit-item";
+    if (state.selectedModuleFile === filePath) {
+      item.classList.add("is-active");
+    }
+    const title = document.createElement("div");
+    title.textContent = filePath;
+    item.append(title);
+    item.addEventListener("click", async () => {
+      const loaded = await selectModuleFile(filePath);
+      if (loaded) {
+        renderModuleFileList(module);
+      }
+    });
+    dom.moduleFileList.append(item);
+  });
+}
+
+async function loadModulesIndex(options = {}) {
+  const allowDirty = options.allowDirty !== false;
+  if (!dom.moduleSelect || !dom.moduleFileList) {
+    return;
+  }
+  if (!allowDirty && state.moduleFileDirty) {
+    state.modulesStale = true;
+    return;
+  }
+  if (moduleIndexLoading) {
+    return;
+  }
+  moduleIndexLoading = true;
+  dom.moduleFileList.innerHTML =
+    "<div class=\"diff-placeholder\">Loading module files...</div>";
+  dom.moduleSelect.disabled = true;
   try {
-    await requestJSON("/api/automation/merge", { method: "POST" });
-    showToast("Automations merged");
+    const data = await requestJSON("/api/modules/index");
+    state.modulesIndex = data.modules || [];
+    state.modulesStale = false;
+    renderModuleSelect(state.modulesIndex);
+    if (!state.modulesIndex.length) {
+      dom.moduleFileList.innerHTML =
+        "<div class=\"diff-placeholder\">No YAML module files found.</div>";
+      state.selectedModuleId = null;
+      clearModuleSelection();
+      return;
+    }
+    if (!state.selectedModuleId || !getModuleById(state.selectedModuleId)) {
+      state.selectedModuleId = state.modulesIndex[0].id;
+    }
+    dom.moduleSelect.value = state.selectedModuleId;
+    const activeModule = getModuleById(state.selectedModuleId);
+    if (
+      state.selectedModuleFile &&
+      (!activeModule || !activeModule.files.includes(state.selectedModuleFile))
+    ) {
+      clearModuleSelection();
+    }
+    renderModuleFileList(activeModule);
   } catch (err) {
+    state.modulesIndex = [];
+    state.selectedModuleId = null;
+    dom.moduleSelect.innerHTML = "";
+    dom.moduleSelect.disabled = true;
+    dom.moduleFileList.innerHTML = `<div class="diff-placeholder">${err.message}</div>`;
+    clearModuleSelection();
+  } finally {
+    moduleIndexLoading = false;
+  }
+}
+
+async function selectModuleFile(filePath) {
+  if (state.selectedModuleFile === filePath) {
+    return true;
+  }
+  if (!confirmDiscardModuleChanges()) {
+    return false;
+  }
+  state.selectedModuleFile = filePath;
+  dom.moduleFileMeta.textContent = `Loading ${filePath}...`;
+  dom.moduleDeleteBtn.disabled = true;
+  dom.moduleSaveBtn.disabled = true;
+  dom.moduleEditorStatus.textContent = "";
+  try {
+    const data = await requestJSON(
+      `/api/modules/file?path=${encodeURIComponent(filePath)}`
+    );
+    await ensureModuleEditor();
+    setModuleEditorReadOnly(false);
+    setModuleEditorContent(data.content || "", true);
+    state.selectedModuleFile = data.path || filePath;
+    dom.moduleDeleteBtn.disabled = false;
+    updateModuleFileMeta();
+    return true;
+  } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
+    showToast(err.message);
+    clearModuleSelection();
+    return false;
+  }
+}
+
+async function saveModuleFile() {
+  if (!state.selectedModuleFile) {
+    return;
+  }
+  const content = getModuleEditorValue();
+  dom.moduleSaveBtn.disabled = true;
+  dom.moduleEditorStatus.textContent = "Saving module file...";
+  try {
+    await requestJSON("/api/modules/file", {
+      method: "POST",
+      body: JSON.stringify({ path: state.selectedModuleFile, content }),
+    });
+    state.moduleFileContent = content;
+    setModuleDirty(false);
+    dom.moduleEditorStatus.textContent = "Module file saved.";
+    showToast("Module file saved");
+    await loadStatus();
+  } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
     showToast(err.message);
   }
 }
 
-async function syncAutomations() {
+async function deleteModuleFile() {
+  if (!state.selectedModuleFile) {
+    return;
+  }
+  const warning = state.moduleFileDirty
+    ? "Unsaved changes will be lost."
+    : "This cannot be undone.";
+  if (!window.confirm(`Delete ${state.selectedModuleFile}? ${warning}`)) {
+    return;
+  }
+  dom.moduleDeleteBtn.disabled = true;
+  dom.moduleEditorStatus.textContent = "Deleting module file...";
   try {
-    await requestJSON("/api/automation/sync", { method: "POST" });
-    showToast("Automations synced");
+    await requestJSON(
+      `/api/modules/file?path=${encodeURIComponent(state.selectedModuleFile)}`,
+      { method: "DELETE" }
+    );
+    showToast("Module file deleted");
+    clearModuleSelection();
+    await loadStatus();
+    await loadModulesIndex();
   } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
+    showToast(err.message);
+  }
+}
+
+async function syncModules() {
+  dom.modulesStatus.textContent = "Syncing YAML Modules...";
+  try {
+    const data = await requestJSON("/api/modules/sync", { method: "POST" });
+    showToast("YAML Modules synced");
+    await loadStatus();
+    if (!state.moduleFileDirty) {
+      await loadModulesIndex();
+    }
+    if (data.warnings && data.warnings.length) {
+      dom.modulesStatus.textContent = `Sync complete with warnings: ${data.warnings.join(" | ")}`;
+    } else {
+      dom.modulesStatus.textContent = "Sync complete.";
+    }
+  } catch (err) {
+    dom.modulesStatus.textContent = err.message;
     showToast(err.message);
   }
 }
@@ -767,16 +1202,31 @@ function bindEvents() {
   dom.sshGenerateBtn.addEventListener("click", generateSshKey);
   dom.sshLoadBtn.addEventListener("click", loadPublicKey);
   dom.sshTestBtn.addEventListener("click", testSshKey);
-  dom.mergeBtn.addEventListener("click", mergeAutomations);
-  dom.syncBtn.addEventListener("click", syncAutomations);
+  dom.modulesSyncBtn.addEventListener("click", syncModules);
+  dom.moduleSelect.addEventListener("change", (event) => {
+    const nextId = event.target.value;
+    if (!confirmDiscardModuleChanges()) {
+      dom.moduleSelect.value = state.selectedModuleId || "";
+      return;
+    }
+    state.selectedModuleId = nextId;
+    clearModuleSelection();
+    renderModuleFileList(getModuleById(nextId));
+  });
+  dom.moduleSaveBtn.addEventListener("click", saveModuleFile);
+  dom.moduleDeleteBtn.addEventListener("click", deleteModuleFile);
 }
 
 async function init() {
   bindEvents();
   await loadConfig();
   await loadStatus();
+  await loadModulesIndex();
   await loadBranches();
   await loadSshStatus();
+  if (isModulesTabActive()) {
+    startModulesRefresh();
+  }
 }
 
 init();

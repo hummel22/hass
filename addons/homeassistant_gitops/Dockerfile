@@ -7,17 +7,14 @@ RUN apk add --no-cache \
     python3 \
     py3-pip
 
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+RUN pip install --no-cache-dir uv==0.4.24
 
-RUN python3 -m venv "$VIRTUAL_ENV"
+WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    fastapi==0.115.0 \
-    httpx==0.27.2 \
-    pydantic==2.9.2 \
-    uvicorn==0.31.1 \
-    watchdog==5.0.3
+COPY pyproject.toml /app/pyproject.toml
+RUN uv sync --no-dev --project /app
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY rootfs /
 COPY rootfs/app/gitignore_example /app/gitignore_example
