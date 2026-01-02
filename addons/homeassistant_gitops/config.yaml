@@ -27,6 +27,7 @@ options:
   webhook_path: pull
   poll_interval_minutes: 15
   merge_automations: true
+  ui_theme: system
 schema:
   remote_url: str?
   remote_branch: str
@@ -35,3 +36,4 @@ schema:
   webhook_path: str
   poll_interval_minutes: int?
   merge_automations: bool
+  ui_theme: str

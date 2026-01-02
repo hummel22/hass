@@ -1,219 +1,204 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Home Assistant GitOps Bridge</title>
-  <style>
-    body {
-      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 24px;
-      background: #0f172a;
-      color: #e2e8f0;
-    }
-    h1 { margin-bottom: 8px; }
-    section {
-      background: #111827;
-      padding: 16px;
-      border-radius: 12px;
-      margin-bottom: 16px;
-      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
-    }
-    button {
-      background: #38bdf8;
-      color: #0f172a;
-      border: none;
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-right: 8px;
-    }
-    pre {
-      background: #0f172a;
-      padding: 12px;
-      border-radius: 8px;
-      overflow-x: auto;
-    }
-    ul { padding-left: 18px; }
-    label { display: block; margin-top: 8px; }
-    input[type="text"] {
-      width: 100%;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      background: #0f172a;
-      color: #e2e8f0;
-    }
-  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@primer/css@21.0.7/dist/primer.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+  <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <h1>Home Assistant GitOps Bridge</h1>
-  <p>Monitor configuration changes, stage and commit updates, and sync with GitHub.</p>
+  <div class="app-shell">
+    <header class="app-bar">
+      <div class="app-brand">
+        <div class="brand-mark">HA</div>
+        <div>
+          <div class="brand-title">GitOps Bridge</div>
+          <div class="brand-subtitle">Configuration control for Home Assistant</div>
+        </div>
+      </div>
+      <nav class="tab-strip" role="tablist">
+        <button class="tab-btn is-active" data-tab="status" aria-controls="tab-status">Status</button>
+        <button class="tab-btn" data-tab="git" aria-controls="tab-git">Git</button>
+        <button class="tab-btn" data-tab="history" aria-controls="tab-history">History</button>
+        <button class="tab-btn" data-tab="enhancements" aria-controls="tab-enhancements">Enhancements</button>
+      </nav>
+      <button class="tab-btn icon-btn" data-tab="settings" aria-controls="tab-settings" aria-label="Settings">
+        <span class="material-symbols-outlined">settings</span>
+      </button>
+    </header>
 
-  <section>
-    <h2>Status</h2>
-    <button onclick="loadStatus()">Refresh</button>
-    <div id="status"></div>
-  </section>
+    <main class="app-content">
+      <section id="tab-status" class="tab-panel is-active" role="tabpanel">
+        <div class="status-grid">
+          <div class="card">
+            <div class="card-header">Current State</div>
+            <div id="status-summary" class="summary-grid"></div>
+            <div class="card-actions">
+              <button id="status-refresh" class="btn">Refresh</button>
+              <button id="remote-refresh" class="btn">Check Remote</button>
+            </div>
+            <div id="status-message" class="note"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">Operator Overview</div>
+            <p class="note">
+              Status is the system landing page. Use Git for working tree diffs, staging, and commits.
+              Use History to review branches, commits, and switch state. Use Enhancements for automation tools.
+            </p>
+          </div>
+        </div>
+      </section>
 
-  <section>
-    <h2>Configuration</h2>
-    <p>Configuration changes are saved to <code>.gitops.yaml</code> and require an add-on restart.</p>
-    <label>Remote URL</label>
-    <input type="text" id="config-remote-url" placeholder="git@github.com:user/ha-config.git" />
-    <label>Remote branch</label>
-    <input type="text" id="config-remote-branch" placeholder="main" />
-    <label>Webhook path</label>
-    <input type="text" id="config-webhook-path" placeholder="pull" />
-    <label>Poll interval minutes</label>
-    <input type="text" id="config-poll-interval" placeholder="15" />
-    <label><input type="checkbox" id="config-notifications" /> Enable notifications</label>
-    <label><input type="checkbox" id="config-webhook-enabled" /> Enable webhook</label>
-    <label><input type="checkbox" id="config-merge-automations" /> Enable automation builder</label>
-    <button onclick="saveConfig()">Save configuration</button>
-    <div id="config-status"></div>
-  </section>
+      <section id="tab-git" class="tab-panel" role="tabpanel">
+        <div class="status-grid">
+          <div class="card">
+            <div class="card-header">Commit & Sync</div>
+            <label>Commit message</label>
+            <input type="text" id="commit-message" placeholder="Describe your change" />
+            <div class="button-row">
+              <button id="commit-staged" class="btn">Commit staged</button>
+              <button id="commit-all" class="btn btn-primary">Commit all</button>
+            </div>
+            <div class="button-row">
+              <button id="pull-btn" class="btn">Pull</button>
+              <button id="push-btn" class="btn">Push</button>
+            </div>
+            <div id="commit-status" class="note"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">Working Tree Checklist</div>
+            <p class="note">
+              Stage changes, review diffs, then commit and push. Use History to inspect prior commits.
+            </p>
+          </div>
+        </div>
 
-  <section>
-    <h2>Commit</h2>
-    <label>Commit message</label>
-    <input type="text" id="commit-message" placeholder="Describe your change" />
-    <button onclick="commitAll()">Commit all changes</button>
-  </section>
+        <div class="card diff-toolbar">
+          <div class="card-header">Working Tree Diffs</div>
+          <div class="toolbar-row">
+            <div id="diff-mode" class="segmented" role="tablist">
+              <button class="segmented-btn is-active" data-mode="all">All</button>
+              <button class="segmented-btn" data-mode="staged">Staged</button>
+              <button class="segmented-btn" data-mode="unstaged">Unstaged</button>
+            </div>
+            <div class="button-row">
+              <button id="stage-all" class="btn">Stage all</button>
+              <button id="unstage-all" class="btn">Unstage all</button>
+            </div>
+          </div>
+          <div id="diff-list" class="diff-list"></div>
+        </div>
+      </section>
 
-  <section>
-    <h2>Remote Sync</h2>
-    <button onclick="pullChanges()">Pull</button>
-    <button onclick="pushChanges()">Push</button>
-    <div id="remote-status"></div>
-  </section>
+      <section id="tab-history" class="tab-panel" role="tabpanel">
+        <div class="git-grid">
+          <aside class="card branch-card">
+            <div class="card-header">Branches</div>
+            <label>Select branch</label>
+            <select id="branch-select"></select>
+            <div id="commit-list" class="commit-list"></div>
+          </aside>
+          <section class="card commit-card">
+            <div class="commit-header">
+              <div>
+                <div class="card-header">Commit History</div>
+                <div id="commit-meta" class="note">Select a commit to inspect its diff.</div>
+              </div>
+              <button id="reset-commit" class="btn btn-danger" disabled>
+                Set state to this commit
+              </button>
+            </div>
+            <div id="commit-diffs" class="diff-list"></div>
+          </section>
+        </div>
+      </section>
 
-  <section>
-    <h2>Automation Merge</h2>
-    <p>
-      The automation builder keeps <code>automations.yaml</code> in sync with
-      files under <code>automations/</code>. Only sections wrapped in
-      <code># BEGIN automations/...</code> and <code># END ...</code> are managed.
-    </p>
-    <p id="automation-status"></p>
-    <button id="merge-btn" onclick="mergeAutomations()">Merge automations</button>
-    <button id="sync-btn" onclick="syncAutomations()">Sync from markers</button>
-  </section>
+      <section id="tab-enhancements" class="tab-panel" role="tabpanel">
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-header">Automations Enhancement</div>
+            <p class="note">
+              Automation enhancement tools keep <code>automations.yaml</code> aligned with the
+              <code>automations/</code> folder using marker blocks. Use these actions when you
+              want to rebuild or reconcile automation files.
+            </p>
+            <p id="automation-status" class="note"></p>
+            <div class="button-row">
+              <button id="merge-btn" class="btn">Merge automations</button>
+              <button id="sync-btn" class="btn">Sync from markers</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">Coming Enhancements</div>
+            <p class="note">
+              This space will grow with reusable components, generated dashboards, and enhanced
+              blueprints once core Git operations are standardized.
+            </p>
+          </div>
+        </div>
+      </section>
 
-  <script>
-    async function loadStatus() {
-      const response = await fetch('/api/status');
-      const data = await response.json();
-      const status = document.getElementById('status');
-      status.innerHTML = `
-        <p><strong>Remote:</strong> ${data.remote || 'Not configured'}</p>
-        <p><strong>GitOps config:</strong> ${data.gitops_config_path || 'Not configured'}</p>
-        <p><strong>Pending:</strong> ${data.pending.length}</p>
-        <h3>Pending files</h3>
-        <ul>${data.pending.map(item => `<li>${item}</li>`).join('') || '<li>None</li>'}</ul>
-        <h3>Git status</h3>
-        <ul>${data.changes.map(change => `<li>${change.status} ${change.path}</li>`).join('') || '<li>Clean</li>'}</ul>
-        <h3>Recent commits</h3>
-        <ul>${data.commits.map(commit => `<li>${commit.sha} ${commit.subject} (${commit.date})</li>`).join('') || '<li>No commits yet</li>'}</ul>
-      `;
-      const automationStatus = document.getElementById('automation-status');
-      const mergeEnabled = Boolean(data.merge_automations);
-      automationStatus.innerText = mergeEnabled
-        ? 'Automation builder is enabled.'
-        : 'Automation builder is disabled in add-on options.';
-      document.getElementById('merge-btn').disabled = !mergeEnabled;
-      document.getElementById('sync-btn').disabled = !mergeEnabled;
-    }
+      <section id="tab-settings" class="tab-panel" role="tabpanel">
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-header">Settings</div>
+            <p class="note">
+              Settings are saved to <code>.gitops.yaml</code>. Restart the add-on to apply backend
+              changes. Theme updates apply immediately. Automation tools live in Enhancements.
+            </p>
+            <label>Remote URL</label>
+            <input type="text" id="config-remote-url" placeholder="git@github.com:user/ha-config.git" />
+            <label>Remote branch</label>
+            <input type="text" id="config-remote-branch" placeholder="main" />
+            <label>Git user name</label>
+            <input type="text" id="config-git-user-name" placeholder="Home Assistant" />
+            <label>Git user email</label>
+            <input type="text" id="config-git-user-email" placeholder="home@assistant.local" />
+            <label>Webhook path</label>
+            <input type="text" id="config-webhook-path" placeholder="pull" />
+            <label>Poll interval minutes</label>
+            <input type="text" id="config-poll-interval" placeholder="15" />
+            <label>Theme</label>
+            <select id="config-ui-theme">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+            <div class="toggle-grid">
+              <label><input type="checkbox" id="config-notifications" /> Enable notifications</label>
+              <label><input type="checkbox" id="config-webhook-enabled" /> Enable webhook</label>
+              <label><input type="checkbox" id="config-merge-automations" /> Enable automation builder</label>
+            </div>
+            <p class="note">Git user name and email are stored in the repo config used for commits.</p>
+            <button id="save-config" class="btn btn-primary">Save configuration</button>
+            <div id="config-status" class="note"></div>
+          </div>
 
-    async function loadConfig() {
-      const response = await fetch('/api/config');
-      const data = await response.json();
-      const config = data.config || {};
-      document.getElementById('config-remote-url').value = config.remote_url || '';
-      document.getElementById('config-remote-branch').value = config.remote_branch || 'main';
-      document.getElementById('config-webhook-path').value = config.webhook_path || 'pull';
-      document.getElementById('config-poll-interval').value =
-        config.poll_interval_minutes === null || config.poll_interval_minutes === undefined
-          ? ''
-          : String(config.poll_interval_minutes);
-      document.getElementById('config-notifications').checked = Boolean(config.notification_enabled);
-      document.getElementById('config-webhook-enabled').checked = Boolean(config.webhook_enabled);
-      document.getElementById('config-merge-automations').checked = Boolean(config.merge_automations);
-    }
+          <div class="card">
+            <div class="card-header">SSH Keys</div>
+            <p class="note">SSH keys live in <code>/config/.ssh</code>.</p>
+            <div id="ssh-status" class="note"></div>
+            <div class="button-row">
+              <button id="ssh-generate-btn" class="btn">Generate keypair</button>
+              <button id="ssh-load-btn" class="btn">Load public key</button>
+              <button id="ssh-test-btn" class="btn">Test SSH connection</button>
+            </div>
+            <pre id="ssh-public-key"></pre>
+            <div id="ssh-instructions" class="note"></div>
+            <div id="ssh-test-status" class="note"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
-    async function saveConfig() {
-      const pollValue = document.getElementById('config-poll-interval').value.trim();
-      const payload = {
-        remote_url: document.getElementById('config-remote-url').value.trim(),
-        remote_branch: document.getElementById('config-remote-branch').value.trim() || 'main',
-        webhook_path: document.getElementById('config-webhook-path').value.trim() || 'pull',
-        poll_interval_minutes: pollValue === '' ? null : Number(pollValue),
-        notification_enabled: document.getElementById('config-notifications').checked,
-        webhook_enabled: document.getElementById('config-webhook-enabled').checked,
-        merge_automations: document.getElementById('config-merge-automations').checked
-      };
-      if (Number.isNaN(payload.poll_interval_minutes)) {
-        document.getElementById('config-status').innerText = 'Poll interval must be a number or blank.';
-        return;
-      }
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await response.json();
-      document.getElementById('config-status').innerText =
-        response.ok ? 'Saved. Restart the add-on to apply changes.' : (data.detail || 'Save failed.');
-      loadStatus();
-    }
+  <div id="toast" class="toast" role="status"></div>
 
-    async function commitAll() {
-      const message = document.getElementById('commit-message').value.trim();
-      if (!message) {
-        alert('Please enter a commit message.');
-        return;
-      }
-      const response = await fetch('/api/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message })
-      });
-      const data = await response.json();
-      alert(data.status || data.detail);
-      loadStatus();
-    }
-
-    async function pullChanges() {
-      const response = await fetch('/api/pull', { method: 'POST' });
-      const data = await response.json();
-      document.getElementById('remote-status').innerText = data.status || data.detail;
-      loadStatus();
-    }
-
-    async function pushChanges() {
-      const response = await fetch('/api/push', { method: 'POST' });
-      const data = await response.json();
-      document.getElementById('remote-status').innerText = data.status || data.detail;
-      loadStatus();
-    }
-
-    async function mergeAutomations() {
-      const response = await fetch('/api/automation/merge', { method: 'POST' });
-      const data = await response.json();
-      alert(`Merged: ${data.files.join(', ')}`);
-      loadStatus();
-    }
-
-    async function syncAutomations() {
-      const response = await fetch('/api/automation/sync', { method: 'POST' });
-      const data = await response.json();
-      alert(`Synced: ${data.files.join(', ')}`);
-      loadStatus();
-    }
-
-    loadStatus();
-    loadConfig();
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

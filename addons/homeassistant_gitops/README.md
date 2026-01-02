@@ -15,6 +15,7 @@ ingress UI to stage/commit changes, and syncs with GitHub via SSH.
 | `webhook_path` | Path segment for the webhook. | `pull` |
 | `poll_interval_minutes` | Periodic remote check interval in minutes. | `15` |
 | `merge_automations` | Generate a merged `automations.yaml` file from `automations/`. | `true` |
+| `ui_theme` | UI theme preference (`light`, `dark`, or `system`). | `system` |
 
 ## Usage
 

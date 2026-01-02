@@ -9,6 +9,7 @@
 ##############################
 # Secrets / credentials
 ##############################
+.ssh/
 secrets.yaml
 **/secrets.yaml
 ip_bans.yaml
