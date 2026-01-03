@@ -22,6 +22,8 @@ const state = {
   lastModuleSelection: null,
   modulesStale: false,
   modulesEnabled: false,
+  exportTab: "entities",
+  exportConfig: null,
 };
 
 const dom = {
@@ -88,6 +90,14 @@ const dom = {
   moduleMoveNewPackage: document.getElementById("module-move-new-package"),
   moduleMoveOneOff: document.getElementById("module-move-one-off"),
   moduleMoveSummary: document.getElementById("module-move-summary"),
+  exportRunBtn: document.getElementById("export-run-btn"),
+  exportStatus: document.getElementById("export-status"),
+  exportBlacklist: document.getElementById("export-blacklist"),
+  exportSaveConfig: document.getElementById("export-save-config"),
+  exportFileMeta: document.getElementById("export-file-meta"),
+  exportTable: document.getElementById("export-table"),
+  exportConfigEntities: document.getElementById("export-config-entities"),
+  exportConfigOther: document.getElementById("export-config-other"),
   toast: document.getElementById("toast"),
 };
 
@@ -177,6 +187,10 @@ function setTab(tab) {
     startModulesRefresh();
   } else {
     stopModulesRefresh();
+  }
+  if (tab === "exports") {
+    loadExportConfig();
+    setExportTab(state.exportTab);
   }
 }
 
@@ -1413,6 +1427,221 @@ async function deleteModuleFile() {
   }
 }
 
+function setExportTab(tab) {
+  state.exportTab = tab;
+  qsa(".export-tab-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.exportTab === tab);
+  });
+  if (dom.exportConfigEntities && dom.exportConfigOther) {
+    const isEntities = tab === "entities";
+    dom.exportConfigEntities.hidden = !isEntities;
+    dom.exportConfigOther.hidden = isEntities;
+  }
+  if (dom.exportRunBtn) {
+    const label = tab.charAt(0).toUpperCase() + tab.slice(1);
+    dom.exportRunBtn.textContent = `Run ${label} export`;
+  }
+  loadExportFile(tab);
+}
+
+async function loadExportConfig() {
+  if (!dom.exportBlacklist) {
+    return;
+  }
+  try {
+    const data = await requestJSON("/api/exports/config");
+    state.exportConfig = data.config || null;
+    const blacklist =
+      (state.exportConfig &&
+        state.exportConfig.entities &&
+        state.exportConfig.entities.integration_blacklist) ||
+      [];
+    dom.exportBlacklist.value = blacklist.join("\n");
+  } catch (err) {
+    if (dom.exportStatus) {
+      dom.exportStatus.textContent = err.message;
+    }
+  }
+}
+
+function parseBlacklistInput(raw) {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry);
+}
+
+async function saveExportConfig() {
+  if (!dom.exportBlacklist) {
+    return;
+  }
+  const blacklist = parseBlacklistInput(dom.exportBlacklist.value);
+  if (dom.exportStatus) {
+    dom.exportStatus.textContent = "Saving export config...";
+  }
+  try {
+    const data = await requestJSON("/api/exports/config", {
+      method: "POST",
+      body: JSON.stringify({
+        schema_version: 1,
+        entities: { integration_blacklist: blacklist },
+      }),
+    });
+    state.exportConfig = data.config || null;
+    dom.exportBlacklist.value = blacklist.join("\n");
+    if (dom.exportStatus) {
+      dom.exportStatus.textContent = "Export config saved.";
+    }
+    showToast("Export config saved");
+  } catch (err) {
+    if (dom.exportStatus) {
+      dom.exportStatus.textContent = err.message;
+    }
+    showToast(err.message);
+  }
+}
+
+async function runExport() {
+  const tab = state.exportTab;
+  if (dom.exportStatus) {
+    dom.exportStatus.textContent = `Running ${tab} export...`;
+  }
+  try {
+    const data = await requestJSON(`/api/exports/run/${encodeURIComponent(tab)}`, {
+      method: "POST",
+    });
+    if (dom.exportStatus) {
+      dom.exportStatus.textContent = `Export complete (${data.rows || 0} rows).`;
+    }
+    await loadExportFile(tab);
+    showToast("Export complete");
+    await loadStatus();
+  } catch (err) {
+    if (dom.exportStatus) {
+      dom.exportStatus.textContent = err.message;
+    }
+    showToast(err.message);
+  }
+}
+
+function parseCsv(content) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    if (inQuotes) {
+      if (char === "\"") {
+        const nextChar = content[i + 1];
+        if (nextChar === "\"") {
+          cell += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += char;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inQuotes = true;
+      continue;
+    }
+    if (char === ",") {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+    if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    if (char === "\r") {
+      continue;
+    }
+    cell += char;
+  }
+  if (cell.length || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function renderExportTable(content) {
+  if (!dom.exportTable) {
+    return;
+  }
+  dom.exportTable.innerHTML = "";
+  if (!content || !content.trim()) {
+    dom.exportTable.innerHTML =
+      "<div class=\"export-table-placeholder\">No export run yet.</div>";
+    return;
+  }
+  const rows = parseCsv(content);
+  if (!rows.length) {
+    dom.exportTable.innerHTML =
+      "<div class=\"export-table-placeholder\">No export run yet.</div>";
+    return;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  rows[0].forEach((cell) => {
+    const th = document.createElement("th");
+    th.textContent = cell;
+    headerRow.append(th);
+  });
+  thead.append(headerRow);
+  table.append(thead);
+
+  const tbody = document.createElement("tbody");
+  rows.slice(1).forEach((row) => {
+    const tr = document.createElement("tr");
+    rows[0].forEach((_header, index) => {
+      const td = document.createElement("td");
+      td.textContent = row[index] || "";
+      tr.append(td);
+    });
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  dom.exportTable.append(table);
+}
+
+async function loadExportFile(tab) {
+  if (!dom.exportTable) {
+    return;
+  }
+  if (dom.exportFileMeta) {
+    dom.exportFileMeta.textContent = "Loading export file...";
+  }
+  try {
+    const data = await requestJSON(`/api/exports/file/${encodeURIComponent(tab)}`);
+    renderExportTable(data.content || "");
+    if (dom.exportFileMeta) {
+      dom.exportFileMeta.textContent = data.path || "";
+    }
+  } catch (err) {
+    if (dom.exportFileMeta) {
+      dom.exportFileMeta.textContent = "No export run yet.";
+    }
+    if (err.message && err.message.toLowerCase().includes("not found")) {
+      renderExportTable("");
+      return;
+    }
+    dom.exportTable.innerHTML = `<div class=\"export-table-placeholder\">${err.message}</div>`;
+  }
+}
+
 function renderMovePackageOptions() {
   if (!dom.moduleMovePackage) {
     return [];
@@ -1828,6 +2057,15 @@ function bindEvents() {
   });
   dom.moduleSaveBtn.addEventListener("click", saveModuleFile);
   dom.moduleDeleteBtn.addEventListener("click", deleteModuleFile);
+  if (dom.exportRunBtn) {
+    dom.exportRunBtn.addEventListener("click", runExport);
+  }
+  if (dom.exportSaveConfig) {
+    dom.exportSaveConfig.addEventListener("click", saveExportConfig);
+  }
+  qsa(".export-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setExportTab(btn.dataset.exportTab));
+  });
   if (dom.moduleMoveBtn) {
     dom.moduleMoveBtn.addEventListener("click", openMoveModal);
   }
@@ -1880,6 +2118,7 @@ async function init() {
   bindEvents();
   await loadConfig();
   await loadStatus();
+  await loadExportConfig();
   await loadModulesIndex();
   await loadBranches();
   await loadSshStatus();

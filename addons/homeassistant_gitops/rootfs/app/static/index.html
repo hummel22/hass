@@ -25,6 +25,7 @@
         <button class="tab-btn" data-tab="git" aria-controls="tab-git">Git</button>
         <button class="tab-btn" data-tab="history" aria-controls="tab-history">History</button>
         <button class="tab-btn" data-tab="modules" aria-controls="tab-modules">YAML Modules</button>
+        <button class="tab-btn" data-tab="exports" aria-controls="tab-exports">Export</button>
       </nav>
       <button class="tab-btn icon-btn" data-tab="settings" aria-controls="tab-settings" aria-label="Settings">
         <span class="material-symbols-outlined">settings</span>
@@ -192,6 +193,66 @@
             </div>
           </div>
           <div id="modules-preview-status" class="note"></div>
+        </div>
+      </section>
+
+      <section id="tab-exports" class="tab-panel" role="tabpanel">
+        <div class="card export-tabs">
+          <div class="card-header">Registry Exports</div>
+          <div class="segmented" role="tablist">
+            <button class="segmented-btn is-active export-tab-btn" data-export-tab="entities">
+              Entities
+            </button>
+            <button class="segmented-btn export-tab-btn" data-export-tab="areas">
+              Areas
+            </button>
+            <button class="segmented-btn export-tab-btn" data-export-tab="devices">
+              Devices
+            </button>
+          </div>
+        </div>
+
+        <div class="git-grid export-grid">
+          <aside class="card export-config-card">
+            <div class="card-header">Export Controls</div>
+            <p class="note">
+              Exports write CSV files to <code>system/</code>. Commit the CSV snapshots to
+              track registry changes without storing <code>.storage</code>.
+            </p>
+            <div class="export-controls">
+              <button id="export-run-btn" class="btn btn-primary">Run export</button>
+              <div id="export-status" class="note"></div>
+            </div>
+            <div id="export-config-entities" class="export-config-section">
+              <label for="export-blacklist">Integration blacklist (one per line)</label>
+              <textarea
+                id="export-blacklist"
+                rows="6"
+                placeholder="hacs&#10;google_assistant"
+              ></textarea>
+              <div class="button-row">
+                <button id="export-save-config" class="btn">Save export config</button>
+              </div>
+              <p class="note">
+                Blacklisted integrations are excluded from <code>entities.csv</code>.
+                Settings are saved to <code>.gitops/exports.config.yaml</code>.
+              </p>
+            </div>
+            <div id="export-config-other" class="export-config-section" hidden>
+              <p class="note">No additional settings for this export.</p>
+            </div>
+          </aside>
+          <section class="card export-table-card">
+            <div class="commit-header">
+              <div>
+                <div class="card-header">Export Preview</div>
+                <div id="export-file-meta" class="note">No export run yet.</div>
+              </div>
+            </div>
+            <div id="export-table" class="export-table">
+              <div class="diff-placeholder">No export run yet.</div>
+            </div>
+          </section>
         </div>
       </section>
 

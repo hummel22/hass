@@ -478,6 +478,75 @@ button.tab-btn {
   align-items: start;
 }
 
+.export-grid {
+  align-items: start;
+}
+
+.export-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.export-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.export-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.export-config-section textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-family: var(--font-body);
+  resize: vertical;
+}
+
+.export-table {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.export-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.export-table th,
+.export-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.export-table th {
+  background: var(--surface-strong);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.export-table-placeholder {
+  padding: 16px;
+  color: var(--muted);
+}
+
 .module-sidebar {
   display: flex;
   flex-direction: column;

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from watchdog.observers import Observer
 
-from . import config_store, git_ops, ha_services, settings, ssh_ops, watchers, yaml_modules
+from . import config_store, exports, git_ops, ha_services, settings, ssh_ops, watchers, yaml_modules
 from .fs_utils import file_hash
 
 OPTIONS = config_store.OPTIONS
@@ -566,6 +566,42 @@ async def api_delete_module_file(path: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/exports/config")
+async def api_exports_config() -> JSONResponse:
+    try:
+        return JSONResponse({"config": exports.load_exports_config()})
+    except exports.ExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/exports/config")
+async def api_save_exports_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    try:
+        config = exports.save_exports_config(payload)
+    except exports.ExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return JSONResponse({"status": "saved", "config": config})
+
+
+@app.get("/api/exports/file/{kind}")
+async def api_export_file(kind: str) -> JSONResponse:
+    try:
+        return JSONResponse(exports.read_export_file(kind))
+    except exports.ExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/exports/run/{kind}")
+async def api_run_export(kind: str) -> JSONResponse:
+    try:
+        result = await exports.run_export(kind)
+    except exports.ExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return JSONResponse(result)
 
 
 @app.post("/api/automation/merge")
