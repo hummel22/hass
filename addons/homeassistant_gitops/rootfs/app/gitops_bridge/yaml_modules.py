@@ -1600,7 +1600,8 @@ def list_yaml_modules_index() -> dict[str, Any]:
     for module in package_modules:
         module["files"] = sorted(set(module["files"]))
 
-    domain_modules: list[dict[str, Any]] = []
+    one_off_modules: list[dict[str, Any]] = []
+    unassigned_modules: list[dict[str, Any]] = []
     for domain in MODULE_BROWSER_DOMAINS:
         dir_path = settings.CONFIG_DIR / domain
         if not dir_path.exists():
@@ -1612,18 +1613,33 @@ def list_yaml_modules_index() -> dict[str, Any]:
         )
         if not files:
             continue
-        domain_modules.append(
-            {
-                "id": f"domain:{domain}",
-                "name": domain,
-                "kind": "domain",
-                "files": files,
-            }
-        )
+        canonical_unassigned = _unassigned_module_path(dir_path).relative_to(
+            settings.CONFIG_DIR
+        ).as_posix()
+        one_off_files = [path for path in files if path != canonical_unassigned]
+        if one_off_files:
+            one_off_modules.append(
+                {
+                    "id": f"one_offs:{domain}",
+                    "name": domain,
+                    "kind": "one_offs",
+                    "files": one_off_files,
+                }
+            )
+        if canonical_unassigned in files:
+            unassigned_modules.append(
+                {
+                    "id": f"unassigned:{domain}",
+                    "name": domain,
+                    "kind": "unassigned",
+                    "files": [canonical_unassigned],
+                }
+            )
 
     package_modules.sort(key=lambda item: item["name"])
-    domain_modules.sort(key=lambda item: item["name"])
-    return {"modules": package_modules + domain_modules}
+    one_off_modules.sort(key=lambda item: item["name"])
+    unassigned_modules.sort(key=lambda item: item["name"])
+    return {"modules": package_modules + one_off_modules + unassigned_modules}
 
 
 def read_module_file(rel_path: str) -> dict[str, Any]:

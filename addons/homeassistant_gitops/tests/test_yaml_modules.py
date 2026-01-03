@@ -44,7 +44,7 @@ def get_yaml_modules_module():
     return sys.modules["gitops_bridge.yaml_modules"]
 
 
-def test_list_yaml_modules_index_includes_packages_and_domains(tmp_path: Path) -> None:
+def test_list_yaml_modules_index_includes_packages_one_offs_and_unassigned(tmp_path: Path) -> None:
     _, config_dir = load_main(tmp_path)
 
     write_yaml(
@@ -57,19 +57,28 @@ def test_list_yaml_modules_index_includes_packages_and_domains(tmp_path: Path) -
         [{"alias": "One-off", "trigger": []}],
     )
     write_yaml(config_dir / "scripts/turn_on.yaml", {"alias": "Turn on"})
+    write_yaml(
+        config_dir / "automations/automations.unassigned.yaml",
+        [{"alias": "Unassigned", "trigger": []}],
+    )
 
     yaml_modules = get_yaml_modules_module()
     index = yaml_modules.list_yaml_modules_index()
-    modules = {module["name"]: module for module in index["modules"]}
+    modules = {module["id"]: module for module in index["modules"]}
 
-    assert "kitchen" in modules
-    assert "bedroom" in modules
-    assert "automations" in modules
-    assert "scripts" in modules
-    assert "packages/kitchen/automations.yaml" in modules["kitchen"]["files"]
-    assert "packages/bedroom.yaml" in modules["bedroom"]["files"]
-    assert "automations/oneoff.yaml" in modules["automations"]["files"]
-    assert "scripts/turn_on.yaml" in modules["scripts"]["files"]
+    assert "package:kitchen" in modules
+    assert "package:bedroom" in modules
+    assert "one_offs:automations" in modules
+    assert "one_offs:scripts" in modules
+    assert "unassigned:automations" in modules
+    assert "packages/kitchen/automations.yaml" in modules["package:kitchen"]["files"]
+    assert "packages/bedroom.yaml" in modules["package:bedroom"]["files"]
+    assert "automations/oneoff.yaml" in modules["one_offs:automations"]["files"]
+    assert "scripts/turn_on.yaml" in modules["one_offs:scripts"]["files"]
+    assert (
+        "automations/automations.unassigned.yaml"
+        in modules["unassigned:automations"]["files"]
+    )
 
 
 def test_module_file_round_trip(tmp_path: Path) -> None:

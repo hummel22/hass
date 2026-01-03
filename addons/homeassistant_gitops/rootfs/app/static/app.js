@@ -952,7 +952,15 @@ function renderModuleSelect(modules) {
   }, {});
 
   const packages = modules.filter((module) => module.kind === "package");
-  const domains = modules.filter((module) => module.kind !== "package");
+  const oneOffs = modules.filter((module) => module.kind === "one_offs");
+  const unassigned = modules.filter((module) => module.kind === "unassigned");
+
+  const kindLabel = (kind) => {
+    if (kind === "one_offs") {
+      return "one-offs";
+    }
+    return kind || "module";
+  };
 
   const appendGroup = (label, items) => {
     if (!items.length) {
@@ -963,7 +971,7 @@ function renderModuleSelect(modules) {
     items.forEach((module) => {
       const option = document.createElement("option");
       option.value = module.id;
-      const suffix = nameCounts[module.name] > 1 ? ` (${module.kind})` : "";
+      const suffix = nameCounts[module.name] > 1 ? ` (${kindLabel(module.kind)})` : "";
       option.textContent = `${module.name}${suffix}`;
       group.append(option);
     });
@@ -971,7 +979,8 @@ function renderModuleSelect(modules) {
   };
 
   appendGroup("Packages", packages);
-  appendGroup("Domains", domains);
+  appendGroup("One-offs", oneOffs);
+  appendGroup("Unassigned", unassigned);
 }
 
 function renderModuleFileList(module) {
