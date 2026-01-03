@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import difflib
 import hashlib
 import json
@@ -1671,6 +1672,14 @@ MODULE_BROWSER_DOMAINS = (
     "lovelace",
 )
 
+MODULE_DOMAIN_MAP = {
+    "automations": "automation",
+    "scripts": "script",
+    "scenes": "scene",
+    "templates": "template",
+    "lovelace": "lovelace",
+}
+
 
 def _is_yaml_path(path: Path) -> bool:
     return path.suffix.lower() in settings.WATCH_EXTENSIONS
@@ -1694,6 +1703,405 @@ def _resolve_module_path(rel_path: str) -> Path:
     except ValueError as exc:
         raise ValueError("Module path must stay within the config directory.") from exc
     return resolved
+
+
+def _parse_item_yaml(payload: str) -> Any:
+    try:
+        return yaml.safe_load(payload)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML: {exc}") from exc
+
+
+def _select_list_item(
+    items: list[ModuleItem], selector: dict[str, Any]
+) -> tuple[int, ModuleItem]:
+    target_id = selector.get("id")
+    target_fp = selector.get("fingerprint")
+    matches: list[tuple[int, ModuleItem]] = []
+    for idx, item in enumerate(items):
+        if target_id and item.ha_id != target_id:
+            continue
+        if target_fp and item.fingerprint != target_fp:
+            continue
+        matches.append((idx, item))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError("Item not found. Refresh the item list and try again.")
+    raise ValueError("Item match is ambiguous. Refresh the item list and try again.")
+
+
+def _list_items_from_helpers_file(
+    path: Path, warnings: list[str]
+) -> list[dict[str, Any]]:
+    data, _lines, error = yaml_load(path)
+    if error:
+        warnings.append(error)
+        return []
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        warnings.append(f"{path.relative_to(settings.CONFIG_DIR)} is not a map.")
+        return []
+    items: list[dict[str, Any]] = []
+    for helper_type, helper_values in data.items():
+        if helper_type not in HELPER_TYPES:
+            continue
+        if not isinstance(helper_values, dict):
+            warnings.append(f"{path.relative_to(settings.CONFIG_DIR)} {helper_type} is not a map.")
+            continue
+        for key, value in helper_values.items():
+            name = _item_name(value)
+            fingerprint = _fingerprint(value, set())
+            items.append(
+                {
+                    "selector": {
+                        "type": "helper",
+                        "helper_type": helper_type,
+                        "key": str(key),
+                    },
+                    "id": str(key),
+                    "name": name,
+                    "fingerprint": fingerprint,
+                    "helper_type": helper_type,
+                }
+            )
+    return items
+
+
+def list_module_items(rel_path: str) -> dict[str, Any]:
+    path = _resolve_module_path(rel_path)
+    rel_path = path.relative_to(settings.CONFIG_DIR).as_posix()
+    warnings: list[str] = []
+    kind, spec = _module_file_context(path)
+
+    if kind == "list" and spec:
+        items, _data, _changed, valid = _parse_list_module_file(path, spec, warnings)
+        if not valid:
+            return {"path": rel_path, "file_kind": kind, "items": [], "warnings": warnings}
+        payload = [
+            {
+                "selector": {
+                    "type": "list_id",
+                    "id": item.ha_id,
+                    "fingerprint": item.fingerprint,
+                },
+                "id": item.ha_id,
+                "name": item.name,
+                "fingerprint": item.fingerprint,
+            }
+            for item in items
+        ]
+        return {"path": rel_path, "file_kind": kind, "items": payload, "warnings": warnings}
+
+    if kind == "mapping" and spec:
+        items, _data, _changed, valid = _parse_mapping_module_file(path, warnings)
+        if not valid:
+            return {"path": rel_path, "file_kind": kind, "items": [], "warnings": warnings}
+        payload = [
+            {
+                "selector": {"type": "map_key", "key": item.ha_id},
+                "id": item.ha_id,
+                "name": item.name,
+                "fingerprint": item.fingerprint,
+            }
+            for item in items
+        ]
+        return {"path": rel_path, "file_kind": kind, "items": payload, "warnings": warnings}
+
+    if kind == "lovelace":
+        module = _parse_lovelace_module(path, warnings)
+        if not module.valid:
+            return {"path": rel_path, "file_kind": kind, "items": [], "warnings": warnings}
+        payload = [
+            {
+                "selector": {
+                    "type": "lovelace_view",
+                    "id": item.ha_id,
+                    "fingerprint": item.fingerprint,
+                },
+                "id": item.ha_id,
+                "name": item.name,
+                "fingerprint": item.fingerprint,
+            }
+            for item in module.views
+        ]
+        return {"path": rel_path, "file_kind": kind, "items": payload, "warnings": warnings}
+
+    if kind == "helpers":
+        return {
+            "path": rel_path,
+            "file_kind": kind,
+            "items": _list_items_from_helpers_file(path, warnings),
+            "warnings": warnings,
+        }
+
+    raise ValueError("Unsupported module file type.")
+
+
+def read_module_item(rel_path: str, selector: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(selector, dict):
+        raise ValueError("Selector must be an object.")
+    path = _resolve_module_path(rel_path)
+    rel_path = path.relative_to(settings.CONFIG_DIR).as_posix()
+    kind, spec = _module_file_context(path)
+
+    if kind == "list" and spec:
+        items, _data, _changed, valid = _parse_list_module_file(path, spec, [])
+        if not valid:
+            raise ValueError("Module file is not a valid list.")
+        _idx, item = _select_list_item(items, selector)
+        return {
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "yaml": yaml_dump(item.data),
+        }
+
+    if kind == "mapping" and spec:
+        _items, data, _changed, valid = _parse_mapping_module_file(path, [])
+        if not valid:
+            raise ValueError("Module file is not a valid map.")
+        key = selector.get("key")
+        if not key:
+            raise ValueError("Selector key is required.")
+        if key not in data:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        value = data[key]
+        return {
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "yaml": yaml_dump(value),
+        }
+
+    if kind == "helpers":
+        data, _lines, error = yaml_load(path)
+        if error:
+            raise ValueError(error)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("Module file is not a valid helpers map.")
+        helper_type = selector.get("helper_type")
+        key = selector.get("key")
+        if not helper_type or not key:
+            raise ValueError("Selector helper_type and key are required.")
+        helper_values = data.get(helper_type)
+        if not isinstance(helper_values, dict) or key not in helper_values:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        return {
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "yaml": yaml_dump(helper_values[key]),
+        }
+
+    if kind == "lovelace":
+        module = _parse_lovelace_module(path, [])
+        if not module.valid:
+            raise ValueError("Module file is not a valid lovelace module.")
+        _idx, item = _select_list_item(module.views, selector)
+        return {
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "yaml": yaml_dump(item.data),
+        }
+
+    raise ValueError("Unsupported module file type.")
+
+
+def write_module_item(rel_path: str, selector: dict[str, Any], content: str) -> dict[str, Any]:
+    if not isinstance(selector, dict):
+        raise ValueError("Selector must be an object.")
+    if not isinstance(content, str):
+        raise ValueError("YAML content must be a string.")
+    path = _resolve_module_path(rel_path)
+    rel_path = path.relative_to(settings.CONFIG_DIR).as_posix()
+    kind, spec = _module_file_context(path)
+
+    item_data = _parse_item_yaml(content)
+    if item_data is None:
+        raise ValueError("YAML content is empty.")
+
+    if kind == "list" and spec:
+        if not isinstance(item_data, dict):
+            raise ValueError("List items must be YAML maps.")
+        data, _lines, error = yaml_load(path)
+        if error:
+            raise ValueError(error)
+        if data is None:
+            data = []
+        if not isinstance(data, list):
+            raise ValueError("Module file is not a list.")
+        data_copy = copy.deepcopy(data)
+        items, _changed = _parse_list_items(data_copy, None, rel_path, spec, [])
+        index, _item = _select_list_item(items, selector)
+        if spec.key == "automation" and spec.id_field:
+            if not item_data.get(spec.id_field):
+                candidate = _automation_alias_id(item_data)
+                if not candidate:
+                    candidate = _synthetic_id(rel_path, None, index)
+                used_ids = {entry.ha_id for idx, entry in enumerate(items) if idx != index}
+                fingerprint = _fingerprint(item_data, {spec.id_field})
+                item_data[spec.id_field] = _ensure_unique_id(candidate, used_ids, fingerprint)
+        data[index] = item_data
+        _write_yaml(path, data, preview=None)
+        return {
+            "status": "saved",
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "fingerprint": _fingerprint(item_data, {spec.id_field} if spec.id_field else set()),
+        }
+
+    if kind == "mapping" and spec:
+        if not isinstance(item_data, dict):
+            raise ValueError("Map items must be YAML maps.")
+        data, _lines, error = yaml_load(path)
+        if error:
+            raise ValueError(error)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("Module file is not a map.")
+        key = selector.get("key")
+        if not key:
+            raise ValueError("Selector key is required.")
+        if key not in data:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        data[key] = item_data
+        _write_yaml(path, data, preview=None)
+        return {
+            "status": "saved",
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "fingerprint": _fingerprint(item_data, set()),
+        }
+
+    if kind == "helpers":
+        if not isinstance(item_data, dict):
+            raise ValueError("Helper items must be YAML maps.")
+        data, _lines, error = yaml_load(path)
+        if error:
+            raise ValueError(error)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("Module file is not a helpers map.")
+        helper_type = selector.get("helper_type")
+        key = selector.get("key")
+        if not helper_type or not key:
+            raise ValueError("Selector helper_type and key are required.")
+        if helper_type not in HELPER_TYPES:
+            raise ValueError("Unsupported helper type.")
+        helper_values = data.get(helper_type)
+        if helper_values is None:
+            helper_values = {}
+            data[helper_type] = helper_values
+        if not isinstance(helper_values, dict):
+            raise ValueError("Helper type is not a map.")
+        if key not in helper_values:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        helper_values[key] = item_data
+        _write_yaml(path, data, preview=None)
+        return {
+            "status": "saved",
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "fingerprint": _fingerprint(item_data, set()),
+        }
+
+    if kind == "lovelace":
+        if not isinstance(item_data, dict):
+            raise ValueError("Lovelace views must be YAML maps.")
+        data, _lines, error = yaml_load(path)
+        if error:
+            raise ValueError(error)
+        if data is None:
+            data = []
+        shape = "list"
+        meta: dict[str, Any] = {}
+        views: list[Any]
+        if isinstance(data, list):
+            views = data
+        elif isinstance(data, dict):
+            shape = "dict"
+            views = data.get("views") or []
+            if not isinstance(views, list):
+                raise ValueError("Lovelace views are not a list.")
+            meta = {key: value for key, value in data.items() if key != "views"}
+        else:
+            raise ValueError("Module file is not a valid lovelace module.")
+        views_copy = copy.deepcopy(views)
+        items, _changed = _parse_list_items(views_copy, None, rel_path, spec, [])
+        index, _item = _select_list_item(items, selector)
+        if spec and spec.id_field and not item_data.get(spec.id_field):
+            selector_id = selector.get("id")
+            if selector_id:
+                item_data[spec.id_field] = selector_id
+        views[index] = item_data
+        payload = views if shape == "list" else {"views": views, **meta}
+        _write_yaml(path, payload, preview=None)
+        return {
+            "status": "saved",
+            "path": rel_path,
+            "file_kind": kind,
+            "selector": selector,
+            "fingerprint": _fingerprint(item_data, {spec.id_field} if spec else set()),
+        }
+
+    raise ValueError("Unsupported module file type.")
+
+
+def _spec_by_key(key: str) -> DomainSpec | None:
+    for spec in YAML_MODULE_DOMAINS:
+        if spec.key == key:
+            return spec
+    return None
+
+
+def _spec_by_package_filename(filename: str) -> DomainSpec | None:
+    for spec in YAML_MODULE_DOMAINS:
+        if spec.package_filename == filename:
+            return spec
+    return None
+
+
+def _module_file_context(path: Path) -> tuple[str, DomainSpec | None]:
+    rel_parts = path.relative_to(settings.CONFIG_DIR).parts
+    if not rel_parts:
+        raise ValueError("Module path is not within the config directory.")
+    root = rel_parts[0]
+    filename = path.name
+
+    if root == "packages":
+        if filename == "helpers.yaml":
+            return "helpers", None
+        spec = _spec_by_package_filename(filename)
+        if not spec:
+            raise ValueError("Unsupported package module filename.")
+        if spec.key == "template":
+            raise ValueError("Template modules are not supported yet.")
+        return spec.kind, spec
+
+    if root == "helpers":
+        return "helpers", None
+    if root == "lovelace":
+        spec = _spec_by_key("lovelace")
+        return "lovelace", spec
+    if root in MODULE_DOMAIN_MAP:
+        spec = _spec_by_key(MODULE_DOMAIN_MAP[root])
+        if not spec:
+            raise ValueError("Unsupported domain module.")
+        if spec.key == "template":
+            raise ValueError("Template modules are not supported yet.")
+        return spec.kind, spec
+
+    raise ValueError("Unsupported module path.")
 
 
 def list_yaml_modules_index() -> dict[str, Any]:

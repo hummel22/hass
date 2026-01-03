@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
@@ -469,6 +470,34 @@ async def api_module_file(path: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/api/modules/items")
+async def api_module_items(path: str) -> JSONResponse:
+    if not OPTIONS.yaml_modules_enabled:
+        raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
+    try:
+        return JSONResponse(yaml_modules.list_module_items(path))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/modules/item")
+async def api_module_item(path: str, selector: str) -> JSONResponse:
+    if not OPTIONS.yaml_modules_enabled:
+        raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
+    try:
+        selector_payload = json.loads(selector)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Selector must be valid JSON") from exc
+    try:
+        return JSONResponse(yaml_modules.read_module_item(path, selector_payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/modules/file")
 async def api_save_module_file(payload: dict[str, Any] = Body(...)) -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:
@@ -481,6 +510,27 @@ async def api_save_module_file(payload: dict[str, Any] = Body(...)) -> JSONRespo
         raise HTTPException(status_code=400, detail="Module content must be a string")
     try:
         return JSONResponse(yaml_modules.write_module_file(path, content))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/modules/item")
+async def api_save_module_item(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    if not OPTIONS.yaml_modules_enabled:
+        raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
+    path = payload.get("path")
+    selector = payload.get("selector")
+    content = payload.get("yaml")
+    if not isinstance(path, str) or not path:
+        raise HTTPException(status_code=400, detail="Module path is required")
+    if not isinstance(selector, dict):
+        raise HTTPException(status_code=400, detail="Selector must be an object")
+    if not isinstance(content, str):
+        raise HTTPException(status_code=400, detail="YAML content must be a string")
+    try:
+        return JSONResponse(yaml_modules.write_module_item(path, selector, content))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
