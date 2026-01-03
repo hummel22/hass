@@ -21,6 +21,7 @@ const state = {
   moduleItemOrder: {},
   lastModuleSelection: null,
   modulesStale: false,
+  modulesEnabled: false,
 };
 
 const dom = {
@@ -74,8 +75,19 @@ const dom = {
   moduleFileMeta: document.getElementById("module-file-meta"),
   moduleSaveBtn: document.getElementById("module-save-btn"),
   moduleDeleteBtn: document.getElementById("module-delete-btn"),
+  moduleMoveBtn: document.getElementById("module-move-btn"),
+  moduleUnassignBtn: document.getElementById("module-unassign-btn"),
+  moduleDeleteItemsBtn: document.getElementById("module-delete-items-btn"),
   moduleEditor: document.getElementById("module-editor"),
   moduleEditorStatus: document.getElementById("module-editor-status"),
+  moduleMoveModal: document.getElementById("module-move-modal"),
+  moduleMoveClose: document.getElementById("module-move-close"),
+  moduleMoveCancel: document.getElementById("module-move-cancel"),
+  moduleMoveConfirm: document.getElementById("module-move-confirm"),
+  moduleMovePackage: document.getElementById("module-move-package"),
+  moduleMoveNewPackage: document.getElementById("module-move-new-package"),
+  moduleMoveOneOff: document.getElementById("module-move-one-off"),
+  moduleMoveSummary: document.getElementById("module-move-summary"),
   toast: document.getElementById("toast"),
 };
 
@@ -194,6 +206,7 @@ function stopModulesRefresh() {
 }
 
 function updateModulesStatus(enabled) {
+  state.modulesEnabled = enabled;
   dom.modulesStatus.textContent = enabled
     ? "YAML Modules sync is enabled."
     : "YAML Modules sync is disabled in add-on options.";
@@ -201,6 +214,7 @@ function updateModulesStatus(enabled) {
   if (dom.modulesPreviewBtn) {
     dom.modulesPreviewBtn.disabled = !enabled;
   }
+  updateModuleActionButtons();
 }
 
 function renderSummaryItem(label, value) {
@@ -934,6 +948,7 @@ function clearModuleSelection() {
   dom.moduleEditorStatus.textContent = "";
   updateModuleFileMeta();
   updateModuleSelectionCount();
+  updateModuleActionButtons();
   if (moduleEditor || moduleEditorTextarea) {
     setModuleEditorContent("", true);
     setModuleEditorReadOnly(true);
@@ -958,19 +973,29 @@ function updateModuleSelectionCount() {
   const selected = Object.values(state.moduleItemSelections).filter(Boolean).length;
   if (!selected) {
     dom.moduleSelectionCount.textContent = "No items selected.";
+    updateModuleActionButtons();
     return;
   }
   dom.moduleSelectionCount.textContent = `${selected} item${selected === 1 ? "" : "s"} selected.`;
+  updateModuleActionButtons();
 }
 
 function moduleItemKey(item) {
   return JSON.stringify(item.selector || {});
 }
 
+function withItemPath(item, filePath) {
+  if (!item || item.path === filePath) {
+    return item;
+  }
+  return { ...item, path: filePath };
+}
+
 function setSelectedItems(items, filePath) {
   state.moduleItemSelections = {};
   items.forEach((item) => {
-    state.moduleItemSelections[moduleItemKey(item)] = item;
+    const stored = withItemPath(item, filePath);
+    state.moduleItemSelections[moduleItemKey(stored)] = stored;
   });
   state.lastModuleSelection = {
     filePath,
@@ -984,7 +1009,7 @@ function toggleSelectedItem(item, filePath) {
   if (state.moduleItemSelections[key]) {
     delete state.moduleItemSelections[key];
   } else {
-    state.moduleItemSelections[key] = item;
+    state.moduleItemSelections[key] = withItemPath(item, filePath);
   }
   state.lastModuleSelection = { filePath, key };
   updateModuleSelectionCount();
@@ -1014,6 +1039,36 @@ function selectRange(filePath, items, targetKey) {
   const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
   const selection = order.slice(from, to + 1).map((key) => itemsByKey[key]).filter(Boolean);
   setSelectedItems(selection, filePath);
+}
+
+function updateModuleActionButtons() {
+  if (!dom.moduleMoveBtn || !dom.moduleUnassignBtn || !dom.moduleDeleteItemsBtn) {
+    return;
+  }
+  const hasSelection = Object.values(state.moduleItemSelections).some(Boolean);
+  const enabled = state.modulesEnabled && hasSelection && state.selectedModuleFile;
+  dom.moduleMoveBtn.disabled = !enabled;
+  dom.moduleUnassignBtn.disabled = !enabled;
+  dom.moduleDeleteItemsBtn.disabled = !enabled;
+}
+
+function getOrderedSelectedItems(filePath) {
+  const order = state.moduleItemOrder[filePath] || [];
+  const selections = state.moduleItemSelections;
+  const ordered = order.map((key) => selections[key]).filter(Boolean);
+  if (ordered.length) {
+    return ordered;
+  }
+  return Object.values(selections).filter(Boolean);
+}
+
+function buildOperatePayload() {
+  const filePath = state.selectedModuleFile;
+  const selections = getOrderedSelectedItems(filePath);
+  return selections.map((item) => ({
+    path: item.path || filePath,
+    selector: item.selector,
+  }));
 }
 
 function getModuleById(moduleId) {
@@ -1219,7 +1274,7 @@ async function loadModuleSelection(filePath, isMulti) {
     setModuleEditorReadOnly(true);
     setModuleEditorContent(snippets.join("\n\n"), true);
     dom.moduleEditorStatus.textContent =
-      "Multiple items selected. Use move or delete actions to operate on this set.";
+      "Multiple items selected. Use move, unassign, or delete actions to operate on this set.";
     return;
   }
   const item = selections[0];
@@ -1232,11 +1287,13 @@ async function loadModuleSelection(filePath, isMulti) {
   dom.moduleEditorStatus.textContent = "";
 }
 
-async function selectModuleFile(filePath) {
-  if (state.selectedModuleFile === filePath) {
+async function selectModuleFile(filePath, options = {}) {
+  const force = options.force === true;
+  const confirmDiscard = options.confirmDiscard !== false;
+  if (!force && state.selectedModuleFile === filePath) {
     return true;
   }
-  if (!confirmDiscardModuleChanges()) {
+  if (confirmDiscard && !confirmDiscardModuleChanges()) {
     return false;
   }
   state.selectedModuleFile = filePath;
@@ -1354,6 +1411,252 @@ async function deleteModuleFile() {
     dom.moduleEditorStatus.textContent = err.message;
     showToast(err.message);
   }
+}
+
+function renderMovePackageOptions() {
+  if (!dom.moduleMovePackage) {
+    return [];
+  }
+  dom.moduleMovePackage.innerHTML = "";
+  const packages = state.modulesIndex
+    .filter((module) => module.kind === "package")
+    .map((module) => module.name)
+    .sort((a, b) => a.localeCompare(b));
+  if (!packages.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No packages found";
+    dom.moduleMovePackage.append(option);
+    dom.moduleMovePackage.disabled = true;
+    return [];
+  }
+  dom.moduleMovePackage.disabled = false;
+  packages.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    dom.moduleMovePackage.append(option);
+  });
+  return packages;
+}
+
+function getMoveTargetType() {
+  const selected = qs("input[name=\"module-move-type\"]:checked");
+  return selected ? selected.value : "existing_package";
+}
+
+function setMoveTargetType(type) {
+  qsa("input[name=\"module-move-type\"]").forEach((input) => {
+    input.checked = input.value === type;
+  });
+  qsa(".module-move-field").forEach((field) => {
+    field.hidden = field.dataset.field !== type;
+  });
+  updateMoveModalSummary();
+  updateMoveModalConfirmState();
+}
+
+function updateMoveModalSummary() {
+  if (!dom.moduleMoveSummary) {
+    return;
+  }
+  const selections = Object.values(state.moduleItemSelections).filter(Boolean);
+  if (!selections.length) {
+    dom.moduleMoveSummary.textContent = "Select items to move.";
+    return;
+  }
+  const count = selections.length;
+  const sources = new Set(
+    selections
+      .map((item) => item.path || state.selectedModuleFile)
+      .filter(Boolean)
+  );
+  const sourceLabel = sources.size ? Array.from(sources).join(", ") : "selected file";
+  const targetType = getMoveTargetType();
+  let targetLabel = "a destination";
+  if (targetType === "existing_package") {
+    const name = dom.moduleMovePackage ? dom.moduleMovePackage.value : "";
+    targetLabel = name ? `package "${name}"` : "an existing package";
+  } else if (targetType === "new_package") {
+    const name = dom.moduleMoveNewPackage ? dom.moduleMoveNewPackage.value.trim() : "";
+    targetLabel = name ? `new package "${name}"` : "a new package";
+  } else if (targetType === "one_off") {
+    const name = dom.moduleMoveOneOff ? dom.moduleMoveOneOff.value.trim() : "";
+    targetLabel = name ? `one-off "${name}"` : "a one-off file";
+  }
+  dom.moduleMoveSummary.textContent =
+    `Moving ${count} item${count === 1 ? "" : "s"} from ${sourceLabel} to ${targetLabel}.`;
+}
+
+function updateMoveModalConfirmState() {
+  if (!dom.moduleMoveConfirm) {
+    return;
+  }
+  const selections = Object.values(state.moduleItemSelections).filter(Boolean);
+  let valid = selections.length > 0;
+  const targetType = getMoveTargetType();
+  if (targetType === "existing_package") {
+    valid = valid && dom.moduleMovePackage && dom.moduleMovePackage.value;
+  } else if (targetType === "new_package") {
+    valid = valid && dom.moduleMoveNewPackage && dom.moduleMoveNewPackage.value.trim();
+  } else if (targetType === "one_off") {
+    valid = valid && dom.moduleMoveOneOff && dom.moduleMoveOneOff.value.trim();
+  }
+  dom.moduleMoveConfirm.disabled = !valid;
+}
+
+function openMoveModal() {
+  if (!state.modulesEnabled) {
+    showToast("YAML Modules sync is disabled.");
+    return;
+  }
+  const selections = Object.values(state.moduleItemSelections).filter(Boolean);
+  if (!selections.length) {
+    showToast("Select items to move.");
+    return;
+  }
+  if (!confirmDiscardModuleChanges()) {
+    return;
+  }
+  const packages = renderMovePackageOptions();
+  const existingInput = qs("input[name=\"module-move-type\"][value=\"existing_package\"]");
+  if (existingInput) {
+    existingInput.disabled = packages.length === 0;
+  }
+  const defaultType = packages.length ? "existing_package" : "new_package";
+  setMoveTargetType(defaultType);
+  if (dom.moduleMoveModal) {
+    dom.moduleMoveModal.classList.add("is-visible");
+    dom.moduleMoveModal.setAttribute("aria-hidden", "false");
+  }
+  updateMoveModalSummary();
+  updateMoveModalConfirmState();
+}
+
+function closeMoveModal() {
+  if (!dom.moduleMoveModal) {
+    return;
+  }
+  dom.moduleMoveModal.classList.remove("is-visible");
+  dom.moduleMoveModal.setAttribute("aria-hidden", "true");
+}
+
+async function operateModuleItems(operation, moveTarget) {
+  const selectedFile = state.selectedModuleFile;
+  const payloadItems = buildOperatePayload();
+  if (!payloadItems.length) {
+    showToast("Select items to operate on.");
+    return false;
+  }
+  dom.moduleEditorStatus.textContent = `Running ${operation}...`;
+  updateModuleActionButtons();
+  if (dom.moduleMoveConfirm) {
+    dom.moduleMoveConfirm.disabled = true;
+  }
+  try {
+    const result = await requestJSON("/api/modules/items/operate", {
+      method: "POST",
+      body: JSON.stringify({
+        operation,
+        items: payloadItems,
+        move_target: moveTarget,
+      }),
+    });
+    const warnings = result.warnings || [];
+    dom.moduleEditorStatus.textContent = warnings.length
+      ? `Operation complete with warnings: ${warnings.join(" | ")}`
+      : "Operation complete.";
+    showToast(
+      warnings.length ? "Operation complete with warnings" : "Operation complete"
+    );
+    state.moduleItemSelections = {};
+    state.lastModuleSelection = null;
+    updateModuleSelectionCount();
+    setModuleDirty(false);
+    await loadStatus();
+    await loadModulesIndex();
+    if (selectedFile) {
+      await selectModuleFile(selectedFile, { force: true, confirmDiscard: false });
+    }
+    return true;
+  } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
+    showToast(err.message);
+    return false;
+  } finally {
+    if (dom.moduleMoveConfirm) {
+      dom.moduleMoveConfirm.disabled = false;
+    }
+    updateModuleActionButtons();
+  }
+}
+
+async function confirmMoveItems() {
+  const targetType = getMoveTargetType();
+  let moveTarget = null;
+  if (targetType === "existing_package") {
+    const name = dom.moduleMovePackage ? dom.moduleMovePackage.value : "";
+    if (!name) {
+      showToast("Select a package to continue.");
+      return;
+    }
+    moveTarget = { type: "existing_package", package_name: name };
+  } else if (targetType === "new_package") {
+    const name = dom.moduleMoveNewPackage ? dom.moduleMoveNewPackage.value.trim() : "";
+    if (!name) {
+      showToast("Enter a package name to continue.");
+      return;
+    }
+    moveTarget = { type: "new_package", package_name: name };
+  } else if (targetType === "one_off") {
+    const filename = dom.moduleMoveOneOff ? dom.moduleMoveOneOff.value.trim() : "";
+    if (!filename) {
+      showToast("Enter a one-off filename to continue.");
+      return;
+    }
+    moveTarget = { type: "one_off", one_off_filename: filename };
+  }
+  const succeeded = await operateModuleItems("move", moveTarget);
+  if (succeeded) {
+    closeMoveModal();
+  }
+}
+
+async function unassignSelectedItems() {
+  const selections = Object.values(state.moduleItemSelections).filter(Boolean);
+  if (!selections.length) {
+    return;
+  }
+  if (state.selectedModuleFile && state.selectedModuleFile.includes(".unassigned.")) {
+    showToast("Items are already unassigned.");
+    return;
+  }
+  if (!confirmDiscardModuleChanges()) {
+    return;
+  }
+  const count = selections.length;
+  if (!window.confirm(`Unassign ${count} item${count === 1 ? "" : "s"}?`)) {
+    return;
+  }
+  await operateModuleItems("unassign");
+}
+
+async function deleteSelectedItems() {
+  const selections = Object.values(state.moduleItemSelections).filter(Boolean);
+  if (!selections.length) {
+    return;
+  }
+  if (!confirmDiscardModuleChanges()) {
+    return;
+  }
+  const count = selections.length;
+  const message =
+    `Delete ${count} item${count === 1 ? "" : "s"} from the HA config and module files?` +
+    " This cannot be undone.";
+  if (!window.confirm(message)) {
+    return;
+  }
+  await operateModuleItems("delete");
 }
 
 async function syncModules() {
@@ -1525,6 +1828,52 @@ function bindEvents() {
   });
   dom.moduleSaveBtn.addEventListener("click", saveModuleFile);
   dom.moduleDeleteBtn.addEventListener("click", deleteModuleFile);
+  if (dom.moduleMoveBtn) {
+    dom.moduleMoveBtn.addEventListener("click", openMoveModal);
+  }
+  if (dom.moduleUnassignBtn) {
+    dom.moduleUnassignBtn.addEventListener("click", unassignSelectedItems);
+  }
+  if (dom.moduleDeleteItemsBtn) {
+    dom.moduleDeleteItemsBtn.addEventListener("click", deleteSelectedItems);
+  }
+  if (dom.moduleMoveClose) {
+    dom.moduleMoveClose.addEventListener("click", closeMoveModal);
+  }
+  if (dom.moduleMoveCancel) {
+    dom.moduleMoveCancel.addEventListener("click", closeMoveModal);
+  }
+  if (dom.moduleMoveConfirm) {
+    dom.moduleMoveConfirm.addEventListener("click", confirmMoveItems);
+  }
+  qsa("input[name=\"module-move-type\"]").forEach((input) => {
+    input.addEventListener("change", () => setMoveTargetType(input.value));
+  });
+  if (dom.moduleMovePackage) {
+    dom.moduleMovePackage.addEventListener("change", () => {
+      updateMoveModalSummary();
+      updateMoveModalConfirmState();
+    });
+  }
+  if (dom.moduleMoveNewPackage) {
+    dom.moduleMoveNewPackage.addEventListener("input", () => {
+      updateMoveModalSummary();
+      updateMoveModalConfirmState();
+    });
+  }
+  if (dom.moduleMoveOneOff) {
+    dom.moduleMoveOneOff.addEventListener("input", () => {
+      updateMoveModalSummary();
+      updateMoveModalConfirmState();
+    });
+  }
+  if (dom.moduleMoveModal) {
+    dom.moduleMoveModal.addEventListener("click", (event) => {
+      if (event.target === dom.moduleMoveModal) {
+        closeMoveModal();
+      }
+    });
+  }
 }
 
 async function init() {

@@ -537,6 +537,25 @@ async def api_save_module_item(payload: dict[str, Any] = Body(...)) -> JSONRespo
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/modules/items/operate")
+async def api_operate_module_items(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    if not OPTIONS.yaml_modules_enabled:
+        raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
+    operation = payload.get("operation")
+    items = payload.get("items")
+    move_target = payload.get("move_target")
+    if not isinstance(operation, str) or not operation:
+        raise HTTPException(status_code=400, detail="Operation is required")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="Items must be a non-empty list")
+    try:
+        return JSONResponse(yaml_modules.operate_module_items(operation, items, move_target))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.delete("/api/modules/file")
 async def api_delete_module_file(path: str) -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:

@@ -2057,6 +2057,538 @@ def write_module_item(rel_path: str, selector: dict[str, Any], content: str) -> 
     raise ValueError("Unsupported module file type.")
 
 
+def _selector_key(selector: dict[str, Any]) -> str:
+    return json.dumps(selector, sort_keys=True)
+
+
+def _select_list_item_flexible(
+    items: list[ModuleItem], selector: dict[str, Any], allow_fingerprint_only: bool
+) -> tuple[int, ModuleItem]:
+    try:
+        return _select_list_item(items, selector)
+    except ValueError:
+        if not allow_fingerprint_only:
+            raise
+    fingerprint = selector.get("fingerprint")
+    if not fingerprint:
+        raise ValueError("Item not found. Refresh the item list and try again.")
+    matches = [(idx, item) for idx, item in enumerate(items) if item.fingerprint == fingerprint]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError("Item not found. Refresh the item list and try again.")
+    raise ValueError("Item match is ambiguous. Refresh the item list and try again.")
+
+
+def _remove_list_items(
+    path: Path,
+    spec: DomainSpec,
+    selectors: list[dict[str, Any]],
+    warnings: list[str],
+    allow_fingerprint_only: bool,
+) -> tuple[list[dict[str, Any]], list[Any]]:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = []
+    if not isinstance(data, list):
+        raise ValueError("Module file is not a list.")
+    data_copy = copy.deepcopy(data)
+    items, _changed = _parse_list_items(data_copy, None, path.relative_to(settings.CONFIG_DIR).as_posix(), spec, warnings)
+    removed: dict[str, dict[str, Any]] = {}
+    indices: list[int] = []
+    for selector in selectors:
+        idx, item = _select_list_item_flexible(items, selector, allow_fingerprint_only)
+        key = _selector_key(selector)
+        removed[key] = {
+            "data": data[idx],
+            "id": item.ha_id,
+            "fingerprint": item.fingerprint,
+            "name": item.name,
+            "selector": selector,
+        }
+        indices.append(idx)
+    for idx in sorted(set(indices), reverse=True):
+        data.pop(idx)
+    ordered = [removed[_selector_key(selector)] for selector in selectors if _selector_key(selector) in removed]
+    return ordered, data
+
+
+def _remove_mapping_items(
+    path: Path, selectors: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("Module file is not a map.")
+    removed: list[dict[str, Any]] = []
+    for selector in selectors:
+        key = selector.get("key")
+        if not key:
+            raise ValueError("Selector key is required.")
+        if key not in data:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        removed.append(
+            {
+                "data": data[key],
+                "id": str(key),
+                "key": str(key),
+                "selector": selector,
+            }
+        )
+    for selector in selectors:
+        key = selector.get("key")
+        if key in data:
+            data.pop(key)
+    return removed, data
+
+
+def _remove_helpers_items(
+    path: Path, selectors: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("Module file is not a helpers map.")
+    removed: list[dict[str, Any]] = []
+    for selector in selectors:
+        helper_type = selector.get("helper_type")
+        key = selector.get("key")
+        if not helper_type or not key:
+            raise ValueError("Selector helper_type and key are required.")
+        helper_values = data.get(helper_type)
+        if not isinstance(helper_values, dict) or key not in helper_values:
+            raise ValueError("Item not found. Refresh the item list and try again.")
+        removed.append(
+            {
+                "data": helper_values[key],
+                "id": str(key),
+                "key": str(key),
+                "helper_type": helper_type,
+                "selector": selector,
+            }
+        )
+    for selector in selectors:
+        helper_type = selector.get("helper_type")
+        key = selector.get("key")
+        helper_values = data.get(helper_type)
+        if isinstance(helper_values, dict) and key in helper_values:
+            helper_values.pop(key)
+            if not helper_values:
+                data.pop(helper_type, None)
+    return removed, data
+
+
+def _remove_lovelace_items(
+    path: Path,
+    spec: DomainSpec,
+    selectors: list[dict[str, Any]],
+    warnings: list[str],
+    allow_fingerprint_only: bool,
+) -> tuple[list[dict[str, Any]], Any]:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = []
+    shape = "list"
+    meta: dict[str, Any] = {}
+    views: list[Any]
+    if isinstance(data, list):
+        views = data
+    elif isinstance(data, dict):
+        shape = "dict"
+        views = data.get("views") or []
+        if not isinstance(views, list):
+            raise ValueError("Lovelace views are not a list.")
+        meta = {key: value for key, value in data.items() if key != "views"}
+    else:
+        raise ValueError("Module file is not a valid lovelace module.")
+    views_copy = copy.deepcopy(views)
+    items, _changed = _parse_list_items(views_copy, None, path.relative_to(settings.CONFIG_DIR).as_posix(), spec, warnings)
+    removed: dict[str, dict[str, Any]] = {}
+    indices: list[int] = []
+    for selector in selectors:
+        idx, item = _select_list_item_flexible(items, selector, allow_fingerprint_only)
+        key = _selector_key(selector)
+        removed[key] = {
+            "data": views[idx],
+            "id": item.ha_id,
+            "fingerprint": item.fingerprint,
+            "name": item.name,
+            "selector": selector,
+        }
+        indices.append(idx)
+    for idx in sorted(set(indices), reverse=True):
+        views.pop(idx)
+    payload = views if shape == "list" else {"views": views, **meta}
+    ordered = [removed[_selector_key(selector)] for selector in selectors if _selector_key(selector) in removed]
+    return ordered, payload
+
+
+def _prepare_list_item_for_target(
+    item_data: dict[str, Any],
+    spec: DomainSpec,
+    used_ids: set[str],
+    rel_path: str,
+    index: int,
+) -> dict[str, Any]:
+    if spec.id_field:
+        item_id = _extract_item_id(item_data, spec.id_field)
+        if item_id and item_id in used_ids:
+            raise ValueError(f"{spec.key} id {item_id} already exists in destination.")
+        if not item_id and spec.auto_id:
+            if spec.key == "automation":
+                candidate = _automation_alias_id(item_data)
+            else:
+                candidate = None
+            if not candidate:
+                candidate = _synthetic_id(rel_path, None, index)
+                if spec.key == "lovelace":
+                    candidate = _sanitize_lovelace_path(candidate)
+            fingerprint = _fingerprint(item_data, {spec.id_field})
+            item_id = _ensure_unique_id(candidate, used_ids, fingerprint)
+            item_data[spec.id_field] = item_id
+        if item_id:
+            used_ids.add(str(item_id))
+    return item_data
+
+
+def _append_items_to_list_file(
+    path: Path,
+    spec: DomainSpec,
+    items: list[dict[str, Any]],
+) -> None:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = []
+    if not isinstance(data, list):
+        raise ValueError("Destination file is not a list.")
+    used_ids: set[str] = set()
+    if spec.id_field:
+        for entry in data:
+            if isinstance(entry, dict) and entry.get(spec.id_field) is not None:
+                used_ids.add(str(entry.get(spec.id_field)))
+    for idx, item in enumerate(items):
+        payload = dict(item["data"])
+        payload = _prepare_list_item_for_target(
+            payload, spec, used_ids, path.relative_to(settings.CONFIG_DIR).as_posix(), len(data) + idx
+        )
+        data.append(payload)
+    _write_yaml(path, data, preview=None)
+
+
+def _append_items_to_mapping_file(path: Path, items: list[dict[str, Any]]) -> None:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("Destination file is not a map.")
+    for item in items:
+        key = item.get("key") or item.get("id")
+        if not key:
+            raise ValueError("Item key is required for mapping destinations.")
+        if key in data:
+            raise ValueError(f"Item key {key} already exists in destination.")
+        data[key] = item["data"]
+    _write_yaml(path, data, preview=None)
+
+
+def _append_items_to_helpers_file(path: Path, items: list[dict[str, Any]]) -> None:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("Destination file is not a helpers map.")
+    for item in items:
+        helper_type = item.get("helper_type")
+        key = item.get("key") or item.get("id")
+        if not helper_type or not key:
+            raise ValueError("Helper item must include helper_type and key.")
+        if helper_type not in HELPER_TYPES:
+            raise ValueError("Unsupported helper type.")
+        helper_values = data.setdefault(helper_type, {})
+        if not isinstance(helper_values, dict):
+            raise ValueError("Helper type is not a map.")
+        if key in helper_values:
+            raise ValueError(f"Helper key {key} already exists in destination.")
+        helper_values[key] = item["data"]
+    _write_yaml(path, data, preview=None)
+
+
+def _append_items_to_lovelace_file(
+    path: Path, spec: DomainSpec, items: list[dict[str, Any]]
+) -> None:
+    data, _lines, error = yaml_load(path)
+    if error:
+        raise ValueError(error)
+    if data is None:
+        data = []
+    shape = "list"
+    meta: dict[str, Any] = {}
+    views: list[Any]
+    if isinstance(data, list):
+        views = data
+    elif isinstance(data, dict):
+        shape = "dict"
+        views = data.get("views") or []
+        if not isinstance(views, list):
+            raise ValueError("Lovelace views are not a list.")
+        meta = {key: value for key, value in data.items() if key != "views"}
+    else:
+        raise ValueError("Destination file is not a valid lovelace module.")
+    used_ids: set[str] = set()
+    if spec.id_field:
+        for entry in views:
+            if isinstance(entry, dict) and entry.get(spec.id_field) is not None:
+                used_ids.add(str(entry.get(spec.id_field)))
+    for idx, item in enumerate(items):
+        payload = dict(item["data"])
+        payload = _prepare_list_item_for_target(
+            payload, spec, used_ids, path.relative_to(settings.CONFIG_DIR).as_posix(), len(views) + idx
+        )
+        views.append(payload)
+    final_payload = views if shape == "list" else {"views": views, **meta}
+    _write_yaml(path, final_payload, preview=None)
+
+
+def _ensure_yaml_filename(name: str) -> str:
+    if "/" in name or "\\" in name:
+        raise ValueError("One-off filename must be a simple filename.")
+    candidate = name.strip()
+    if not candidate:
+        raise ValueError("Filename is required.")
+    if not Path(candidate).suffix:
+        candidate = f"{candidate}.yaml"
+    if not _is_yaml_path(Path(candidate)):
+        raise ValueError("Filename must end with .yaml or .yml.")
+    return candidate
+
+
+def _resolve_destination_path(
+    operation: str,
+    source_path: Path,
+    kind: str,
+    spec: DomainSpec | None,
+    move_target: dict[str, Any] | None,
+) -> Path | None:
+    if operation == "delete":
+        return None
+    if operation == "unassign":
+        if kind == "helpers":
+            module_dir = settings.CONFIG_DIR / "helpers"
+        elif spec:
+            module_dir = spec.module_dir
+        else:
+            raise ValueError("Unsupported module type for unassign.")
+        return _unassigned_module_path(module_dir)
+    if not move_target or not isinstance(move_target, dict):
+        raise ValueError("move_target is required for move operations.")
+    target_type = move_target.get("type")
+    if target_type in {"existing_package", "new_package"}:
+        package_name = move_target.get("package_name")
+        if not isinstance(package_name, str) or not package_name.strip():
+            raise ValueError("package_name is required.")
+        package_dir = settings.PACKAGES_DIR / package_name.strip()
+        if target_type == "existing_package" and not package_dir.exists():
+            raise ValueError("Package does not exist.")
+        package_dir.mkdir(parents=True, exist_ok=True)
+        if kind == "helpers":
+            filename = "helpers.yaml"
+        elif spec:
+            filename = spec.package_filename
+        else:
+            raise ValueError("Unsupported module type for package destination.")
+        return package_dir / filename
+    if target_type == "one_off":
+        filename = _ensure_yaml_filename(move_target.get("one_off_filename", ""))
+        if kind == "helpers":
+            module_dir = settings.CONFIG_DIR / "helpers"
+        elif spec:
+            module_dir = spec.module_dir
+        else:
+            raise ValueError("Unsupported module type for one-off destination.")
+        return module_dir / filename
+    raise ValueError("Unsupported move target type.")
+
+
+def operate_module_items(
+    operation: str,
+    items: list[dict[str, Any]],
+    move_target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if operation not in {"move", "delete", "unassign"}:
+        raise ValueError("Unsupported operation.")
+    if not items:
+        raise ValueError("At least one item is required.")
+
+    warnings: list[str] = []
+    changed_files: list[str] = []
+    items_by_source: dict[str, list[dict[str, Any]]] = {}
+    ordered_items: list[tuple[str, dict[str, Any]]] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            raise ValueError("Each item must be an object.")
+        path = entry.get("path")
+        selector = entry.get("selector")
+        if not isinstance(path, str) or not path:
+            raise ValueError("Item path is required.")
+        if not isinstance(selector, dict):
+            raise ValueError("Item selector is required.")
+        items_by_source.setdefault(path, []).append(selector)
+        ordered_items.append((path, selector))
+
+    removed_items_by_source: dict[str, list[dict[str, Any]]] = {}
+    source_context: dict[str, tuple[str, DomainSpec | None]] = {}
+    for rel_path, selectors in items_by_source.items():
+        path = _resolve_module_path(rel_path)
+        kind, spec = _module_file_context(path)
+        source_context[rel_path] = (kind, spec)
+        if kind == "list" and spec:
+            removed_items, updated = _remove_list_items(
+                path, spec, selectors, warnings, allow_fingerprint_only=False
+            )
+        elif kind == "mapping" and spec:
+            removed_items, updated = _remove_mapping_items(path, selectors)
+        elif kind == "helpers":
+            removed_items, updated = _remove_helpers_items(path, selectors)
+        elif kind == "lovelace" and spec:
+            removed_items, updated = _remove_lovelace_items(
+                path, spec, selectors, warnings, allow_fingerprint_only=False
+            )
+        else:
+            raise ValueError("Unsupported module file type.")
+
+        _write_yaml(path, updated, preview=None)
+        changed_files.append(path.relative_to(settings.CONFIG_DIR).as_posix())
+        removed_items_by_source[rel_path] = removed_items
+
+    if operation == "delete":
+        for rel_path, selectors in items_by_source.items():
+            kind, spec = source_context[rel_path]
+            if kind == "list" and spec:
+                domain_items, domain_updated = _remove_list_items(
+                    spec.domain_file, spec, selectors, warnings, allow_fingerprint_only=True
+                )
+                _ = domain_items
+                _write_yaml(spec.domain_file, domain_updated, preview=None)
+                changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
+            elif kind == "mapping" and spec:
+                _removed, domain_updated = _remove_mapping_items(spec.domain_file, selectors)
+                _write_yaml(spec.domain_file, domain_updated, preview=None)
+                changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
+            elif kind == "lovelace" and spec:
+                _removed, domain_updated = _remove_lovelace_items(
+                    spec.domain_file, spec, selectors, warnings, allow_fingerprint_only=True
+                )
+                _write_yaml(spec.domain_file, domain_updated, preview=None)
+                changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
+            elif kind == "helpers":
+                for selector in selectors:
+                    helper_type = selector.get("helper_type")
+                    key = selector.get("key")
+                    if not helper_type or not key:
+                        continue
+                    domain_path = settings.CONFIG_DIR / f"{helper_type}.yaml"
+                    data, _lines, error = yaml_load(domain_path)
+                    if error:
+                        warnings.append(error)
+                        continue
+                    if data is None:
+                        data = {}
+                    if not isinstance(data, dict):
+                        warnings.append(
+                            f"{domain_path.relative_to(settings.CONFIG_DIR)} is not a map."
+                        )
+                        continue
+                    if key in data:
+                        data.pop(key)
+                        _write_yaml(domain_path, data, preview=None)
+                        changed_files.append(
+                            domain_path.relative_to(settings.CONFIG_DIR).as_posix()
+                        )
+
+    if operation in {"move", "unassign"}:
+        items_by_destination: dict[str, dict[str, Any]] = {}
+        for rel_path, _selectors in items_by_source.items():
+            kind, spec = source_context[rel_path]
+            source_path = _resolve_module_path(rel_path)
+            destination = _resolve_destination_path(
+                operation, source_path, kind, spec, move_target
+            )
+            if destination is None:
+                continue
+            if destination.resolve() == source_path.resolve():
+                raise ValueError("Destination matches the source file.")
+            dest_key = destination.relative_to(settings.CONFIG_DIR).as_posix()
+            if dest_key not in items_by_destination:
+                items_by_destination[dest_key] = {"kind": kind, "spec": spec, "items": []}
+            else:
+                existing = items_by_destination[dest_key]
+                if existing["kind"] != kind or existing["spec"] != spec:
+                    raise ValueError("Destination cannot mix different module types.")
+
+        removed_by_source_key: dict[str, dict[str, dict[str, Any]]] = {}
+        for rel_path, removed_items in removed_items_by_source.items():
+            removed_by_source_key[rel_path] = {
+                _selector_key(item["selector"]): item for item in removed_items if item.get("selector")
+            }
+        for rel_path, selector in ordered_items:
+            kind, spec = source_context[rel_path]
+            source_path = _resolve_module_path(rel_path)
+            destination = _resolve_destination_path(
+                operation, source_path, kind, spec, move_target
+            )
+            if destination is None:
+                continue
+            dest_key = destination.relative_to(settings.CONFIG_DIR).as_posix()
+            removed_item = removed_by_source_key.get(rel_path, {}).get(_selector_key(selector))
+            if not removed_item:
+                raise ValueError("Selected item could not be resolved after removal.")
+            items_by_destination[dest_key]["items"].append(removed_item)
+
+        for dest_rel, payload in items_by_destination.items():
+            dest_items = payload["items"]
+            if not dest_items:
+                continue
+            dest_path = settings.CONFIG_DIR / dest_rel
+            kind = payload["kind"]
+            spec = payload["spec"]
+            if kind == "list" and spec:
+                _append_items_to_list_file(dest_path, spec, dest_items)
+            elif kind == "mapping" and spec:
+                _append_items_to_mapping_file(dest_path, dest_items)
+            elif kind == "helpers":
+                _append_items_to_helpers_file(dest_path, dest_items)
+            elif kind == "lovelace" and spec:
+                _append_items_to_lovelace_file(dest_path, spec, dest_items)
+            else:
+                raise ValueError("Unsupported destination type.")
+            changed_files.append(dest_rel)
+
+    sync_result = sync_yaml_modules()
+    warnings.extend(sync_result.get("warnings", []))
+    changed_files = sorted(set(changed_files + sync_result.get("changed_files", [])))
+    return {
+        "status": "ok",
+        "changed_files": changed_files,
+        "warnings": warnings,
+    }
+
+
 def _spec_by_key(key: str) -> DomainSpec | None:
     for spec in YAML_MODULE_DOMAINS:
         if spec.key == key:

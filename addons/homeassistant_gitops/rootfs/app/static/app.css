@@ -536,6 +536,24 @@ button.tab-btn {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+.module-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.module-item-actions-note {
+  margin: 0;
+}
+
+.module-item-actions .button-row {
+  flex-wrap: wrap;
+}
 .module-editor-card {
   display: flex;
   flex-direction: column;
@@ -602,6 +620,75 @@ button.tab-btn {
 .module-preview-section .diff-list {
   max-height: 50vh;
   overflow-y: auto;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 40;
+}
+
+.modal-overlay.is-visible {
+  display: flex;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-strong);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-form label {
+  font-weight: 600;
+  display: block;
+  margin-top: 6px;
+}
+
+.module-move-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.radio-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 pre {

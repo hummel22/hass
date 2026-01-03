@@ -154,6 +154,20 @@
                 <button id="module-delete-btn" class="btn btn-danger" disabled>Delete file</button>
               </div>
             </div>
+            <div class="module-item-actions">
+              <div class="module-item-actions-note note">
+                Use selection actions to move, unassign, or delete the highlighted items.
+              </div>
+              <div class="button-row">
+                <button id="module-move-btn" class="btn btn-primary" disabled>
+                  Move / Save to package...
+                </button>
+                <button id="module-unassign-btn" class="btn" disabled>Unassign</button>
+                <button id="module-delete-items-btn" class="btn btn-danger" disabled>
+                  Delete items
+                </button>
+              </div>
+            </div>
             <div id="module-editor" class="module-editor">
               <div class="module-editor-placeholder">Select a module file to start editing.</div>
             </div>
@@ -236,6 +250,59 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
+
+  <div id="module-move-modal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="card-header">Move selected items</div>
+        <button id="module-move-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="note">Choose where the selected items should be saved.</p>
+        <div class="modal-form">
+          <label>Destination type</label>
+          <div class="radio-row">
+            <label>
+              <input type="radio" name="module-move-type" value="existing_package" checked />
+              Existing package
+            </label>
+            <label>
+              <input type="radio" name="module-move-type" value="new_package" />
+              New package
+            </label>
+            <label>
+              <input type="radio" name="module-move-type" value="one_off" />
+              One-off file
+            </label>
+          </div>
+          <div class="module-move-field" data-field="existing_package">
+            <label>Select package</label>
+            <select id="module-move-package"></select>
+          </div>
+          <div class="module-move-field" data-field="new_package" hidden>
+            <label>New package name</label>
+            <input type="text" id="module-move-new-package" placeholder="kitchen" />
+          </div>
+          <div class="module-move-field" data-field="one_off" hidden>
+            <label>One-off filename</label>
+            <input type="text" id="module-move-one-off" placeholder="dishwasher.yaml" />
+            <div class="note">
+              One-off files are saved under the selected domain folder.
+            </div>
+          </div>
+          <div id="module-move-summary" class="note"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="module-move-cancel" class="btn">Cancel</button>
+        <button id="module-move-confirm" class="btn btn-primary">
+          Move items
+        </button>
+      </div>
+    </div>
+  </div>
 
   <script>
     window.MONACO_BASE = "https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min";
