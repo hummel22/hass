@@ -48,4 +48,5 @@ should be updated as work lands.
 TODo 
 - Optional mapping file versioning: allow users to ignore `.gitops/mappings/*` in Git.
 - GitOps templates: inject shared objects into multiple YAML locations during sync.
+- add files to .gitignore
 

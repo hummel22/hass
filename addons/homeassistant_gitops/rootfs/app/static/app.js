@@ -15,6 +15,11 @@ const state = {
   selectedModuleFile: null,
   moduleFileContent: "",
   moduleFileDirty: false,
+  moduleFileKind: null,
+  moduleItemsByFile: {},
+  moduleItemSelections: {},
+  moduleItemOrder: {},
+  lastModuleSelection: null,
   modulesStale: false,
 };
 
@@ -65,6 +70,7 @@ const dom = {
   modulesPreviewStatus: document.getElementById("modules-preview-status"),
   moduleSelect: document.getElementById("module-select"),
   moduleFileList: document.getElementById("module-file-list"),
+  moduleSelectionCount: document.getElementById("module-selection-count"),
   moduleFileMeta: document.getElementById("module-file-meta"),
   moduleSaveBtn: document.getElementById("module-save-btn"),
   moduleDeleteBtn: document.getElementById("module-delete-btn"),
@@ -918,10 +924,16 @@ function clearModuleSelection() {
   state.selectedModuleFile = null;
   state.moduleFileContent = "";
   state.moduleFileDirty = false;
+  state.moduleFileKind = null;
+  state.moduleItemsByFile = {};
+  state.moduleItemSelections = {};
+  state.moduleItemOrder = {};
+  state.lastModuleSelection = null;
   dom.moduleSaveBtn.disabled = true;
   dom.moduleDeleteBtn.disabled = true;
   dom.moduleEditorStatus.textContent = "";
   updateModuleFileMeta();
+  updateModuleSelectionCount();
   if (moduleEditor || moduleEditorTextarea) {
     setModuleEditorContent("", true);
     setModuleEditorReadOnly(true);
@@ -937,6 +949,71 @@ function confirmDiscardModuleChanges() {
   }
   const target = state.selectedModuleFile || "this file";
   return window.confirm(`Discard unsaved changes to ${target}?`);
+}
+
+function updateModuleSelectionCount() {
+  if (!dom.moduleSelectionCount) {
+    return;
+  }
+  const selected = Object.values(state.moduleItemSelections).filter(Boolean).length;
+  if (!selected) {
+    dom.moduleSelectionCount.textContent = "No items selected.";
+    return;
+  }
+  dom.moduleSelectionCount.textContent = `${selected} item${selected === 1 ? "" : "s"} selected.`;
+}
+
+function moduleItemKey(item) {
+  return JSON.stringify(item.selector || {});
+}
+
+function setSelectedItems(items, filePath) {
+  state.moduleItemSelections = {};
+  items.forEach((item) => {
+    state.moduleItemSelections[moduleItemKey(item)] = item;
+  });
+  state.lastModuleSelection = {
+    filePath,
+    key: items.length ? moduleItemKey(items[items.length - 1]) : null,
+  };
+  updateModuleSelectionCount();
+}
+
+function toggleSelectedItem(item, filePath) {
+  const key = moduleItemKey(item);
+  if (state.moduleItemSelections[key]) {
+    delete state.moduleItemSelections[key];
+  } else {
+    state.moduleItemSelections[key] = item;
+  }
+  state.lastModuleSelection = { filePath, key };
+  updateModuleSelectionCount();
+}
+
+function selectRange(filePath, items, targetKey) {
+  const order = state.moduleItemOrder[filePath] || [];
+  if (!order.length) {
+    return;
+  }
+  const startKey =
+    state.lastModuleSelection && state.lastModuleSelection.filePath === filePath
+      ? state.lastModuleSelection.key
+      : null;
+  if (!startKey) {
+    return;
+  }
+  const startIndex = order.indexOf(startKey);
+  const endIndex = order.indexOf(targetKey);
+  if (startIndex < 0 || endIndex < 0) {
+    return;
+  }
+  const itemsByKey = items.reduce((acc, item) => {
+    acc[moduleItemKey(item)] = item;
+    return acc;
+  }, {});
+  const [from, to] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+  const selection = order.slice(from, to + 1).map((key) => itemsByKey[key]).filter(Boolean);
+  setSelectedItems(selection, filePath);
 }
 
 function getModuleById(moduleId) {
@@ -1013,6 +1090,46 @@ function renderModuleFileList(module) {
       }
     });
     dom.moduleFileList.append(item);
+
+    if (state.selectedModuleFile === filePath && state.moduleItemsByFile[filePath]) {
+      const items = state.moduleItemsByFile[filePath];
+      const list = document.createElement("div");
+      list.className = "module-item-list";
+      items.forEach((entry) => {
+        const key = moduleItemKey(entry);
+        const card = document.createElement("div");
+        card.className = "module-item";
+        if (state.moduleItemSelections[key]) {
+          card.classList.add("is-active");
+        }
+        const titleLine = document.createElement("div");
+        titleLine.className = "module-item-title";
+        titleLine.textContent = entry.name || entry.id || "Untitled item";
+        const metaLine = document.createElement("div");
+        metaLine.className = "module-item-meta";
+        metaLine.textContent = entry.id || entry.helper_type || "Item";
+        card.append(titleLine, metaLine);
+        card.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!confirmDiscardModuleChanges()) {
+            return;
+          }
+          const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
+          if (event.shiftKey) {
+            selectRange(filePath, state.moduleItemsByFile[filePath], key);
+          } else if (event.metaKey || event.ctrlKey) {
+            toggleSelectedItem(entry, filePath);
+          } else {
+            setSelectedItems([entry], filePath);
+          }
+          renderModuleFileList(module);
+          await loadModuleSelection(filePath, isMulti);
+        });
+        list.append(card);
+      });
+      item.append(list);
+    }
   });
 }
 
@@ -1068,6 +1185,53 @@ async function loadModulesIndex(options = {}) {
   }
 }
 
+async function loadModuleItems(filePath) {
+  try {
+    const data = await requestJSON(`/api/modules/items?path=${encodeURIComponent(filePath)}`);
+    const items = data.items || [];
+    state.moduleItemsByFile[filePath] = items;
+    state.moduleItemOrder[filePath] = items.map((item) => moduleItemKey(item));
+    state.moduleFileKind = data.file_kind || null;
+  } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
+    state.moduleItemsByFile[filePath] = [];
+    state.moduleItemOrder[filePath] = [];
+  }
+}
+
+async function loadModuleSelection(filePath, isMulti) {
+  const selections = Object.values(state.moduleItemSelections);
+  if (!selections.length) {
+    return;
+  }
+  if (isMulti && selections.length > 1) {
+    const snippets = [];
+    const orderedSelections = (state.moduleItemOrder[filePath] || [])
+      .map((key) => state.moduleItemSelections[key])
+      .filter(Boolean);
+    for (const item of orderedSelections) {
+      const selector = encodeURIComponent(JSON.stringify(item.selector));
+      const data = await requestJSON(
+        `/api/modules/item?path=${encodeURIComponent(filePath)}&selector=${selector}`
+      );
+      snippets.push(`# --- ITEM: ${item.id || "item"} ---\n${data.yaml || ""}`.trim());
+    }
+    setModuleEditorReadOnly(true);
+    setModuleEditorContent(snippets.join("\n\n"), true);
+    dom.moduleEditorStatus.textContent =
+      "Multiple items selected. Use move or delete actions to operate on this set.";
+    return;
+  }
+  const item = selections[0];
+  const selector = encodeURIComponent(JSON.stringify(item.selector));
+  const data = await requestJSON(
+    `/api/modules/item?path=${encodeURIComponent(filePath)}&selector=${selector}`
+  );
+  setModuleEditorReadOnly(false);
+  setModuleEditorContent(data.yaml || "", true);
+  dom.moduleEditorStatus.textContent = "";
+}
+
 async function selectModuleFile(filePath) {
   if (state.selectedModuleFile === filePath) {
     return true;
@@ -1080,6 +1244,9 @@ async function selectModuleFile(filePath) {
   dom.moduleDeleteBtn.disabled = true;
   dom.moduleSaveBtn.disabled = true;
   dom.moduleEditorStatus.textContent = "";
+  state.moduleItemSelections = {};
+  state.moduleItemOrder[filePath] = [];
+  state.lastModuleSelection = null;
   try {
     const data = await requestJSON(
       `/api/modules/file?path=${encodeURIComponent(filePath)}`
@@ -1088,6 +1255,8 @@ async function selectModuleFile(filePath) {
     setModuleEditorReadOnly(false);
     setModuleEditorContent(data.content || "", true);
     state.selectedModuleFile = data.path || filePath;
+    await loadModuleItems(state.selectedModuleFile);
+    updateModuleSelectionCount();
     dom.moduleDeleteBtn.disabled = false;
     updateModuleFileMeta();
     return true;
@@ -1103,6 +1272,15 @@ async function saveModuleFile() {
   if (!state.selectedModuleFile) {
     return;
   }
+  const selections = Object.values(state.moduleItemSelections);
+  if (selections.length === 1) {
+    await saveModuleItem(selections[0]);
+    return;
+  }
+  if (selections.length > 1) {
+    showToast("Save is available for single-item edits only.");
+    return;
+  }
   const content = getModuleEditorValue();
   dom.moduleSaveBtn.disabled = true;
   dom.moduleEditorStatus.textContent = "Saving module file...";
@@ -1115,6 +1293,35 @@ async function saveModuleFile() {
     setModuleDirty(false);
     dom.moduleEditorStatus.textContent = "Module file saved.";
     showToast("Module file saved");
+    await loadStatus();
+  } catch (err) {
+    dom.moduleEditorStatus.textContent = err.message;
+    showToast(err.message);
+  }
+}
+
+async function saveModuleItem(item) {
+  const content = getModuleEditorValue();
+  dom.moduleSaveBtn.disabled = true;
+  dom.moduleEditorStatus.textContent = "Saving module item...";
+  try {
+    await requestJSON("/api/modules/item", {
+      method: "POST",
+      body: JSON.stringify({
+        path: state.selectedModuleFile,
+        selector: item.selector,
+        yaml: content,
+      }),
+    });
+    state.moduleFileContent = content;
+    setModuleDirty(false);
+    dom.moduleEditorStatus.textContent = "Module item saved.";
+    showToast("Module item saved");
+    await loadModuleItems(state.selectedModuleFile);
+    state.moduleItemSelections = {};
+    state.lastModuleSelection = null;
+    updateModuleSelectionCount();
+    renderModuleFileList(getModuleById(state.selectedModuleId));
     await loadStatus();
   } catch (err) {
     dom.moduleEditorStatus.textContent = err.message;
