@@ -68,6 +68,8 @@ Definitions:
 - Update: write module files from domain YAML.
 - Sync: runs build and update with conflict rules (assigned modules win, unassigned changes stay
   in unassigned files).
+- Modules: Git ops pacakges, either found in /packages or one-offs found under domain folder ex: /automations/my_automation.yaml
+- Domain files: top level files created by home assistant
 
 ### Folder convention (hybrid)
 

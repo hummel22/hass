@@ -6,6 +6,7 @@ import os
 import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from watchdog.observers import Observer
 
 from . import config_store, git_ops, ha_services, settings, ssh_ops, watchers, yaml_modules
+from .fs_utils import file_hash
 
 OPTIONS = config_store.OPTIONS
 tracker = watchers.create_tracker()
@@ -336,11 +338,107 @@ async def api_ssh_test(payload: dict[str, Any] | None = Body(default=None)) -> J
     )
 
 
+async def _wait_for_file_settle(
+    path: Path,
+    previous_hash: str,
+    timeout_seconds: float = 20.0,
+    poll_interval: float = 0.5,
+) -> tuple[bool, str]:
+    """Wait for a file hash to change and then stabilize."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    last_hash = previous_hash
+    changed = False
+    while loop.time() < deadline:
+        await asyncio.sleep(poll_interval)
+        current_hash = file_hash(path)
+        if current_hash != last_hash:
+            last_hash = current_hash
+            changed = True
+            continue
+        if changed:
+            return True, current_hash
+    return False, last_hash
+
+
+async def _maybe_reconcile_automation_ids(
+    sync_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Reload automations and reconcile IDs if HA rewrites automations.yaml."""
+    changed_files = sync_result.get("changed_files") or []
+    if "automations.yaml" not in changed_files:
+        return {
+            "status": "skipped",
+            "reason": "automations.yaml was not modified by sync.",
+            "changed_files": [],
+            "warnings": [],
+            "reconciled_ids": [],
+        }
+    if not os.environ.get("SUPERVISOR_TOKEN"):
+        return {
+            "status": "skipped",
+            "reason": "Supervisor token not available; cannot reload automations.",
+            "changed_files": [],
+            "warnings": [],
+            "reconciled_ids": [],
+        }
+
+    automations_path = settings.CONFIG_DIR / "automations.yaml"
+    if not automations_path.exists():
+        return {
+            "status": "skipped",
+            "reason": "automations.yaml not found after sync.",
+            "changed_files": [],
+            "warnings": [],
+            "reconciled_ids": [],
+        }
+
+    before_hash = file_hash(automations_path)
+    await ha_services.call_service("automation", "reload")
+    changed, _after_hash = await _wait_for_file_settle(automations_path, before_hash)
+    if not changed:
+        return {
+            "status": "skipped",
+            "reason": "Automation reload did not change automations.yaml.",
+            "changed_files": [],
+            "warnings": [],
+            "reconciled_ids": [],
+        }
+
+    reconcile = yaml_modules.reconcile_automation_ids()
+    reconcile_changed = reconcile.get("changed_files") or []
+    if reconcile_changed:
+        resync = yaml_modules.sync_yaml_modules()
+        reconcile["warnings"] = reconcile.get("warnings", []) + resync.get("warnings", [])
+        reconcile["changed_files"] = sorted(
+            set(reconcile_changed) | set(resync.get("changed_files", []))
+        )
+    return reconcile
+
+
+async def _sync_modules_with_reconcile() -> dict[str, Any]:
+    """Sync YAML modules and optionally reconcile automation IDs."""
+    result = yaml_modules.sync_yaml_modules()
+    reconcile = await _maybe_reconcile_automation_ids(result)
+    if reconcile.get("status") == "skipped" and not reconcile.get("warnings"):
+        return result
+    merged_files = sorted(
+        set(result.get("changed_files", [])) | set(reconcile.get("changed_files", []))
+    )
+    merged_warnings = result.get("warnings", []) + reconcile.get("warnings", [])
+    result["changed_files"] = merged_files
+    result["warnings"] = merged_warnings
+    result["reconcile_status"] = reconcile.get("status")
+    result["reconcile_reason"] = reconcile.get("reason")
+    result["reconciled_ids"] = reconcile.get("reconciled_ids", [])
+    return result
+
+
 @app.post("/api/modules/sync")
 async def api_sync_modules() -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:
         raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
-    result = yaml_modules.sync_yaml_modules()
+    result = await _sync_modules_with_reconcile()
     return JSONResponse(result)
 
 
@@ -397,7 +495,7 @@ async def api_delete_module_file(path: str) -> JSONResponse:
 async def api_merge_automations() -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:
         raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
-    result = yaml_modules.sync_yaml_modules()
+    result = await _sync_modules_with_reconcile()
     return JSONResponse(result)
 
 
@@ -405,7 +503,7 @@ async def api_merge_automations() -> JSONResponse:
 async def api_sync_automations() -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:
         raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
-    result = yaml_modules.sync_yaml_modules()
+    result = await _sync_modules_with_reconcile()
     return JSONResponse(result)
 
 

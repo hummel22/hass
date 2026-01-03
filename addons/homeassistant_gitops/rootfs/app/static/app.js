@@ -1142,10 +1142,15 @@ async function syncModules() {
     if (!state.moduleFileDirty) {
       await loadModulesIndex();
     }
+    const reconciledCount = (data.reconciled_ids || []).length;
+    const reconcileNote = reconciledCount
+      ? ` Automation IDs reconciled (${reconciledCount}). Review and commit changes.`
+      : "";
     if (data.warnings && data.warnings.length) {
-      dom.modulesStatus.textContent = `Sync complete with warnings: ${data.warnings.join(" | ")}`;
+      dom.modulesStatus.textContent =
+        `Sync complete with warnings: ${data.warnings.join(" | ")}` + reconcileNote;
     } else {
-      dom.modulesStatus.textContent = "Sync complete.";
+      dom.modulesStatus.textContent = `Sync complete.${reconcileNote}`;
     }
   } catch (err) {
     dom.modulesStatus.textContent = err.message;

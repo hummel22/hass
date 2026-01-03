@@ -304,6 +304,15 @@ def _item_name(value: Any) -> str | None:
     return None
 
 
+def _automation_alias_id(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    alias = value.get("alias")
+    if isinstance(alias, str) and alias.strip():
+        return alias.strip()
+    return None
+
+
 def _extract_item_id(value: Any, id_field: str | None) -> str | None:
     if id_field and isinstance(value, dict):
         raw_id = value.get(id_field)
@@ -317,6 +326,21 @@ def _synthetic_id(rel_path: str, line: int | None, index: int) -> str:
     if line and line > 0:
         return f"{rel_path}:{line}"
     return f"{rel_path}:{index + 1}"
+
+
+def _ensure_unique_id(candidate: str, used_ids: set[str], fingerprint: str | None) -> str:
+    if candidate not in used_ids:
+        return candidate
+    if fingerprint:
+        augmented = f"{candidate}-{fingerprint}"
+        if augmented not in used_ids:
+            return augmented
+    suffix = 2
+    while True:
+        augmented = f"{candidate}-{suffix}"
+        if augmented not in used_ids:
+            return augmented
+        suffix += 1
 
 
 def _sanitize_lovelace_path(value: str) -> str:
@@ -423,6 +447,7 @@ def _parse_list_items(
     items: list[ModuleItem] = []
     changed = False
     exclude_keys = {spec.id_field} if spec.id_field else set()
+    used_ids: set[str] = set()
     for idx, entry in enumerate(data):
         if not isinstance(entry, dict):
             warnings.append(f"{rel_path} item {idx + 1} is not a map.")
@@ -431,13 +456,23 @@ def _parse_list_items(
         if lines and idx < len(lines):
             line = lines[idx]
         item_id = _extract_item_id(entry, spec.id_field)
-        if not item_id:
-            item_id = _synthetic_id(rel_path, line, idx)
-            if spec.key == "lovelace":
-                item_id = _sanitize_lovelace_path(item_id)
+        if item_id:
+            used_ids.add(item_id)
+        else:
+            if spec.key == "automation":
+                candidate = _automation_alias_id(entry)
+                if not candidate:
+                    candidate = _synthetic_id(rel_path, line, idx)
+                fingerprint = _fingerprint(entry, exclude_keys)
+                item_id = _ensure_unique_id(candidate, used_ids, fingerprint)
+            else:
+                item_id = _synthetic_id(rel_path, line, idx)
+                if spec.key == "lovelace":
+                    item_id = _sanitize_lovelace_path(item_id)
             if spec.id_field and spec.auto_id:
                 entry[spec.id_field] = item_id
                 changed = True
+            used_ids.add(item_id)
         fingerprint = _fingerprint(entry, exclude_keys)
         items.append(
             ModuleItem(
@@ -1378,6 +1413,104 @@ def _sync_helpers(state: dict[str, Any], warnings: list[str]) -> list[str]:
         "modules_hash": modules_hash(sorted(module_hash_paths)),
     }
     return changed_files
+
+
+def reconcile_automation_ids() -> dict[str, Any]:
+    """Align module automation IDs to HA-written IDs using fingerprint matching."""
+    warnings: list[str] = []
+    changed_files: list[str] = []
+    reconciled: list[dict[str, str]] = []
+
+    spec = next(domain for domain in YAML_MODULE_DOMAINS if domain.key == "automation")
+    if not spec.id_field:
+        return {
+            "status": "skipped",
+            "reason": "Automation domain has no id field.",
+            "changed_files": [],
+            "warnings": warnings,
+            "reconciled_ids": reconciled,
+        }
+
+    module_files = _list_module_files(spec)
+    if not module_files:
+        return {
+            "status": "skipped",
+            "reason": "No automation module files found.",
+            "changed_files": [],
+            "warnings": warnings,
+            "reconciled_ids": reconciled,
+        }
+
+    module_items_by_file: dict[str, list[ModuleItem]] = {}
+    module_items: list[ModuleItem] = []
+    for path in module_files:
+        items, _data, _injected, valid = _parse_list_module_file(path, spec, warnings)
+        if not valid:
+            continue
+        rel_path = path.relative_to(settings.CONFIG_DIR).as_posix()
+        module_items_by_file[rel_path] = items
+        module_items.extend(items)
+
+    domain_items, _domain_data, _domain_injected, domain_valid = _parse_list_domain(
+        spec, warnings
+    )
+    if not domain_valid:
+        return {
+            "status": "skipped",
+            "reason": "automations.yaml is invalid.",
+            "changed_files": [],
+            "warnings": warnings,
+            "reconciled_ids": reconciled,
+        }
+
+    module_by_fp: dict[str, list[ModuleItem]] = {}
+    for item in module_items:
+        if not item.fingerprint:
+            continue
+        module_by_fp.setdefault(item.fingerprint, []).append(item)
+
+    domain_by_fp: dict[str, list[ModuleItem]] = {}
+    for item in domain_items:
+        if not item.fingerprint:
+            continue
+        domain_by_fp.setdefault(item.fingerprint, []).append(item)
+
+    for fingerprint, module_matches in module_by_fp.items():
+        domain_matches = domain_by_fp.get(fingerprint, [])
+        if len(module_matches) == 1 and len(domain_matches) == 1:
+            module_item = module_matches[0]
+            domain_item = domain_matches[0]
+            if module_item.ha_id != domain_item.ha_id:
+                old_id = module_item.ha_id
+                module_item.data[spec.id_field] = domain_item.ha_id
+                module_item.ha_id = domain_item.ha_id
+                reconciled.append(
+                    {
+                        "old_id": old_id,
+                        "new_id": domain_item.ha_id,
+                        "source": module_item.source,
+                        "name": module_item.name or "",
+                    }
+                )
+            continue
+        if domain_matches and module_matches:
+            warnings.append(
+                "Ambiguous automation ID reconciliation for fingerprint "
+                f"{fingerprint}; skipping."
+            )
+
+    for rel_path, items in module_items_by_file.items():
+        payload = [item.data for item in sorted(items, key=lambda item: item.order)]
+        if write_yaml_if_changed(settings.CONFIG_DIR / rel_path, payload):
+            changed_files.append(rel_path)
+
+    status = "reconciled" if reconciled else "no_changes"
+    return {
+        "status": status,
+        "changed_files": changed_files,
+        "warnings": warnings,
+        "reconciled_ids": reconciled,
+    }
 
 
 def sync_yaml_modules() -> dict[str, Any]:
