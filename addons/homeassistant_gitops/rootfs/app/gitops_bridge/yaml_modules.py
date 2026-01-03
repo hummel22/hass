@@ -679,6 +679,24 @@ def _decide_preference(
     return "modules"
 
 
+def _resolve_preference(preference_override: str | None, computed: str) -> str:
+    if preference_override is None:
+        return computed
+    if preference_override not in {"modules", "domain", "mixed"}:
+        raise ValueError("Unsupported preference override.")
+    return preference_override
+
+
+def _should_write_target(write_mode: str, target: str) -> bool:
+    if write_mode == "all":
+        return True
+    if write_mode == "domain":
+        return target == "domain"
+    if write_mode == "modules":
+        return target == "modules"
+    raise ValueError("Unsupported write mode.")
+
+
 def _needs_automation_marker_migration() -> bool:
     automations_yaml = settings.CONFIG_DIR / "automations.yaml"
     automations_dir = settings.CONFIG_DIR / "automations"
@@ -704,6 +722,8 @@ def _sync_list_domain(
     state: dict[str, Any],
     warnings: list[str],
     preview: dict[str, str] | None = None,
+    preference_override: str | None = None,
+    write_mode: str = "all",
 ) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
@@ -785,6 +805,9 @@ def _sync_list_domain(
         spec.domain_file.exists() and domain_valid,
         bool(module_files),
     )
+    preference = _resolve_preference(preference_override, preference)
+    write_modules = _should_write_target(write_mode, "modules")
+    write_domain = _should_write_target(write_mode, "domain")
 
     desired_items_by_file: dict[str, list[ModuleItem]] = {rel: [] for rel in module_items_by_file}
     for entry in mapping_index.values():
@@ -830,14 +853,14 @@ def _sync_list_domain(
         if rel_path in invalid_module_files:
             continue
         payload = [item.data for item in sorted(items, key=lambda item: item.order)]
-        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
+        if write_modules and _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined: list[Any] = []
     for rel_path in sorted(desired_items_by_file.keys()):
         items = desired_items_by_file[rel_path]
         combined.extend(item.data for item in sorted(items, key=lambda item: item.order))
-    if _write_yaml(spec.domain_file, combined, preview):
+    if write_domain and _write_yaml(spec.domain_file, combined, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -867,6 +890,8 @@ def _sync_mapping_domain(
     state: dict[str, Any],
     warnings: list[str],
     preview: dict[str, str] | None = None,
+    preference_override: str | None = None,
+    write_mode: str = "all",
 ) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
@@ -945,6 +970,9 @@ def _sync_mapping_domain(
         spec.domain_file.exists() and domain_valid,
         bool(module_files),
     )
+    preference = _resolve_preference(preference_override, preference)
+    write_modules = _should_write_target(write_mode, "modules")
+    write_domain = _should_write_target(write_mode, "domain")
 
     desired_items_by_file: dict[str, list[ModuleItem]] = {rel: [] for rel in module_items_by_file}
     for entry in mapping_index.values():
@@ -992,7 +1020,7 @@ def _sync_mapping_domain(
         payload: dict[str, Any] = {
             item.ha_id: item.data for item in sorted(items, key=lambda item: item.order)
         }
-        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
+        if write_modules and _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined: dict[str, Any] = {}
@@ -1004,7 +1032,7 @@ def _sync_mapping_domain(
                 )
                 continue
             combined[item.ha_id] = item.data
-    if _write_yaml(spec.domain_file, combined, preview):
+    if write_domain and _write_yaml(spec.domain_file, combined, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -1034,6 +1062,8 @@ def _sync_lovelace_domain(
     state: dict[str, Any],
     warnings: list[str],
     preview: dict[str, str] | None = None,
+    preference_override: str | None = None,
+    write_mode: str = "all",
 ) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
@@ -1117,6 +1147,9 @@ def _sync_lovelace_domain(
         spec.domain_file.exists() and domain_valid,
         bool(module_files),
     )
+    preference = _resolve_preference(preference_override, preference)
+    write_modules = _should_write_target(write_mode, "modules")
+    write_domain = _should_write_target(write_mode, "domain")
 
     desired_items_by_file: dict[str, list[ModuleItem]] = {rel: [] for rel in lovelace_modules}
     for entry in mapping_index.values():
@@ -1186,7 +1219,7 @@ def _sync_lovelace_domain(
             payload = {"views": views_payload}
         else:
             payload = views_payload
-        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
+        if write_modules and _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined_views: list[Any] = []
@@ -1194,7 +1227,7 @@ def _sync_lovelace_domain(
         items = desired_items_by_file[rel_path]
         combined_views.extend(item.data for item in sorted(items, key=lambda item: item.order))
     domain_payload: dict[str, Any] = {"views": combined_views, **meta_payload}
-    if _write_yaml(spec.domain_file, domain_payload, preview):
+    if write_domain and _write_yaml(spec.domain_file, domain_payload, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -1223,6 +1256,8 @@ def _sync_helpers(
     state: dict[str, Any],
     warnings: list[str],
     preview: dict[str, str] | None = None,
+    preference_override: str | None = None,
+    write_mode: str = "all",
 ) -> list[str]:
     changed_files: list[str] = []
     module_files: list[Path] = []
@@ -1360,6 +1395,9 @@ def _sync_helpers(
         any((settings.CONFIG_DIR / f"{helper}.yaml").exists() for helper in HELPER_TYPES),
         bool(module_files),
     )
+    preference = _resolve_preference(preference_override, preference)
+    write_modules = _should_write_target(write_mode, "modules")
+    write_domain = _should_write_target(write_mode, "domain")
 
     desired_items_by_file: dict[str, list[ModuleItem]] = {rel: [] for rel in module_items_by_file}
     for composite_id, entry in mapping_index.items():
@@ -1413,7 +1451,7 @@ def _sync_helpers(
             payload[helper_type] = {
                 item.ha_id: item.data for item in sorted(entries, key=lambda item: item.order)
             }
-        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
+        if write_modules and _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     for helper_type in HELPER_TYPES:
@@ -1430,7 +1468,7 @@ def _sync_helpers(
                     continue
                 combined[item.ha_id] = item.data
         domain_path = settings.CONFIG_DIR / f"{helper_type}.yaml"
-        if _write_yaml(domain_path, combined, preview):
+        if write_domain and _write_yaml(domain_path, combined, preview):
             changed_files.append(domain_path.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -1557,25 +1595,117 @@ def reconcile_automation_ids() -> dict[str, Any]:
     }
 
 
+def _sync_yaml_modules_state(
+    state: dict[str, Any],
+    warnings: list[str],
+    preview: dict[str, str] | None = None,
+    preference_override: str | None = None,
+    write_mode: str = "all",
+) -> list[str]:
+    changed_files: list[str] = []
+    for spec in YAML_MODULE_DOMAINS:
+        if spec.kind == "list":
+            changed_files.extend(
+                _sync_list_domain(
+                    spec,
+                    state,
+                    warnings,
+                    preview=preview,
+                    preference_override=preference_override,
+                    write_mode=write_mode,
+                )
+            )
+        elif spec.kind == "mapping":
+            changed_files.extend(
+                _sync_mapping_domain(
+                    spec,
+                    state,
+                    warnings,
+                    preview=preview,
+                    preference_override=preference_override,
+                    write_mode=write_mode,
+                )
+            )
+        elif spec.kind == "lovelace":
+            changed_files.extend(
+                _sync_lovelace_domain(
+                    spec,
+                    state,
+                    warnings,
+                    preview=preview,
+                    preference_override=preference_override,
+                    write_mode=write_mode,
+                )
+            )
+
+    changed_files.extend(
+        _sync_helpers(
+            state,
+            warnings,
+            preview=preview,
+            preference_override=preference_override,
+            write_mode=write_mode,
+        )
+    )
+    return changed_files
+
+
 def sync_yaml_modules() -> dict[str, Any]:
     warnings: list[str] = []
     changed_files: list[str] = []
     _maybe_migrate_automation_markers(warnings)
     state, state_warnings = _load_sync_state()
     warnings.extend(state_warnings)
-
-    for spec in YAML_MODULE_DOMAINS:
-        if spec.kind == "list":
-            changed_files.extend(_sync_list_domain(spec, state, warnings))
-        elif spec.kind == "mapping":
-            changed_files.extend(_sync_mapping_domain(spec, state, warnings))
-        elif spec.kind == "lovelace":
-            changed_files.extend(_sync_lovelace_domain(spec, state, warnings))
-
-    changed_files.extend(_sync_helpers(state, warnings))
+    changed_files.extend(_sync_yaml_modules_state(state, warnings))
     _save_sync_state(state)
     return {
         "status": "synced",
+        "changed_files": sorted(set(changed_files)),
+        "warnings": warnings,
+    }
+
+
+def build_yaml_modules() -> dict[str, Any]:
+    """Build domain YAML from module files."""
+    warnings: list[str] = []
+    changed_files: list[str] = []
+    _maybe_migrate_automation_markers(warnings)
+    state, state_warnings = _load_sync_state()
+    warnings.extend(state_warnings)
+    changed_files.extend(
+        _sync_yaml_modules_state(
+            state,
+            warnings,
+            preference_override="modules",
+            write_mode="domain",
+        )
+    )
+    _save_sync_state(state)
+    return {
+        "status": "built",
+        "changed_files": sorted(set(changed_files)),
+        "warnings": warnings,
+    }
+
+
+def update_yaml_modules() -> dict[str, Any]:
+    """Update module YAML from domain files."""
+    warnings: list[str] = []
+    changed_files: list[str] = []
+    _maybe_migrate_automation_markers(warnings)
+    state, state_warnings = _load_sync_state()
+    warnings.extend(state_warnings)
+    changed_files.extend(
+        _sync_yaml_modules_state(
+            state,
+            warnings,
+            preference_override="domain",
+            write_mode="modules",
+        )
+    )
+    _save_sync_state(state)
+    return {
+        "status": "updated",
         "changed_files": sorted(set(changed_files)),
         "warnings": warnings,
     }
@@ -1627,16 +1757,7 @@ def preview_yaml_modules() -> dict[str, Any]:
         )
     state, state_warnings = _load_sync_state()
     warnings.extend(state_warnings)
-
-    for spec in YAML_MODULE_DOMAINS:
-        if spec.kind == "list":
-            _sync_list_domain(spec, state, warnings, preview=preview_writes)
-        elif spec.kind == "mapping":
-            _sync_mapping_domain(spec, state, warnings, preview=preview_writes)
-        elif spec.kind == "lovelace":
-            _sync_lovelace_domain(spec, state, warnings, preview=preview_writes)
-
-    _sync_helpers(state, warnings, preview=preview_writes)
+    _sync_yaml_modules_state(state, warnings, preview=preview_writes)
 
     domain_paths = _domain_yaml_paths()
     build_diffs: list[dict[str, Any]] = []
@@ -1661,6 +1782,145 @@ def preview_yaml_modules() -> dict[str, Any]:
         "update_diffs": update_diffs,
         "warnings": warnings,
     }
+
+
+def _plan_yaml_modules(
+    preference_override: str | None,
+    write_mode: str,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    preview_writes: dict[str, str] = {}
+    if _needs_automation_marker_migration():
+        warnings.append(
+            "Preview skipped marker-based automation migration. Run sync to apply it."
+        )
+    state, state_warnings = _load_sync_state()
+    warnings.extend(state_warnings)
+    changed_files = _sync_yaml_modules_state(
+        state,
+        warnings,
+        preview=preview_writes,
+        preference_override=preference_override,
+        write_mode=write_mode,
+    )
+    return {
+        "changed_files": sorted(set(changed_files)),
+        "warnings": warnings,
+    }
+
+
+def _dedupe_lines(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        output.append(value)
+    return output
+
+
+def validate_yaml_modules() -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "status": "ok",
+        "errors": [],
+        "warnings": [],
+        "domains": {},
+        "build": {},
+        "update": {},
+        "summary": {"errors": 0, "warnings": 0},
+    }
+
+    state, state_warnings = _load_sync_state()
+    if state_warnings:
+        report["warnings"].extend([f"sync_state: {warning}" for warning in state_warnings])
+
+    for spec in YAML_MODULE_DOMAINS:
+        domain_warnings: list[str] = []
+        domain_errors: list[str] = []
+        preview: dict[str, str] = {}
+        try:
+            if spec.kind == "list":
+                changed_files = _sync_list_domain(
+                    spec,
+                    state,
+                    domain_warnings,
+                    preview=preview,
+                    write_mode="all",
+                )
+            elif spec.kind == "mapping":
+                changed_files = _sync_mapping_domain(
+                    spec,
+                    state,
+                    domain_warnings,
+                    preview=preview,
+                    write_mode="all",
+                )
+            elif spec.kind == "lovelace":
+                changed_files = _sync_lovelace_domain(
+                    spec,
+                    state,
+                    domain_warnings,
+                    preview=preview,
+                    write_mode="all",
+                )
+            else:
+                changed_files = []
+        except Exception as exc:
+            domain_errors.append(str(exc))
+            changed_files = []
+        report["domains"][spec.key] = {
+            "warnings": domain_warnings,
+            "errors": domain_errors,
+            "changed_files": sorted(set(changed_files)),
+        }
+        report["errors"].extend([f"{spec.key}: {error}" for error in domain_errors])
+        report["warnings"].extend([f"{spec.key}: {warning}" for warning in domain_warnings])
+
+    helpers_warnings: list[str] = []
+    helpers_errors: list[str] = []
+    helpers_preview: dict[str, str] = {}
+    try:
+        helpers_changed = _sync_helpers(
+            state,
+            helpers_warnings,
+            preview=helpers_preview,
+            write_mode="all",
+        )
+    except Exception as exc:
+        helpers_errors.append(str(exc))
+        helpers_changed = []
+
+    report["domains"]["helpers"] = {
+        "warnings": helpers_warnings,
+        "errors": helpers_errors,
+        "changed_files": sorted(set(helpers_changed)),
+    }
+    report["errors"].extend([f"helpers: {error}" for error in helpers_errors])
+    report["warnings"].extend([f"helpers: {warning}" for warning in helpers_warnings])
+
+    build_plan = _plan_yaml_modules("modules", "domain")
+    update_plan = _plan_yaml_modules("domain", "modules")
+    report["build"] = {
+        "count": len(build_plan["changed_files"]),
+        "paths": build_plan["changed_files"],
+        "warnings": build_plan["warnings"],
+    }
+    report["update"] = {
+        "count": len(update_plan["changed_files"]),
+        "paths": update_plan["changed_files"],
+        "warnings": update_plan["warnings"],
+    }
+
+    report["errors"] = _dedupe_lines(report["errors"])
+    report["warnings"] = _dedupe_lines(report["warnings"])
+    report["summary"] = {
+        "errors": len(report["errors"]),
+        "warnings": len(report["warnings"]),
+    }
+    if report["errors"] or report["warnings"]:
+        report["status"] = "issues"
+    return report
 
 
 MODULE_BROWSER_DOMAINS = (

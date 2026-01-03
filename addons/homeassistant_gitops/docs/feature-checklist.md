@@ -47,10 +47,14 @@ should be updated as work lands.
 
 TODo 
 - Optional mapping file versioning: allow users to ignore `.gitops/mappings/*` in Git.
+- New info for ids
+ - view this page and the migration of yaml, it has info for ids
+ - https://www.home-assistant.io/docs/automation/yaml/
+ - If you want to migrate your manual automations to use the editor, you’ll have to copy them to automations.yaml. Make sure that automations.yaml remains a list! For each automation that you copy over, you’ll have to add an id. This can be any string as long as it’s unique.
 - GitOps templates: inject shared objects into multiple YAML locations during sync.
 - add files to .gitignore
 - export groups 
-- - support creating groups though modulescreate a dashboard to manage groups - add, delete, edit groups, 
+- support creating groups though modules, create a dashboard to manage groups - add, delete, edit groups, 
     - ignore certian groups
         - mangage only gitops groups
         - users can import a ha group to be manged be gitops, so default ignored

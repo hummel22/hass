@@ -15,7 +15,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from watchdog.observers import Observer
 
-from . import config_store, exports, git_ops, ha_services, settings, ssh_ops, watchers, yaml_modules
+from . import (
+    cli_installer,
+    config_store,
+    exports,
+    git_ops,
+    ha_services,
+    settings,
+    ssh_ops,
+    watchers,
+    yaml_modules,
+)
 from .fs_utils import file_hash
 
 OPTIONS = config_store.OPTIONS
@@ -116,6 +126,15 @@ async def api_update_config(payload: dict[str, Any] = Body(...)) -> JSONResponse
             "requires_restart": requires_restart,
         }
     )
+
+
+@app.post("/api/cli/install")
+async def api_install_cli(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    overwrite = bool(payload.get("overwrite", False))
+    try:
+        return JSONResponse(cli_installer.install_cli(overwrite=overwrite))
+    except cli_installer.CliInstallError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @app.get("/api/branches")

@@ -290,6 +290,21 @@
             <p class="note">Git user name and email are stored in the repo config used for commits.</p>
             <button id="save-config" class="btn btn-primary">Save configuration</button>
             <div id="config-status" class="note"></div>
+            <div class="settings-section">
+              <div class="section-title">CLI</div>
+              <p class="note">
+                Install the repo-local CLI into <code>.gitops/cli</code> for
+                <code>validate</code>, <code>build</code>, and <code>update</code> commands.
+              </p>
+              <label>
+                <input type="checkbox" id="cli-overwrite" />
+                Overwrite existing CLI files
+              </label>
+              <div class="button-row">
+                <button id="cli-install" class="btn">Install CLI</button>
+              </div>
+              <div id="cli-status" class="note"></div>
+            </div>
           </div>
 
           <div class="card">

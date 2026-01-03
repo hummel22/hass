@@ -98,6 +98,9 @@ const dom = {
   exportTable: document.getElementById("export-table"),
   exportConfigEntities: document.getElementById("export-config-entities"),
   exportConfigOther: document.getElementById("export-config-other"),
+  cliInstallBtn: document.getElementById("cli-install"),
+  cliOverwrite: document.getElementById("cli-overwrite"),
+  cliStatus: document.getElementById("cli-status"),
   toast: document.getElementById("toast"),
 };
 
@@ -754,6 +757,32 @@ async function saveConfig() {
     await loadStatus();
   } catch (err) {
     dom.configStatus.textContent = err.message;
+  }
+}
+
+async function installCli() {
+  if (!dom.cliInstallBtn) {
+    return;
+  }
+  const overwrite = Boolean(dom.cliOverwrite && dom.cliOverwrite.checked);
+  if (dom.cliStatus) {
+    dom.cliStatus.textContent = "Installing CLI...";
+  }
+  try {
+    const data = await requestJSON("/api/cli/install", {
+      method: "POST",
+      body: JSON.stringify({ overwrite }),
+    });
+    if (dom.cliStatus) {
+      dom.cliStatus.textContent = `CLI installed in ${data.path}.`;
+    }
+    showToast("CLI installed");
+    await loadStatus();
+  } catch (err) {
+    if (dom.cliStatus) {
+      dom.cliStatus.textContent = err.message;
+    }
+    showToast(err.message);
   }
 }
 
@@ -2038,6 +2067,9 @@ function bindEvents() {
   dom.resetCommit.addEventListener("click", resetToCommit);
 
   dom.saveConfig.addEventListener("click", saveConfig);
+  if (dom.cliInstallBtn) {
+    dom.cliInstallBtn.addEventListener("click", installCli);
+  }
   dom.sshGenerateBtn.addEventListener("click", generateSshKey);
   dom.sshLoadBtn.addEventListener("click", loadPublicKey);
   dom.sshTestBtn.addEventListener("click", testSshKey);

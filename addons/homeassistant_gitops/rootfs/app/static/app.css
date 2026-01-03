@@ -330,6 +330,19 @@ button.tab-btn {
   margin-bottom: 16px;
 }
 
+.settings-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-title {
+  font-weight: 600;
+}
+
 .segmented {
   display: inline-flex;
   background: var(--surface-strong);
