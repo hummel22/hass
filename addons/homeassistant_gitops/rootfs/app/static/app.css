@@ -542,6 +542,26 @@ button.tab-btn {
   margin-top: 4px;
 }
 
+.module-preview-card {
+  margin-top: 20px;
+}
+
+.module-preview-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.module-preview-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.module-preview-section .diff-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
 pre {
   background: var(--surface-strong);
   border: 1px solid var(--border);

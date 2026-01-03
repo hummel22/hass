@@ -134,6 +134,7 @@
             <div class="module-sidebar-footer">
               <p id="modules-status" class="note"></p>
               <div class="button-row">
+                <button id="modules-preview-btn" class="btn">Preview sync</button>
                 <button id="modules-sync-btn" class="btn btn-primary">Sync modules</button>
               </div>
             </div>
@@ -154,6 +155,25 @@
             </div>
             <div id="module-editor-status" class="note"></div>
           </section>
+        </div>
+
+        <div class="card module-preview-card">
+          <div class="card-header">Preview Sync</div>
+          <p class="note">
+            Preview shows the YAML changes that sync would apply. It includes HA-facing YAML only
+            and skips GitOps state files and exports.
+          </p>
+          <div class="module-preview-grid">
+            <div class="module-preview-section">
+              <div class="module-preview-title">Build (modules → domain)</div>
+              <div id="modules-preview-build" class="diff-list"></div>
+            </div>
+            <div class="module-preview-section">
+              <div class="module-preview-title">Update (domain → modules/one-offs)</div>
+              <div id="modules-preview-update" class="diff-list"></div>
+            </div>
+          </div>
+          <div id="modules-preview-status" class="note"></div>
         </div>
       </section>
 

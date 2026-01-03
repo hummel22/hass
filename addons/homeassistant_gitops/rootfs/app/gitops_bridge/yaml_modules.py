@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 from dataclasses import dataclass
@@ -380,7 +381,9 @@ def _load_sync_state() -> tuple[dict[str, Any], list[str]]:
     return data, []
 
 
-def _save_sync_state(state: dict[str, Any]) -> None:
+def _save_sync_state(state: dict[str, Any], preview: bool = False) -> None:
+    if preview:
+        return
     ensure_gitops_dirs()
     settings.SYNC_STATE_PATH.write_text(yaml_dump(state), encoding="utf-8")
 
@@ -419,10 +422,25 @@ def _load_mapping(domain_key: str, unassigned_rel: str) -> tuple[dict[str, Any],
     return data, []
 
 
-def _save_mapping(domain_key: str, mapping: dict[str, Any]) -> None:
+def _save_mapping(domain_key: str, mapping: dict[str, Any], preview: bool = False) -> None:
+    if preview:
+        return
     ensure_gitops_dirs()
     path = _mapping_path(domain_key)
     path.write_text(yaml_dump(mapping), encoding="utf-8")
+
+
+def _write_yaml(path: Path, data: Any, preview: dict[str, str] | None) -> bool:
+    rendered = yaml_dump(data)
+    if rendered == read_text(path):
+        return False
+    if preview is not None:
+        rel_path = path.relative_to(settings.CONFIG_DIR).as_posix()
+        preview[rel_path] = rendered
+        return True
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rendered, encoding="utf-8")
+    return True
 
 
 def _mapping_entry_key(entry: dict[str, Any]) -> str:
@@ -660,21 +678,32 @@ def _decide_preference(
     return "modules"
 
 
-def _maybe_migrate_automation_markers(warnings: list[str]) -> None:
+def _needs_automation_marker_migration() -> bool:
     automations_yaml = settings.CONFIG_DIR / "automations.yaml"
     automations_dir = settings.CONFIG_DIR / "automations"
     if not automations_yaml.exists():
-        return
+        return False
     if automations_dir.exists() and list(automations_dir.glob("*.y*ml")):
-        return
+        return False
     if "# BEGIN automations/" not in read_text(automations_yaml):
+        return False
+    return True
+
+
+def _maybe_migrate_automation_markers(warnings: list[str]) -> None:
+    if not _needs_automation_marker_migration():
         return
     updated = update_source_from_markers()
     if updated:
         warnings.append("Migrated marker-based automations into module files.")
 
 
-def _sync_list_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[str]) -> list[str]:
+def _sync_list_domain(
+    spec: DomainSpec,
+    state: dict[str, Any],
+    warnings: list[str],
+    preview: dict[str, str] | None = None,
+) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
     module_items_by_file: dict[str, list[ModuleItem]] = {}
@@ -800,14 +829,14 @@ def _sync_list_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[st
         if rel_path in invalid_module_files:
             continue
         payload = [item.data for item in sorted(items, key=lambda item: item.order)]
-        if write_yaml_if_changed(settings.CONFIG_DIR / rel_path, payload):
+        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined: list[Any] = []
     for rel_path in sorted(desired_items_by_file.keys()):
         items = desired_items_by_file[rel_path]
         combined.extend(item.data for item in sorted(items, key=lambda item: item.order))
-    if write_yaml_if_changed(spec.domain_file, combined):
+    if _write_yaml(spec.domain_file, combined, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -821,7 +850,7 @@ def _sync_list_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[st
             entries.append(entry)
     entries.sort(key=lambda entry: entry.get("id") or "")
     mapping["entries"] = entries
-    _save_mapping(spec.key, mapping)
+    _save_mapping(spec.key, mapping, preview=preview is not None)
 
     module_hash_paths = {Path(path) for path in module_files}
     module_hash_paths.update(settings.CONFIG_DIR / rel for rel in desired_items_by_file)
@@ -832,7 +861,12 @@ def _sync_list_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[st
     return changed_files
 
 
-def _sync_mapping_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[str]) -> list[str]:
+def _sync_mapping_domain(
+    spec: DomainSpec,
+    state: dict[str, Any],
+    warnings: list[str],
+    preview: dict[str, str] | None = None,
+) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
     module_items_by_file: dict[str, list[ModuleItem]] = {}
@@ -957,7 +991,7 @@ def _sync_mapping_domain(spec: DomainSpec, state: dict[str, Any], warnings: list
         payload: dict[str, Any] = {
             item.ha_id: item.data for item in sorted(items, key=lambda item: item.order)
         }
-        if write_yaml_if_changed(settings.CONFIG_DIR / rel_path, payload):
+        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined: dict[str, Any] = {}
@@ -969,7 +1003,7 @@ def _sync_mapping_domain(spec: DomainSpec, state: dict[str, Any], warnings: list
                 )
                 continue
             combined[item.ha_id] = item.data
-    if write_yaml_if_changed(spec.domain_file, combined):
+    if _write_yaml(spec.domain_file, combined, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -983,7 +1017,7 @@ def _sync_mapping_domain(spec: DomainSpec, state: dict[str, Any], warnings: list
             entries.append(entry)
     entries.sort(key=lambda entry: entry.get("id") or "")
     mapping["entries"] = entries
-    _save_mapping(spec.key, mapping)
+    _save_mapping(spec.key, mapping, preview=preview is not None)
 
     module_hash_paths = {Path(path) for path in module_files}
     module_hash_paths.update(settings.CONFIG_DIR / rel for rel in desired_items_by_file)
@@ -994,7 +1028,12 @@ def _sync_mapping_domain(spec: DomainSpec, state: dict[str, Any], warnings: list
     return changed_files
 
 
-def _sync_lovelace_domain(spec: DomainSpec, state: dict[str, Any], warnings: list[str]) -> list[str]:
+def _sync_lovelace_domain(
+    spec: DomainSpec,
+    state: dict[str, Any],
+    warnings: list[str],
+    preview: dict[str, str] | None = None,
+) -> list[str]:
     changed_files: list[str] = []
     module_files = _list_module_files(spec)
     lovelace_modules: dict[str, LovelaceModule] = {}
@@ -1146,7 +1185,7 @@ def _sync_lovelace_domain(spec: DomainSpec, state: dict[str, Any], warnings: lis
             payload = {"views": views_payload}
         else:
             payload = views_payload
-        if write_yaml_if_changed(settings.CONFIG_DIR / rel_path, payload):
+        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     combined_views: list[Any] = []
@@ -1154,7 +1193,7 @@ def _sync_lovelace_domain(spec: DomainSpec, state: dict[str, Any], warnings: lis
         items = desired_items_by_file[rel_path]
         combined_views.extend(item.data for item in sorted(items, key=lambda item: item.order))
     domain_payload: dict[str, Any] = {"views": combined_views, **meta_payload}
-    if write_yaml_if_changed(spec.domain_file, domain_payload):
+    if _write_yaml(spec.domain_file, domain_payload, preview):
         changed_files.append(spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -1168,7 +1207,7 @@ def _sync_lovelace_domain(spec: DomainSpec, state: dict[str, Any], warnings: lis
             entries.append(entry)
     entries.sort(key=lambda entry: entry.get("id") or "")
     mapping["entries"] = entries
-    _save_mapping(spec.key, mapping)
+    _save_mapping(spec.key, mapping, preview=preview is not None)
 
     module_hash_paths = {Path(path) for path in module_files}
     module_hash_paths.update(settings.CONFIG_DIR / rel for rel in desired_items_by_file)
@@ -1179,7 +1218,11 @@ def _sync_lovelace_domain(spec: DomainSpec, state: dict[str, Any], warnings: lis
     return changed_files
 
 
-def _sync_helpers(state: dict[str, Any], warnings: list[str]) -> list[str]:
+def _sync_helpers(
+    state: dict[str, Any],
+    warnings: list[str],
+    preview: dict[str, str] | None = None,
+) -> list[str]:
     changed_files: list[str] = []
     module_files: list[Path] = []
     if settings.PACKAGES_DIR.exists():
@@ -1369,7 +1412,7 @@ def _sync_helpers(state: dict[str, Any], warnings: list[str]) -> list[str]:
             payload[helper_type] = {
                 item.ha_id: item.data for item in sorted(entries, key=lambda item: item.order)
             }
-        if write_yaml_if_changed(settings.CONFIG_DIR / rel_path, payload):
+        if _write_yaml(settings.CONFIG_DIR / rel_path, payload, preview):
             changed_files.append(rel_path)
 
     for helper_type in HELPER_TYPES:
@@ -1386,7 +1429,7 @@ def _sync_helpers(state: dict[str, Any], warnings: list[str]) -> list[str]:
                     continue
                 combined[item.ha_id] = item.data
         domain_path = settings.CONFIG_DIR / f"{helper_type}.yaml"
-        if write_yaml_if_changed(domain_path, combined):
+        if _write_yaml(domain_path, combined, preview):
             changed_files.append(domain_path.relative_to(settings.CONFIG_DIR).as_posix())
 
     entries: list[dict[str, Any]] = []
@@ -1404,7 +1447,7 @@ def _sync_helpers(state: dict[str, Any], warnings: list[str]) -> list[str]:
             entries.append(entry)
     entries.sort(key=lambda entry: (entry.get("helper_type") or "", entry.get("id") or ""))
     mapping["entries"] = entries
-    _save_mapping(HELPERS_DOMAIN_KEY, mapping)
+    _save_mapping(HELPERS_DOMAIN_KEY, mapping, preview=preview is not None)
 
     module_hash_paths = {Path(path) for path in module_files}
     module_hash_paths.update(settings.CONFIG_DIR / rel for rel in desired_items_by_file)
@@ -1533,6 +1576,88 @@ def sync_yaml_modules() -> dict[str, Any]:
     return {
         "status": "synced",
         "changed_files": sorted(set(changed_files)),
+        "warnings": warnings,
+    }
+
+
+def _domain_yaml_paths() -> set[str]:
+    paths = {
+        spec.domain_file.relative_to(settings.CONFIG_DIR).as_posix()
+        for spec in YAML_MODULE_DOMAINS
+    }
+    paths.update(f"{helper}.yaml" for helper in HELPER_TYPES)
+    return paths
+
+
+def _is_preview_path(rel_path: str) -> bool:
+    if rel_path.startswith(".gitops/"):
+        return False
+    if rel_path.startswith("system/"):
+        return False
+    return rel_path.endswith((".yaml", ".yml"))
+
+
+def _build_preview_diff(rel_path: str, new_content: str) -> str:
+    old_content = read_text(settings.CONFIG_DIR / rel_path)
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    diff_lines = list(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{rel_path}",
+            tofile=f"b/{rel_path}",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return ""
+    diff_text = "\n".join(diff_lines)
+    return f"diff --git a/{rel_path} b/{rel_path}\n{diff_text}\n"
+
+
+def preview_yaml_modules() -> dict[str, Any]:
+    """Return diffs for a YAML Modules sync without writing files."""
+    warnings: list[str] = []
+    preview_writes: dict[str, str] = {}
+    if _needs_automation_marker_migration():
+        warnings.append(
+            "Preview skipped marker-based automation migration. Run sync to apply it."
+        )
+    state, state_warnings = _load_sync_state()
+    warnings.extend(state_warnings)
+
+    for spec in YAML_MODULE_DOMAINS:
+        if spec.kind == "list":
+            _sync_list_domain(spec, state, warnings, preview=preview_writes)
+        elif spec.kind == "mapping":
+            _sync_mapping_domain(spec, state, warnings, preview=preview_writes)
+        elif spec.kind == "lovelace":
+            _sync_lovelace_domain(spec, state, warnings, preview=preview_writes)
+
+    _sync_helpers(state, warnings, preview=preview_writes)
+
+    domain_paths = _domain_yaml_paths()
+    build_diffs: list[dict[str, Any]] = []
+    update_diffs: list[dict[str, Any]] = []
+    for rel_path, new_content in preview_writes.items():
+        if not _is_preview_path(rel_path):
+            continue
+        diff = _build_preview_diff(rel_path, new_content)
+        if not diff.strip():
+            continue
+        entry = {"path": rel_path, "diff": diff}
+        if rel_path in domain_paths:
+            build_diffs.append(entry)
+        else:
+            update_diffs.append(entry)
+
+    build_diffs.sort(key=lambda item: item["path"])
+    update_diffs.sort(key=lambda item: item["path"])
+    return {
+        "status": "preview",
+        "build_diffs": build_diffs,
+        "update_diffs": update_diffs,
         "warnings": warnings,
     }
 

@@ -442,6 +442,14 @@ async def api_sync_modules() -> JSONResponse:
     return JSONResponse(result)
 
 
+@app.post("/api/modules/preview")
+async def api_preview_modules() -> JSONResponse:
+    if not OPTIONS.yaml_modules_enabled:
+        raise HTTPException(status_code=400, detail="YAML Modules sync is disabled")
+    result = yaml_modules.preview_yaml_modules()
+    return JSONResponse(result)
+
+
 @app.get("/api/modules/index")
 async def api_modules_index() -> JSONResponse:
     if not OPTIONS.yaml_modules_enabled:

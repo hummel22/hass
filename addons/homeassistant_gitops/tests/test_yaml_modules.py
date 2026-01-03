@@ -237,3 +237,27 @@ def test_sync_helpers_split_to_domain_files(tmp_path: Path) -> None:
     )
     assert "kitchen_motion" in input_boolean
     assert "wake_time" in input_datetime
+
+
+def test_preview_yaml_modules_separates_build_and_update(tmp_path: Path) -> None:
+    _, config_dir = load_main(tmp_path)
+
+    write_yaml(
+        config_dir / "packages/wakeup/automation.yaml",
+        [{"alias": "Wake up", "trigger": [], "action": []}],
+    )
+    write_yaml(
+        config_dir / "automations.yaml",
+        [{"alias": "UI only", "trigger": [], "action": []}],
+    )
+
+    yaml_modules = get_yaml_modules_module()
+    preview = yaml_modules.preview_yaml_modules()
+
+    build_paths = {entry["path"] for entry in preview["build_diffs"]}
+    update_paths = {entry["path"] for entry in preview["update_diffs"]}
+
+    assert "automations.yaml" in build_paths
+    assert "automations/automations.unassigned.yaml" in update_paths
+    assert all(not path.startswith(".gitops/") for path in build_paths | update_paths)
+    assert all(not path.startswith("system/") for path in build_paths | update_paths)

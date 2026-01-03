@@ -59,6 +59,10 @@ const dom = {
   sshTestStatus: document.getElementById("ssh-test-status"),
   modulesStatus: document.getElementById("modules-status"),
   modulesSyncBtn: document.getElementById("modules-sync-btn"),
+  modulesPreviewBtn: document.getElementById("modules-preview-btn"),
+  modulesPreviewBuild: document.getElementById("modules-preview-build"),
+  modulesPreviewUpdate: document.getElementById("modules-preview-update"),
+  modulesPreviewStatus: document.getElementById("modules-preview-status"),
   moduleSelect: document.getElementById("module-select"),
   moduleFileList: document.getElementById("module-file-list"),
   moduleFileMeta: document.getElementById("module-file-meta"),
@@ -188,6 +192,9 @@ function updateModulesStatus(enabled) {
     ? "YAML Modules sync is enabled."
     : "YAML Modules sync is disabled in add-on options.";
   dom.modulesSyncBtn.disabled = !enabled;
+  if (dom.modulesPreviewBtn) {
+    dom.modulesPreviewBtn.disabled = !enabled;
+  }
 }
 
 function renderSummaryItem(label, value) {
@@ -1167,6 +1174,85 @@ async function syncModules() {
   }
 }
 
+function renderPreviewList(container, diffs, emptyMessage) {
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  if (!diffs.length) {
+    container.innerHTML = `<div class="diff-placeholder">${emptyMessage}</div>`;
+    return;
+  }
+  diffs.forEach((entry) => {
+    container.append(createPreviewDiffCard(entry));
+  });
+}
+
+function createPreviewDiffCard(entry) {
+  const details = document.createElement("details");
+  details.className = "diff-card";
+
+  const summary = document.createElement("summary");
+  const title = document.createElement("div");
+  title.className = "diff-title";
+  const fileLine = document.createElement("div");
+  fileLine.textContent = entry.path || "Unknown file";
+  title.append(fileLine);
+  summary.append(title);
+  details.append(summary);
+
+  const body = document.createElement("div");
+  body.className = "diff-body";
+  if (!entry.diff || !entry.diff.trim()) {
+    body.innerHTML = "<div class=\"diff-placeholder\">No diff available.</div>";
+  } else if (!window.Diff2Html || typeof window.Diff2Html.html !== "function") {
+    body.innerHTML = "<div class=\"diff-placeholder\">Diff viewer failed to load.</div>";
+  } else {
+    body.innerHTML = Diff2Html.html(entry.diff, {
+      inputFormat: "diff",
+      outputFormat: "side-by-side",
+      drawFileList: false,
+      matching: "lines",
+    });
+  }
+  details.append(body);
+  return details;
+}
+
+async function previewModules() {
+  if (dom.modulesPreviewStatus) {
+    dom.modulesPreviewStatus.textContent = "Generating preview...";
+  }
+  renderPreviewList(dom.modulesPreviewBuild, [], "Loading preview...");
+  renderPreviewList(dom.modulesPreviewUpdate, [], "Loading preview...");
+  try {
+    const data = await requestJSON("/api/modules/preview", { method: "POST" });
+    renderPreviewList(
+      dom.modulesPreviewBuild,
+      data.build_diffs || [],
+      "No domain file changes."
+    );
+    renderPreviewList(
+      dom.modulesPreviewUpdate,
+      data.update_diffs || [],
+      "No module file changes."
+    );
+    if (dom.modulesPreviewStatus) {
+      if (data.warnings && data.warnings.length) {
+        dom.modulesPreviewStatus.textContent =
+          `Preview complete with warnings: ${data.warnings.join(" | ")}`;
+      } else {
+        dom.modulesPreviewStatus.textContent = "Preview complete.";
+      }
+    }
+  } catch (err) {
+    if (dom.modulesPreviewStatus) {
+      dom.modulesPreviewStatus.textContent = err.message;
+    }
+    showToast(err.message);
+  }
+}
+
 function bindEvents() {
   qsa(".tab-btn[data-tab]").forEach((btn) => {
     btn.addEventListener("click", () => setTab(btn.dataset.tab));
@@ -1217,6 +1303,9 @@ function bindEvents() {
   dom.sshLoadBtn.addEventListener("click", loadPublicKey);
   dom.sshTestBtn.addEventListener("click", testSshKey);
   dom.modulesSyncBtn.addEventListener("click", syncModules);
+  if (dom.modulesPreviewBtn) {
+    dom.modulesPreviewBtn.addEventListener("click", previewModules);
+  }
   dom.moduleSelect.addEventListener("change", (event) => {
     const nextId = event.target.value;
     if (!confirmDiscardModuleChanges()) {
