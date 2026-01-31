@@ -3,175 +3,210 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HASS Helper</title>
+    <title>Home Assistant MQTT Console</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+      integrity="sha384-tVbdD2qirSl3PZ4qAfOVzpFYO5RujfrxLEj8tyDsfvqPXeWjKqjodP0Z5N7XNTEz"
+      crossorigin="anonymous"
+    ></script>
+    <script defer src="/static/app.js"></script>
   </head>
   <body>
-    <header>
-      <h1>Home Assistant Entity Helper</h1>
-      <p class="subtitle">Manage integrations, entity ingest, and curation lists.</p>
+    <header class="app-header">
+      <nav class="menu" aria-label="Primary">
+        <div class="menu-brand">MQTT Entity Studio</div>
+        <ul class="menu-links">
+          <li><a href="#mqtt-card">MQTT</a></li>
+          <li><a href="#entities-card">Entities</a></li>
+          <li><a href="#entity-detail-card">History</a></li>
+        </ul>
+      </nav>
     </header>
-    <main>
-      <div
-        id="toast"
-        class="toast"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        hidden
-      >
+    <main class="page">
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden>
         <span class="toast-message"></span>
-        <button type="button" class="toast-close" aria-label="Dismiss notification">
-          &times;
-        </button>
+        <button type="button" class="toast-close" aria-label="Dismiss notification">&times;</button>
       </div>
-      <section id="entity-tab">
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Domains</h2>
-            <div class="panel-actions">
-              <button id="refresh-domains" class="secondary">Refresh</button>
-              <button id="add-domain" class="primary">Add domain</button>
+      <section class="hero">
+        <h1>Home Assistant MQTT Console</h1>
+        <p>
+          Configure your Mosquitto broker, curate entities, and publish custom telemetry from a
+          single minimal dashboard.
+        </p>
+      </section>
+      <section class="grid layout">
+        <article class="card" id="mqtt-card">
+          <div class="card-header">
+            <h2>MQTT connection</h2>
+            <button type="button" class="ghost" id="test-mqtt">Test connection</button>
+          </div>
+          <p class="muted">
+            The Mosquitto broker add-on and the MQTT integration must be enabled in Home Assistant.
+            Store the credentials here so they are available whenever you publish data.
+          </p>
+          <form id="mqtt-form" class="form-grid" autocomplete="off">
+            <div class="field">
+              <label for="mqtt-host">Broker host</label>
+              <input id="mqtt-host" name="host" type="text" required placeholder="homeassistant.local" />
             </div>
-          </div>
-          <p>
-            The domains listed below determine which integrations are queried when ingesting
-            entities and devices. Add additional domains to include their entities in the export.
-          </p>
-          <table id="domains-table">
-            <thead>
-              <tr>
-                <th>Domain</th>
-                <th>Display name</th>
-                <th class="actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Blacklist</h2>
-          </div>
-          <p>
-            Entities and devices in the blacklist will be excluded from ingested data. Whitelisted
-            entities always override blacklist entries.
-          </p>
-          <form id="blacklist-form" class="inline">
-            <select name="targetType" aria-label="Blacklist target type">
-              <option value="entity">Entity</option>
-              <option value="device">Device</option>
-            </select>
-            <input
-              type="text"
-              name="targetId"
-              placeholder="Entity or device ID"
-              aria-label="Blacklist target ID"
-              required
-            />
-            <button type="submit" class="primary">Add to blacklist</button>
+            <div class="field">
+              <label for="mqtt-port">Port</label>
+              <input id="mqtt-port" name="port" type="number" min="1" max="65535" value="1883" />
+            </div>
+            <div class="field">
+              <label for="mqtt-username">Username</label>
+              <input id="mqtt-username" name="username" type="text" placeholder="mqtt-user" />
+            </div>
+            <div class="field">
+              <label for="mqtt-password">Password</label>
+              <input id="mqtt-password" name="password" type="password" autocomplete="new-password" />
+            </div>
+            <div class="field">
+              <label for="mqtt-client">Client ID</label>
+              <input id="mqtt-client" name="client_id" type="text" placeholder="hass-helper" />
+            </div>
+            <div class="field">
+              <label for="mqtt-prefix">Topic prefix</label>
+              <input id="mqtt-prefix" name="topic_prefix" type="text" placeholder="homeassistant/custom" />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary" id="save-mqtt">Save configuration</button>
+            </div>
           </form>
-          <div class="grid two">
-            <div>
-              <h3>Entity IDs</h3>
-              <table id="blacklist-entities">
-                <thead>
-                  <tr>
-                    <th>Entity ID</th>
-                    <th class="actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div>
-              <h3>Device IDs</h3>
-              <table id="blacklist-devices">
-                <thead>
-                  <tr>
-                    <th>Device ID</th>
-                    <th class="actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
         </article>
 
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Whitelist</h2>
+        <article class="card" id="entities-card">
+          <div class="card-header">
+            <h2>Managed entities</h2>
+            <button type="button" class="ghost" id="refresh-entities">Refresh</button>
           </div>
-          <p>
-            Whitelist specific entities to include them even if they are otherwise filtered or
-            blacklisted by device.
+          <p class="muted">
+            These entities will publish new data points to MQTT using the configuration above. Select
+            an entry to review its details, edit metadata, or publish a sample value.
           </p>
-          <form id="whitelist-form" class="inline">
-            <input
-              type="text"
-              name="entityId"
-              placeholder="Entity ID"
-              aria-label="Whitelist entity ID"
-              required
-            />
-            <button type="submit" class="primary">Add to whitelist</button>
+          <ul id="entity-list" class="entity-list" role="list"></ul>
+        </article>
+
+        <article class="card" id="entity-create-card">
+          <div class="card-header">
+            <h2>Create a new entity</h2>
+          </div>
+          <form id="entity-create-form" class="form-grid" autocomplete="off">
+            <div class="field">
+              <label for="create-name">Name</label>
+              <input id="create-name" name="name" type="text" required placeholder="Living room temperature" />
+            </div>
+            <div class="field">
+              <label for="create-entity-id">Entity ID</label>
+              <input
+                id="create-entity-id"
+                name="entity_id"
+                type="text"
+                required
+                placeholder="sensor.living_room_temperature"
+              />
+            </div>
+            <div class="field">
+              <label for="create-data-type">Data type</label>
+              <input id="create-data-type" name="data_type" type="text" placeholder="number" />
+            </div>
+            <div class="field">
+              <label for="create-unit">Unit of measurement</label>
+              <input id="create-unit" name="unit_of_measurement" type="text" placeholder="°C" />
+            </div>
+            <div class="field">
+              <label for="create-device-class">Device class</label>
+              <input id="create-device-class" name="device_class" type="text" placeholder="temperature" />
+            </div>
+            <div class="field">
+              <label for="create-state-class">State class</label>
+              <input id="create-state-class" name="state_class" type="text" placeholder="measurement" />
+            </div>
+            <div class="field">
+              <label for="create-icon">Icon</label>
+              <input id="create-icon" name="icon" type="text" placeholder="mdi:thermometer" />
+            </div>
+            <div class="field">
+              <label for="create-topic">MQTT topic</label>
+              <input id="create-topic" name="topic" type="text" placeholder="homeassistant/custom/sensor" />
+            </div>
+            <div class="field field--full">
+              <label for="create-description">Description</label>
+              <textarea id="create-description" name="description" rows="2" placeholder="Notes for this entity"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary">Create entity</button>
+            </div>
           </form>
-          <table id="whitelist-table">
-            <thead>
-              <tr>
-                <th>Entity ID</th>
-                <th class="actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
         </article>
 
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Entities</h2>
-            <div class="panel-actions">
-              <button id="load-entities" class="secondary">Load stored data</button>
-              <button id="ingest-entities" class="primary">Refresh from Home Assistant</button>
+        <article class="card" id="entity-detail-card" hidden>
+          <div class="card-header">
+            <div>
+              <h2 id="entity-detail-title">Entity details</h2>
+              <p id="entity-detail-subtitle" class="muted"></p>
             </div>
+            <button type="button" class="ghost danger" id="delete-entity">Delete</button>
           </div>
-          <p>
-            The table below reflects the most recent ingest results filtered by the integration and
-            curation settings above.
-          </p>
-          <small class="muted" id="entity-count"></small>
-          <table id="entities-table">
-            <thead>
-              <tr>
-                <th class="icon-col" scope="col">Blacklist</th>
-                <th scope="col">Device</th>
-                <th scope="col">Entity Name</th>
-                <th scope="col">Integration</th>
-                <th scope="col">Unit</th>
-                <th scope="col">Area</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <form id="entity-edit-form" class="form-grid" autocomplete="off">
+            <div class="field">
+              <label for="edit-name">Name</label>
+              <input id="edit-name" name="name" type="text" required />
+            </div>
+            <div class="field">
+              <label for="edit-entity-id">Entity ID</label>
+              <input id="edit-entity-id" name="entity_id" type="text" required />
+            </div>
+            <div class="field">
+              <label for="edit-data-type">Data type</label>
+              <input id="edit-data-type" name="data_type" type="text" />
+            </div>
+            <div class="field">
+              <label for="edit-unit">Unit of measurement</label>
+              <input id="edit-unit" name="unit_of_measurement" type="text" />
+            </div>
+            <div class="field">
+              <label for="edit-device-class">Device class</label>
+              <input id="edit-device-class" name="device_class" type="text" />
+            </div>
+            <div class="field">
+              <label for="edit-state-class">State class</label>
+              <input id="edit-state-class" name="state_class" type="text" />
+            </div>
+            <div class="field">
+              <label for="edit-icon">Icon</label>
+              <input id="edit-icon" name="icon" type="text" />
+            </div>
+            <div class="field">
+              <label for="edit-topic">MQTT topic</label>
+              <input id="edit-topic" name="topic" type="text" />
+            </div>
+            <div class="field field--full">
+              <label for="edit-description">Description</label>
+              <textarea id="edit-description" name="description" rows="2"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary">Save changes</button>
+            </div>
+          </form>
+          <section class="history">
+            <div class="history-header">
+              <h3>Recent data</h3>
+              <span id="history-empty" class="muted" hidden>No data points have been recorded yet.</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="history-chart" height="220"></canvas>
+            </div>
+            <form id="entity-data-form" class="inline-form">
+              <label class="sr-only" for="data-value">Data value</label>
+              <input id="data-value" name="value" type="text" required placeholder="Enter a value" />
+              <button type="submit" class="primary">Send to MQTT</button>
+            </form>
+          </section>
         </article>
       </section>
     </main>
-
-    <div class="modal" id="domain-modal" role="dialog" aria-modal="true" aria-hidden="true">
-      <div class="modal-content">
-        <h3>Select a domain</h3>
-        <p>Select a Home Assistant domain to add to the ingest list.</p>
-        <label for="domain-select" class="muted">Available domains</label>
-        <select id="domain-select"></select>
-        <div class="modal-actions">
-          <button id="cancel-domain" class="secondary">Cancel</button>
-          <button id="confirm-domain" class="primary">Add</button>
-        </div>
-      </div>
-    </div>
-
-    <script type="module" src="/static/app.js"></script>
   </body>
 </html>
