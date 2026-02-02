@@ -38,6 +38,14 @@ Set up Aqara button triggers and toggle different targets for single, double, an
 
 [![Import Aqara Button Toggle Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_button_toggle.yaml)
 
+## Aqara 4-way switch action mapper
+
+Map each of the 1-4 single, double, and hold actions from the Aqara 4-way switch to a toggle,
+turn on, turn off, color set, or custom action. Leave an action set to \"No action\" to make it
+a no-op.
+
+[![Import Aqara 4-way Switch Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_4way_switch_actions.yaml)
+
 ## Aqara Cube Pro per-side light control
 
 Uses Aqara Cube Pro MQTT device actions to control per-side lights. Tap toggles the configured
