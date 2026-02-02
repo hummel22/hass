@@ -1,23 +1,24 @@
 blueprint:
   name: Aqara 4-Way Switch — Map action to toggle/on/off/color/custom
   description: >
-    Map Aqara 4-way switch button actions (1-4 single/double/hold) to a selected
-    operation: toggle, turn on, turn off, set a color, or run a custom action.
-    Leave any action set to "No action" to treat it as a no-op.
+    Select the Aqara 4-way switch device and map button actions (1-4
+    single/double/hold) to a selected operation: toggle, turn on, turn off,
+    set a color, or run a custom action. Leave any action set to "No action"
+    to treat it as a no-op.
   domain: automation
 
   input:
-    button_triggers:
-      name: Button triggers
+    switch_device:
+      name: Aqara 4-way switch device
       description: >
-        Add the device triggers for the Aqara 4-way switch. The blueprint
-        resolves actions from the trigger payload/subtype such as "1_single",
-        "2_double", or "4_hold".
+        Select the Aqara 4-way switch device. The blueprint automatically
+        listens for the 1-4 single, double, and hold actions.
       selector:
-        trigger:
+        device: {}
 
     action_1_single_mode:
       name: Button 1 single — Mode
+      description: Configure the action for Button 1 single press.
       default: none
       selector:
         select:
@@ -52,126 +53,6 @@ blueprint:
         color_rgb: {}
     action_1_single_custom:
       name: Button 1 single — Custom action
-      default: []
-      selector:
-        action: {}
-
-    action_2_single_mode:
-      name: Button 2 single — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_2_single_target:
-      name: Button 2 single — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_2_single_color:
-      name: Button 2 single — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_2_single_custom:
-      name: Button 2 single — Custom action
-      default: []
-      selector:
-        action: {}
-
-    action_3_single_mode:
-      name: Button 3 single — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_3_single_target:
-      name: Button 3 single — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_3_single_color:
-      name: Button 3 single — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_3_single_custom:
-      name: Button 3 single — Custom action
-      default: []
-      selector:
-        action: {}
-
-    action_4_single_mode:
-      name: Button 4 single — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_4_single_target:
-      name: Button 4 single — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_4_single_color:
-      name: Button 4 single — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_4_single_custom:
-      name: Button 4 single — Custom action
       default: []
       selector:
         action: {}
@@ -216,126 +97,6 @@ blueprint:
       selector:
         action: {}
 
-    action_2_double_mode:
-      name: Button 2 double — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_2_double_target:
-      name: Button 2 double — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_2_double_color:
-      name: Button 2 double — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_2_double_custom:
-      name: Button 2 double — Custom action
-      default: []
-      selector:
-        action: {}
-
-    action_3_double_mode:
-      name: Button 3 double — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_3_double_target:
-      name: Button 3 double — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_3_double_color:
-      name: Button 3 double — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_3_double_custom:
-      name: Button 3 double — Custom action
-      default: []
-      selector:
-        action: {}
-
-    action_4_double_mode:
-      name: Button 4 double — Mode
-      default: none
-      selector:
-        select:
-          options:
-            - label: No action
-              value: none
-            - label: Toggle
-              value: toggle
-            - label: Turn on
-              value: turn_on
-            - label: Turn off
-              value: turn_off
-            - label: Set color
-              value: set_color
-            - label: Custom action
-              value: custom
-    action_4_double_target:
-      name: Button 4 double — Target
-      default: {}
-      selector:
-        target:
-          entity:
-            - domain: light
-            - domain: switch
-            - domain: fan
-            - domain: input_boolean
-            - domain: automation
-    action_4_double_color:
-      name: Button 4 double — Color (for Set color)
-      default: [255, 255, 255]
-      selector:
-        color_rgb: {}
-    action_4_double_custom:
-      name: Button 4 double — Custom action
-      default: []
-      selector:
-        action: {}
-
     action_1_hold_mode:
       name: Button 1 hold — Mode
       default: none
@@ -372,6 +133,87 @@ blueprint:
         color_rgb: {}
     action_1_hold_custom:
       name: Button 1 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_2_single_mode:
+      name: Button 2 single — Mode
+      description: Configure the action for Button 2 single press.
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_2_single_target:
+      name: Button 2 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_2_single_color:
+      name: Button 2 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_2_single_custom:
+      name: Button 2 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_2_double_mode:
+      name: Button 2 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_2_double_target:
+      name: Button 2 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_2_double_color:
+      name: Button 2 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_2_double_custom:
+      name: Button 2 double — Custom action
       default: []
       selector:
         action: {}
@@ -416,6 +258,87 @@ blueprint:
       selector:
         action: {}
 
+    action_3_single_mode:
+      name: Button 3 single — Mode
+      description: Configure the action for Button 3 single press.
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_3_single_target:
+      name: Button 3 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_3_single_color:
+      name: Button 3 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_3_single_custom:
+      name: Button 3 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_3_double_mode:
+      name: Button 3 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_3_double_target:
+      name: Button 3 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_3_double_color:
+      name: Button 3 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_3_double_custom:
+      name: Button 3 double — Custom action
+      default: []
+      selector:
+        action: {}
+
     action_3_hold_mode:
       name: Button 3 hold — Mode
       default: none
@@ -452,6 +375,87 @@ blueprint:
         color_rgb: {}
     action_3_hold_custom:
       name: Button 3 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_4_single_mode:
+      name: Button 4 single — Mode
+      description: Configure the action for Button 4 single press.
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_4_single_target:
+      name: Button 4 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_4_single_color:
+      name: Button 4 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_4_single_custom:
+      name: Button 4 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_4_double_mode:
+      name: Button 4 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_4_double_target:
+      name: Button 4 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_4_double_color:
+      name: Button 4 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_4_double_custom:
+      name: Button 4 double — Custom action
       default: []
       selector:
         action: {}
@@ -550,7 +554,67 @@ variables:
   action_4_hold_color: !input action_4_hold_color
   action_4_hold_custom: !input action_4_hold_custom
 
-trigger: !input button_triggers
+trigger:
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "1_single"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "1_double"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "1_hold"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "2_single"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "2_double"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "2_hold"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "3_single"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "3_double"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "3_hold"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "4_single"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "4_double"
+  - platform: device
+    domain: mqtt
+    device_id: !input switch_device
+    type: action
+    subtype: "4_hold"
 
 condition: []
 
