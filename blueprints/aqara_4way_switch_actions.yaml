@@ -1,0 +1,1122 @@
+blueprint:
+  name: Aqara 4-Way Switch — Map action to toggle/on/off/color/custom
+  description: >
+    Map Aqara 4-way switch button actions (1-4 single/double/hold) to a selected
+    operation: toggle, turn on, turn off, set a color, or run a custom action.
+    Leave any action set to "No action" to treat it as a no-op.
+  domain: automation
+
+  input:
+    button_triggers:
+      name: Button triggers
+      description: >
+        Add the device triggers for the Aqara 4-way switch. The blueprint
+        resolves actions from the trigger payload/subtype such as "1_single",
+        "2_double", or "4_hold".
+      selector:
+        trigger:
+
+    action_1_single_mode:
+      name: Button 1 single — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_1_single_target:
+      name: Button 1 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_1_single_color:
+      name: Button 1 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_1_single_custom:
+      name: Button 1 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_2_single_mode:
+      name: Button 2 single — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_2_single_target:
+      name: Button 2 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_2_single_color:
+      name: Button 2 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_2_single_custom:
+      name: Button 2 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_3_single_mode:
+      name: Button 3 single — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_3_single_target:
+      name: Button 3 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_3_single_color:
+      name: Button 3 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_3_single_custom:
+      name: Button 3 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_4_single_mode:
+      name: Button 4 single — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_4_single_target:
+      name: Button 4 single — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_4_single_color:
+      name: Button 4 single — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_4_single_custom:
+      name: Button 4 single — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_1_double_mode:
+      name: Button 1 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_1_double_target:
+      name: Button 1 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_1_double_color:
+      name: Button 1 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_1_double_custom:
+      name: Button 1 double — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_2_double_mode:
+      name: Button 2 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_2_double_target:
+      name: Button 2 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_2_double_color:
+      name: Button 2 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_2_double_custom:
+      name: Button 2 double — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_3_double_mode:
+      name: Button 3 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_3_double_target:
+      name: Button 3 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_3_double_color:
+      name: Button 3 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_3_double_custom:
+      name: Button 3 double — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_4_double_mode:
+      name: Button 4 double — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_4_double_target:
+      name: Button 4 double — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_4_double_color:
+      name: Button 4 double — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_4_double_custom:
+      name: Button 4 double — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_1_hold_mode:
+      name: Button 1 hold — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_1_hold_target:
+      name: Button 1 hold — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_1_hold_color:
+      name: Button 1 hold — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_1_hold_custom:
+      name: Button 1 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_2_hold_mode:
+      name: Button 2 hold — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_2_hold_target:
+      name: Button 2 hold — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_2_hold_color:
+      name: Button 2 hold — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_2_hold_custom:
+      name: Button 2 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_3_hold_mode:
+      name: Button 3 hold — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_3_hold_target:
+      name: Button 3 hold — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_3_hold_color:
+      name: Button 3 hold — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_3_hold_custom:
+      name: Button 3 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+    action_4_hold_mode:
+      name: Button 4 hold — Mode
+      default: none
+      selector:
+        select:
+          options:
+            - label: No action
+              value: none
+            - label: Toggle
+              value: toggle
+            - label: Turn on
+              value: turn_on
+            - label: Turn off
+              value: turn_off
+            - label: Set color
+              value: set_color
+            - label: Custom action
+              value: custom
+    action_4_hold_target:
+      name: Button 4 hold — Target
+      default: {}
+      selector:
+        target:
+          entity:
+            - domain: light
+            - domain: switch
+            - domain: fan
+            - domain: input_boolean
+            - domain: automation
+    action_4_hold_color:
+      name: Button 4 hold — Color (for Set color)
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    action_4_hold_custom:
+      name: Button 4 hold — Custom action
+      default: []
+      selector:
+        action: {}
+
+mode: queued
+max: 10
+
+variables:
+  action_kind: "{{ trigger.payload | default(trigger.subtype) | default(trigger.id) }}"
+  action_1_single_mode: !input action_1_single_mode
+  action_1_single_target: !input action_1_single_target
+  action_1_single_color: !input action_1_single_color
+  action_1_single_custom: !input action_1_single_custom
+  action_2_single_mode: !input action_2_single_mode
+  action_2_single_target: !input action_2_single_target
+  action_2_single_color: !input action_2_single_color
+  action_2_single_custom: !input action_2_single_custom
+  action_3_single_mode: !input action_3_single_mode
+  action_3_single_target: !input action_3_single_target
+  action_3_single_color: !input action_3_single_color
+  action_3_single_custom: !input action_3_single_custom
+  action_4_single_mode: !input action_4_single_mode
+  action_4_single_target: !input action_4_single_target
+  action_4_single_color: !input action_4_single_color
+  action_4_single_custom: !input action_4_single_custom
+  action_1_double_mode: !input action_1_double_mode
+  action_1_double_target: !input action_1_double_target
+  action_1_double_color: !input action_1_double_color
+  action_1_double_custom: !input action_1_double_custom
+  action_2_double_mode: !input action_2_double_mode
+  action_2_double_target: !input action_2_double_target
+  action_2_double_color: !input action_2_double_color
+  action_2_double_custom: !input action_2_double_custom
+  action_3_double_mode: !input action_3_double_mode
+  action_3_double_target: !input action_3_double_target
+  action_3_double_color: !input action_3_double_color
+  action_3_double_custom: !input action_3_double_custom
+  action_4_double_mode: !input action_4_double_mode
+  action_4_double_target: !input action_4_double_target
+  action_4_double_color: !input action_4_double_color
+  action_4_double_custom: !input action_4_double_custom
+  action_1_hold_mode: !input action_1_hold_mode
+  action_1_hold_target: !input action_1_hold_target
+  action_1_hold_color: !input action_1_hold_color
+  action_1_hold_custom: !input action_1_hold_custom
+  action_2_hold_mode: !input action_2_hold_mode
+  action_2_hold_target: !input action_2_hold_target
+  action_2_hold_color: !input action_2_hold_color
+  action_2_hold_custom: !input action_2_hold_custom
+  action_3_hold_mode: !input action_3_hold_mode
+  action_3_hold_target: !input action_3_hold_target
+  action_3_hold_color: !input action_3_hold_color
+  action_3_hold_custom: !input action_3_hold_custom
+  action_4_hold_mode: !input action_4_hold_mode
+  action_4_hold_target: !input action_4_hold_target
+  action_4_hold_color: !input action_4_hold_color
+  action_4_hold_custom: !input action_4_hold_custom
+
+trigger: !input button_triggers
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '1_single' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_single_mode == 'toggle'
+                        and (action_1_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_1_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_single_mode == 'turn_on'
+                        and (action_1_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_1_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_single_mode == 'turn_off'
+                        and (action_1_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_1_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_single_mode == 'set_color'
+                        and (action_1_single_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_1_single_target
+                    data:
+                      rgb_color: !input action_1_single_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_single_mode == 'custom'
+                        and (action_1_single_custom | length > 0) }}
+                sequence: !input action_1_single_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '2_single' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_single_mode == 'toggle'
+                        and (action_2_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_2_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_single_mode == 'turn_on'
+                        and (action_2_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_2_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_single_mode == 'turn_off'
+                        and (action_2_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_2_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_single_mode == 'set_color'
+                        and (action_2_single_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_2_single_target
+                    data:
+                      rgb_color: !input action_2_single_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_single_mode == 'custom'
+                        and (action_2_single_custom | length > 0) }}
+                sequence: !input action_2_single_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '3_single' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_single_mode == 'toggle'
+                        and (action_3_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_3_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_single_mode == 'turn_on'
+                        and (action_3_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_3_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_single_mode == 'turn_off'
+                        and (action_3_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_3_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_single_mode == 'set_color'
+                        and (action_3_single_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_3_single_target
+                    data:
+                      rgb_color: !input action_3_single_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_single_mode == 'custom'
+                        and (action_3_single_custom | length > 0) }}
+                sequence: !input action_3_single_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '4_single' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_single_mode == 'toggle'
+                        and (action_4_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_4_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_single_mode == 'turn_on'
+                        and (action_4_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_4_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_single_mode == 'turn_off'
+                        and (action_4_single_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_4_single_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_single_mode == 'set_color'
+                        and (action_4_single_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_4_single_target
+                    data:
+                      rgb_color: !input action_4_single_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_single_mode == 'custom'
+                        and (action_4_single_custom | length > 0) }}
+                sequence: !input action_4_single_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '1_double' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_double_mode == 'toggle'
+                        and (action_1_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_1_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_double_mode == 'turn_on'
+                        and (action_1_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_1_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_double_mode == 'turn_off'
+                        and (action_1_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_1_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_double_mode == 'set_color'
+                        and (action_1_double_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_1_double_target
+                    data:
+                      rgb_color: !input action_1_double_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_double_mode == 'custom'
+                        and (action_1_double_custom | length > 0) }}
+                sequence: !input action_1_double_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '2_double' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_double_mode == 'toggle'
+                        and (action_2_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_2_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_double_mode == 'turn_on'
+                        and (action_2_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_2_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_double_mode == 'turn_off'
+                        and (action_2_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_2_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_double_mode == 'set_color'
+                        and (action_2_double_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_2_double_target
+                    data:
+                      rgb_color: !input action_2_double_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_double_mode == 'custom'
+                        and (action_2_double_custom | length > 0) }}
+                sequence: !input action_2_double_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '3_double' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_double_mode == 'toggle'
+                        and (action_3_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_3_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_double_mode == 'turn_on'
+                        and (action_3_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_3_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_double_mode == 'turn_off'
+                        and (action_3_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_3_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_double_mode == 'set_color'
+                        and (action_3_double_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_3_double_target
+                    data:
+                      rgb_color: !input action_3_double_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_double_mode == 'custom'
+                        and (action_3_double_custom | length > 0) }}
+                sequence: !input action_3_double_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '4_double' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_double_mode == 'toggle'
+                        and (action_4_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_4_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_double_mode == 'turn_on'
+                        and (action_4_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_4_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_double_mode == 'turn_off'
+                        and (action_4_double_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_4_double_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_double_mode == 'set_color'
+                        and (action_4_double_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_4_double_target
+                    data:
+                      rgb_color: !input action_4_double_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_double_mode == 'custom'
+                        and (action_4_double_custom | length > 0) }}
+                sequence: !input action_4_double_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '1_hold' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_hold_mode == 'toggle'
+                        and (action_1_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_1_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_hold_mode == 'turn_on'
+                        and (action_1_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_1_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_hold_mode == 'turn_off'
+                        and (action_1_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_1_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_hold_mode == 'set_color'
+                        and (action_1_hold_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_1_hold_target
+                    data:
+                      rgb_color: !input action_1_hold_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_1_hold_mode == 'custom'
+                        and (action_1_hold_custom | length > 0) }}
+                sequence: !input action_1_hold_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '2_hold' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_hold_mode == 'toggle'
+                        and (action_2_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_2_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_hold_mode == 'turn_on'
+                        and (action_2_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_2_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_hold_mode == 'turn_off'
+                        and (action_2_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_2_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_hold_mode == 'set_color'
+                        and (action_2_hold_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_2_hold_target
+                    data:
+                      rgb_color: !input action_2_hold_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_2_hold_mode == 'custom'
+                        and (action_2_hold_custom | length > 0) }}
+                sequence: !input action_2_hold_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '3_hold' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_hold_mode == 'toggle'
+                        and (action_3_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_3_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_hold_mode == 'turn_on'
+                        and (action_3_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_3_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_hold_mode == 'turn_off'
+                        and (action_3_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_3_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_hold_mode == 'set_color'
+                        and (action_3_hold_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_3_hold_target
+                    data:
+                      rgb_color: !input action_3_hold_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_3_hold_mode == 'custom'
+                        and (action_3_hold_custom | length > 0) }}
+                sequence: !input action_3_hold_custom
+            default: []
+
+      - conditions:
+          - condition: template
+            value_template: "{{ action_kind == '4_hold' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_hold_mode == 'toggle'
+                        and (action_4_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.toggle
+                    target: !input action_4_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_hold_mode == 'turn_on'
+                        and (action_4_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input action_4_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_hold_mode == 'turn_off'
+                        and (action_4_hold_target | length > 0) }}
+                sequence:
+                  - service: homeassistant.turn_off
+                    target: !input action_4_hold_target
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_hold_mode == 'set_color'
+                        and (action_4_hold_target | length > 0) }}
+                sequence:
+                  - service: light.turn_on
+                    target: !input action_4_hold_target
+                    data:
+                      rgb_color: !input action_4_hold_color
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ action_4_hold_mode == 'custom'
+                        and (action_4_hold_custom | length > 0) }}
+                sequence: !input action_4_hold_custom
+            default: []
+    default: []
