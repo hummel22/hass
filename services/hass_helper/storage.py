@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 class JSONStorage:
@@ -577,4 +578,333 @@ class DataRepository:
         return True
 
 
-__all__ = ["DataRepository"]
+class SQLiteRepository:
+    """SQLite-backed storage for MQTT configuration and managed entities."""
+
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _initialize(self) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mqtt_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    host TEXT NOT NULL,
+                    port INTEGER NOT NULL DEFAULT 1883,
+                    username TEXT,
+                    password TEXT,
+                    client_id TEXT,
+                    topic_prefix TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    unit_of_measurement TEXT,
+                    device_class TEXT,
+                    state_class TEXT,
+                    icon TEXT,
+                    data_type TEXT,
+                    topic TEXT,
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entity_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_id TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.commit()
+
+    @staticmethod
+    def _clean_string(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+        return {key: row[key] for key in row.keys()}
+
+    def get_mqtt_config(self) -> Dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT host, port, username, password, client_id, topic_prefix FROM mqtt_config WHERE id = 1"
+            ).fetchone()
+        if row is None:
+            return {
+                "host": "",
+                "port": 1883,
+                "username": None,
+                "password": None,
+                "client_id": None,
+                "topic_prefix": None,
+            }
+        return self._row_to_dict(row)
+
+    def save_mqtt_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        host = self._clean_string(payload.get("host"))
+        if not host:
+            raise ValueError("Broker host is required.")
+        port = payload.get("port") or 1883
+        try:
+            port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Broker port must be a number.") from exc
+        if not (1 <= port <= 65535):
+            raise ValueError("Broker port must be between 1 and 65535.")
+
+        username = self._clean_string(payload.get("username"))
+        password = payload.get("password")
+        client_id = self._clean_string(payload.get("client_id"))
+        topic_prefix = self._clean_string(payload.get("topic_prefix"))
+
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mqtt_config (id, host, port, username, password, client_id, topic_prefix, updated_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    host = excluded.host,
+                    port = excluded.port,
+                    username = excluded.username,
+                    password = excluded.password,
+                    client_id = excluded.client_id,
+                    topic_prefix = excluded.topic_prefix,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (host, port, username, password, client_id, topic_prefix),
+            )
+            conn.commit()
+        return self.get_mqtt_config()
+
+    def list_entities(self) -> List[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT entity_id, name, unit_of_measurement, device_class, state_class, icon,
+                       data_type, topic, description, updated_at
+                FROM entities
+                ORDER BY LOWER(name)
+                """
+            ).fetchall()
+
+        entities: List[Dict[str, Any]] = []
+        for row in rows:
+            record = self._row_to_dict(row)
+            last_point = self._get_last_data_point(record["entity_id"])
+            record["last_value"] = last_point.get("value") if last_point else None
+            record["last_updated"] = last_point.get("recorded_at") if last_point else None
+            entities.append(record)
+        return entities
+
+    def _get_last_data_point(self, entity_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT value, recorded_at FROM entity_history
+                WHERE entity_id = ?
+                ORDER BY datetime(recorded_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (entity_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT entity_id, name, unit_of_measurement, device_class, state_class, icon,
+                       data_type, topic, description, updated_at
+                FROM entities
+                WHERE entity_id = ?
+                """,
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            history = conn.execute(
+                """
+                SELECT value, recorded_at FROM entity_history
+                WHERE entity_id = ?
+                ORDER BY datetime(recorded_at) ASC, id ASC
+                LIMIT 200
+                """,
+                (entity_id,),
+            ).fetchall()
+
+        entity = self._row_to_dict(row)
+        entity["history"] = [self._row_to_dict(item) for item in history]
+        last_point = entity["history"][-1] if entity["history"] else None
+        entity["last_value"] = last_point.get("value") if last_point else None
+        entity["last_updated"] = last_point.get("recorded_at") if last_point else None
+        return entity
+
+    def create_entity(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = self._prepare_entity_payload(payload, require_id=True)
+        with self._lock, self._connect() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO entities (
+                        entity_id, name, unit_of_measurement, device_class, state_class,
+                        icon, data_type, topic, description, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        cleaned.get("entity_id"),
+                        cleaned.get("name"),
+                        cleaned.get("unit_of_measurement"),
+                        cleaned.get("device_class"),
+                        cleaned.get("state_class"),
+                        cleaned.get("icon"),
+                        cleaned.get("data_type"),
+                        cleaned.get("topic"),
+                        cleaned.get("description"),
+                    ),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("An entity with this ID already exists.") from exc
+        result = self.get_entity(cleaned["entity_id"])
+        if result is None:
+            raise RuntimeError("Failed to load newly created entity.")
+        return result
+
+    def _prepare_entity_payload(
+        self, payload: Dict[str, Any], *, require_id: bool
+    ) -> Dict[str, Any]:
+        entity_id = self._clean_string(payload.get("entity_id"))
+        if require_id and not entity_id:
+            raise ValueError("Entity ID is required.")
+        name = self._clean_string(payload.get("name"))
+        if require_id and not name:
+            raise ValueError("Entity name is required.")
+
+        cleaned: Dict[str, Any] = {}
+        if entity_id is not None:
+            cleaned["entity_id"] = entity_id
+        if name is not None:
+            cleaned["name"] = name
+        for field in (
+            "unit_of_measurement",
+            "device_class",
+            "state_class",
+            "icon",
+            "data_type",
+            "topic",
+            "description",
+        ):
+            if field in payload:
+                cleaned[field] = self._clean_string(payload.get(field))
+        return cleaned
+
+    def update_entity(self, entity_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = self._prepare_entity_payload(payload, require_id=False)
+        if not cleaned:
+            current = self.get_entity(entity_id)
+            if current is None:
+                raise KeyError(entity_id)
+            return current
+
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM entities WHERE entity_id = ?",
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(entity_id)
+
+            new_entity_id = cleaned.get("entity_id", entity_id)
+            assignments = []
+            values: List[Any] = []
+            for field, value in cleaned.items():
+                assignments.append(f"{field} = ?")
+                values.append(value)
+            assignments.append("updated_at = CURRENT_TIMESTAMP")
+            sql = f"UPDATE entities SET {', '.join(assignments)} WHERE entity_id = ?"
+            values.append(entity_id)
+            try:
+                conn.execute(sql, values)
+                if new_entity_id != entity_id:
+                    conn.execute(
+                        "UPDATE entity_history SET entity_id = ? WHERE entity_id = ?",
+                        (new_entity_id, entity_id),
+                    )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("An entity with this ID already exists.") from exc
+
+        result = self.get_entity(new_entity_id)
+        if result is None:
+            raise RuntimeError("Failed to load updated entity.")
+        return result
+
+    def delete_entity(self, entity_id: str) -> None:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM entities WHERE entity_id = ?",
+                (entity_id,),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                raise KeyError(entity_id)
+
+    def add_data_point(self, entity_id: str, value: str) -> Dict[str, Any]:
+        cleaned_value = self._clean_string(value)
+        if cleaned_value is None:
+            raise ValueError("A value is required.")
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM entities WHERE entity_id = ?",
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(entity_id)
+            conn.execute(
+                """
+                INSERT INTO entity_history (entity_id, value, recorded_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                """,
+                (entity_id, cleaned_value),
+            )
+            conn.execute(
+                "UPDATE entities SET updated_at = CURRENT_TIMESTAMP WHERE entity_id = ?",
+                (entity_id,),
+            )
+            conn.commit()
+        result = self._get_last_data_point(entity_id)
+        if result is None:
+            raise RuntimeError("Failed to load recorded data point.")
+        return result
+
+
+__all__ = ["DataRepository", "SQLiteRepository"]
