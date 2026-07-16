@@ -1,0 +1,474 @@
+blueprint:
+  name: Humidity Exhaust Fan (advanced)
+  description: >-
+    Humidity-difference exhaust fan control with manual-override backoff, max runtime
+    with lockout, manual-run handling, and up to two blackout windows (overnight-spanning
+    supported).
+
+    Requires two per-fan helpers for full functionality: an input_text (state machine,
+    max 255) and a timer (restore enabled). Without them the blueprint degrades to plain
+    humidity control + blackout + a blunt max-runtime based on how long the switch has
+    been on.
+
+    Semantics: backoff/lockout only block STARTING the fan (a user-started fan can still
+    be taken over by humidity logic); switch changes while HA is down get no backoff;
+    max runtime counts from humidity takeover, not from a manual turn-on; an HA restart
+    during a blackout window turns off auto/manual runs but spares manual runs started
+    inside the window.
+  domain: automation
+  source_url: https://raw.githubusercontent.com/hummel22/hass/main/blueprints/humidity_exhaust_fan.yaml
+  input:
+    core:
+      name: Core humidity control
+      input:
+        humidity_sensor:
+          name: Humidity Sensor
+          description: Sensor measuring the humidity of the area
+          selector:
+            entity:
+              domain: sensor
+        reference_humidity_sensor:
+          name: Reference Humidity Sensor (optional)
+          description: Baseline humidity sensor. Falls back to the fixed reference below when unset or unavailable.
+          default: []
+          selector:
+            entity:
+              domain: sensor
+        reference_humidity:
+          name: Reference Humidity (fallback)
+          description: Fixed baseline (%) used when no reference sensor is set or it is unavailable
+          default: 60
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: "%"
+        fan_switch:
+          name: Fan Switch
+          selector:
+            entity:
+              domain: switch
+        rising_threshold:
+          name: Rising Threshold
+          description: Points above baseline before the fan turns on
+          default: 8
+          selector:
+            number:
+              min: 0
+              max: 50
+              step: 0.5
+        falling_threshold:
+          name: Falling Threshold
+          description: Fan turns off once the difference falls to this value or below
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 50
+              step: 0.5
+    helpers:
+      name: State helpers (required for backoff / manual-run features)
+      input:
+        state_entity:
+          name: State input_text helper
+          description: Dedicated input_text (max length 255) used by this automation only
+          default: []
+          selector:
+            entity:
+              domain: input_text
+        timer_entity:
+          name: Override timer helper
+          description: Dedicated timer helper (restore enabled) used by this automation only
+          default: []
+          selector:
+            entity:
+              domain: timer
+    timing:
+      name: Backoff, max runtime, lockout
+      input:
+        backoff_minutes:
+          name: Manual-change backoff (minutes)
+          description: After a manual on/off, block auto-starts this long. 0 disables.
+          default: 120
+          selector:
+            number:
+              min: 0
+              max: 1440
+              unit_of_measurement: min
+        max_runtime_minutes:
+          name: Max runtime (minutes)
+          description: Turn a humidity-run fan off after this long. 0 disables.
+          default: 45
+          selector:
+            number:
+              min: 0
+              max: 720
+              unit_of_measurement: min
+        lockout_hours:
+          name: Post-max-runtime lockout (hours)
+          description: After a max-runtime shutoff, block auto-starts this long. 0 disables.
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 24
+              step: 0.5
+              unit_of_measurement: h
+        manual_max_minutes:
+          name: Manual-run max runtime (minutes)
+          description: Turn a manually-started fan off after this long unless humidity logic took over. 0 = run until takeover or blackout.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 720
+              unit_of_measurement: min
+    blackout:
+      name: Blackout windows
+      input:
+        blackout1_enabled:
+          name: Blackout window 1 enabled
+          default: false
+          selector:
+            boolean: {}
+        blackout1_start:
+          name: Window 1 start
+          default: "22:00:00"
+          selector:
+            time: {}
+        blackout1_end:
+          name: Window 1 end
+          default: "07:00:00"
+          selector:
+            time: {}
+        blackout2_enabled:
+          name: Blackout window 2 enabled
+          default: false
+          selector:
+            boolean: {}
+        blackout2_start:
+          name: Window 2 start
+          default: "12:00:00"
+          selector:
+            time: {}
+        blackout2_end:
+          name: Window 2 end
+          default: "13:00:00"
+          selector:
+            time: {}
+
+mode: queued
+max: 25
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input humidity_sensor
+    to: null
+    id: sensor
+  - platform: state
+    entity_id: !input reference_humidity_sensor
+    to: null
+    id: sensor
+  - platform: state
+    entity_id: !input fan_switch
+    from: "off"
+    to: "on"
+    id: fan_on
+  - platform: state
+    entity_id: !input fan_switch
+    from: "on"
+    to: "off"
+    id: fan_off
+  - platform: time
+    at: !input blackout1_start
+    id: blackout1
+  - platform: time
+    at: !input blackout2_start
+    id: blackout2
+  - platform: time_pattern
+    minutes: "/5"
+    id: tick
+  - platform: homeassistant
+    event: start
+    id: startup
+
+variables:
+  humidity_sensor: !input humidity_sensor
+  reference_humidity_sensor: !input reference_humidity_sensor
+  reference_humidity: !input reference_humidity
+  fan_switch: !input fan_switch
+  rising_threshold: !input rising_threshold
+  falling_threshold: !input falling_threshold
+  state_entity: !input state_entity
+  timer_entity: !input timer_entity
+  backoff_minutes: !input backoff_minutes
+  max_runtime_minutes: !input max_runtime_minutes
+  lockout_hours: !input lockout_hours
+  manual_max_minutes: !input manual_max_minutes
+  blackout1_enabled: !input blackout1_enabled
+  blackout1_start: !input blackout1_start
+  blackout1_end: !input blackout1_end
+  blackout2_enabled: !input blackout2_enabled
+  blackout2_start: !input blackout2_start
+  blackout2_end: !input blackout2_end
+  grace_seconds: 120
+  trig_id: >-
+    {{ trigger.id if trigger is defined and trigger.id is defined else 'tick' }}
+  has_state: "{{ state_entity is string and state_entity | length > 0 }}"
+  has_timer: "{{ timer_entity is string and timer_entity | length > 0 }}"
+  has_ref_sensor: "{{ reference_humidity_sensor is string and reference_humidity_sensor | length > 0 }}"
+  humidity_raw: "{{ states(humidity_sensor) }}"
+  ref_raw: "{{ states(reference_humidity_sensor) if has_ref_sensor else '' }}"
+  sensors_ok: "{{ humidity_raw not in ['unknown', 'unavailable', ''] }}"
+  diff: >-
+    {% set ref = (ref_raw | float) if (has_ref_sensor and ref_raw not in ['unknown', 'unavailable', '']) else (reference_humidity | float(60)) %}
+    {{ (humidity_raw | float(0)) - ref }}
+  st_raw: "{{ states(state_entity) if has_state else '' }}"
+  st: >-
+    {% set v = st_raw.split('@')[0] %}
+    {{ v if v in ['idle', 'auto', 'manual', 'manual_void'] else 'idle' }}
+  st_age: >-
+    {% if '@' in st_raw %}
+      {% set ts = as_datetime(st_raw.split('@', 1)[1]) %}
+      {{ (now() - ts).total_seconds() if ts is not none else 999999 }}
+    {% else %}
+      {{ 999999 }}
+    {% endif %}
+  fan_is_on: "{{ is_state(fan_switch, 'on') }}"
+  fan_is_off: "{{ is_state(fan_switch, 'off') }}"
+  fan_age: >-
+    {{ (now() - states[fan_switch].last_changed).total_seconds() if states[fan_switch] is not none else 999999 }}
+  in_b1: >-
+    {% if not blackout1_enabled %}
+      {{ false }}
+    {% else %}
+      {% set start = blackout1_start ~ (':00' if blackout1_start | length == 5 else '') %}
+      {% set end = blackout1_end ~ (':00' if blackout1_end | length == 5 else '') %}
+      {% set n = now().time() %}
+      {% set s = strptime(start, '%H:%M:%S').time() %}
+      {% set e = strptime(end, '%H:%M:%S').time() %}
+      {{ (s <= n < e) if s < e else (n >= s or n < e) }}
+    {% endif %}
+  in_b2: >-
+    {% if not blackout2_enabled %}
+      {{ false }}
+    {% else %}
+      {% set start = blackout2_start ~ (':00' if blackout2_start | length == 5 else '') %}
+      {% set end = blackout2_end ~ (':00' if blackout2_end | length == 5 else '') %}
+      {% set n = now().time() %}
+      {% set s = strptime(start, '%H:%M:%S').time() %}
+      {% set e = strptime(end, '%H:%M:%S').time() %}
+      {{ (s <= n < e) if s < e else (n >= s or n < e) }}
+    {% endif %}
+  in_blackout: "{{ in_b1 or in_b2 }}"
+  timer_blocking: "{{ has_timer and is_state(timer_entity, 'active') }}"
+
+action:
+  - choose:
+      # A2 - manual-on detected (own turn-ons no-op: D1 wrote st=auto before turn_on)
+      - conditions:
+          - "{{ trig_id == 'fan_on' }}"
+          - "{{ has_state }}"
+          - "{{ st != 'auto' }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "{{ ('manual_void' if in_blackout else 'manual') ~ '@' ~ now().isoformat() }}"
+
+      # B2 - external off during a tracked run -> backoff (own turn-offs no-op: st already idle)
+      - conditions:
+          - "{{ trig_id == 'fan_off' }}"
+          - "{{ has_state }}"
+          - "{{ st in ['auto', 'manual', 'manual_void'] }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "idle@{{ now().isoformat() }}"
+          - if:
+              - "{{ has_timer and backoff_minutes | float(0) > 0 }}"
+              - >-
+                {{ not (is_state(timer_entity, 'active')
+                        and state_attr(timer_entity, 'finishes_at') is not none
+                        and (as_datetime(state_attr(timer_entity, 'finishes_at')) - now()).total_seconds()
+                            > backoff_minutes | float * 60) }}
+            then:
+              - service: timer.start
+                target:
+                  entity_id: !input timer_entity
+                data:
+                  duration: "{{ (backoff_minutes | float * 60) | int }}"
+
+      # C - blackout window start edge: turn off any running fan (incl. manual_void - "another window" rule)
+      - conditions:
+          - "{{ trig_id in ['blackout1', 'blackout2'] }}"
+          - "{{ (trig_id == 'blackout1' and blackout1_enabled) or (trig_id == 'blackout2' and blackout2_enabled) }}"
+          - "{{ fan_is_on }}"
+        sequence:
+          - if:
+              - "{{ has_state }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input state_entity
+                data:
+                  value: "idle@{{ now().isoformat() }}"
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
+
+      # D0c - startup catch-up: blackout edge missed while HA was down (spares manual_void)
+      - conditions:
+          - "{{ trig_id == 'startup' }}"
+          - "{{ in_blackout }}"
+          - "{{ fan_is_on }}"
+          - "{{ (not has_state) or st != 'manual_void' }}"
+        sequence:
+          - if:
+              - "{{ has_state }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input state_entity
+                data:
+                  value: "idle@{{ now().isoformat() }}"
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
+
+      # D0a - heal: state says running but fan is off (change happened while HA down / trigger missed)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ has_state }}"
+          - "{{ fan_is_off }}"
+          - "{{ st != 'idle' }}"
+          - "{{ st_age | float(0) > grace_seconds }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "idle@{{ now().isoformat() }}"
+
+      # D0b - heal: fan on with idle state -> adopt as manual (unknown provenance = user intent)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ has_state }}"
+          - "{{ fan_is_on }}"
+          - "{{ st == 'idle' }}"
+          - "{{ st_age | float(0) > grace_seconds }}"
+          - "{{ fan_age | float(0) > grace_seconds }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "{{ ('manual_void' if in_blackout else 'manual') ~ '@' ~ now().isoformat() }}"
+
+      # D1 - auto-on (st==auto allowed so a failed turn_on retries each evaluation)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ sensors_ok }}"
+          - "{{ fan_is_off }}"
+          - "{{ (not has_state) or st in ['idle', 'auto'] }}"
+          - "{{ diff | float(0) > rising_threshold | float }}"
+          - "{{ not timer_blocking }}"
+          - "{{ not in_blackout }}"
+        sequence:
+          - if:
+              - "{{ has_state }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input state_entity
+                data:
+                  value: "auto@{{ now().isoformat() }}"
+          - service: switch.turn_on
+            target:
+              entity_id: !input fan_switch
+
+      # D2 - humidity takeover of a manual run (MUST precede D5)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ has_state }}"
+          - "{{ sensors_ok }}"
+          - "{{ fan_is_on }}"
+          - "{{ st in ['manual', 'manual_void'] }}"
+          - "{{ diff | float(0) > rising_threshold | float }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "auto@{{ now().isoformat() }}"
+
+      # D3 - auto-off at falling threshold
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ sensors_ok }}"
+          - "{{ fan_is_on }}"
+          - "{{ (not has_state) or st == 'auto' }}"
+          - "{{ diff | float(0) <= falling_threshold | float }}"
+        sequence:
+          - if:
+              - "{{ has_state }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input state_entity
+                data:
+                  value: "idle@{{ now().isoformat() }}"
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
+
+      # D4 - max runtime (no sensors_ok requirement: must fire even with a dead sensor)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ fan_is_on }}"
+          - "{{ max_runtime_minutes | float(0) > 0 }}"
+          - >-
+            {{ (has_state and st == 'auto' and st_age | float(0) > max_runtime_minutes | float * 60)
+               or (not has_state and fan_age | float(0) > max_runtime_minutes | float * 60) }}
+        sequence:
+          - if:
+              - "{{ has_state }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: !input state_entity
+                data:
+                  value: "idle@{{ now().isoformat() }}"
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch
+          - if:
+              - "{{ has_timer and lockout_hours | float(0) > 0 }}"
+            then:
+              - service: timer.start
+                target:
+                  entity_id: !input timer_entity
+                data:
+                  duration: "{{ (lockout_hours | float * 3600) | int }}"
+
+      # D5 - manual-run max runtime (no sensors_ok requirement)
+      - conditions:
+          - "{{ trig_id in ['sensor', 'tick', 'startup'] }}"
+          - "{{ has_state }}"
+          - "{{ fan_is_on }}"
+          - "{{ st in ['manual', 'manual_void'] }}"
+          - "{{ manual_max_minutes | float(0) > 0 }}"
+          - "{{ st_age | float(0) > manual_max_minutes | float * 60 }}"
+        sequence:
+          - service: input_text.set_value
+            target:
+              entity_id: !input state_entity
+            data:
+              value: "idle@{{ now().isoformat() }}"
+          - service: switch.turn_off
+            target:
+              entity_id: !input fan_switch

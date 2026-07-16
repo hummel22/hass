@@ -56,3 +56,13 @@ and "Action angle" sensor (rotation delta) so actions map to the intended side.
 ![Aqara Cube Pro example settings](imgs/cube_settings.png)
 
 [![Import Aqara Cube Pro Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/aqara_cube_pro_light_control.yaml)
+
+## Humidity exhaust fan (advanced)
+
+Humidity-difference fan control with manual-override backoff (a fan turned off at the wall
+stays off for a configurable time), max runtime with post-shutoff lockout, manual-run
+handling (optional separate max runtime; humidity logic can take over), and up to two
+blackout windows that support overnight spans. Requires one `input_text` and one `timer`
+helper per fan for full functionality; degrades gracefully without them.
+
+[![Import Humidity Exhaust Fan Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/humidity_exhaust_fan.yaml)
