@@ -2090,12 +2090,38 @@ actions:
                   \ %}\n    {% set message.text = message.text + service_reminder_time_end_message + '\\\
                   n' %}\n  {% endif %}\n{% endif %} {% set message.text = message.text + end_reminder_notification_message\
                   \ %} {{ message.text }}"
-            - wait_for_trigger:
-              - trigger: state
-                entity_id: !input 'end_reminder_notification_entity'
-                to: 'on'
-              timeout:
-                minutes: !input 'end_reminder_notification_time_delay'
+            - choose:
+              - alias: In allowed notify window (or restriction disabled) - normal reminder delay
+                conditions:
+                - condition: or
+                  conditions:
+                  - condition: template
+                    value_template: '{{ include_time == ''time_disabled'' }}'
+                  - condition: and
+                    conditions:
+                    - condition: time
+                      after: !input 'after_time'
+                      before: !input 'before_time'
+                      weekday: !input 'weekday_options'
+                    - condition: template
+                      value_template: '{{ include_time == ''time_enabled'' }}'
+                sequence:
+                - wait_for_trigger: &id001
+                  - trigger: state
+                    entity_id: !input 'end_reminder_notification_entity'
+                    to: 'on'
+                  timeout: &id002
+                    minutes: !input 'end_reminder_notification_time_delay'
+              default:
+              - alias: Outside notify time window - pause reminders until window reopens
+                wait_for_trigger:
+                - trigger: state
+                  entity_id: !input 'end_reminder_notification_entity'
+                  to: 'on'
+                - trigger: time
+                  at: !input 'after_time'
+                timeout:
+                  hours: 24
             - repeat:
                 while:
                 - condition: template
@@ -2131,12 +2157,34 @@ actions:
                       value_template: '{{ (is_state(end_reminder_notification_entity, ''off'')) and (repeat.index
                         <= end_reminder_notification_max_count - 1) }}'
                     sequence:
-                    - wait_for_trigger:
-                      - trigger: state
-                        entity_id: !input 'end_reminder_notification_entity'
-                        to: 'on'
-                      timeout:
-                        minutes: !input 'end_reminder_notification_time_delay'
+                    - choose:
+                      - alias: In allowed notify window (or restriction disabled) - normal reminder delay
+                        conditions:
+                        - condition: or
+                          conditions:
+                          - condition: template
+                            value_template: '{{ include_time == ''time_disabled'' }}'
+                          - condition: and
+                            conditions:
+                            - condition: time
+                              after: !input 'after_time'
+                              before: !input 'before_time'
+                              weekday: !input 'weekday_options'
+                            - condition: template
+                              value_template: '{{ include_time == ''time_enabled'' }}'
+                        sequence:
+                        - wait_for_trigger: *id001
+                          timeout: *id002
+                      default:
+                      - alias: Outside notify time window - pause reminders until window reopens
+                        wait_for_trigger:
+                        - trigger: state
+                          entity_id: !input 'end_reminder_notification_entity'
+                          to: 'on'
+                        - trigger: time
+                          at: !input 'after_time'
+                        timeout:
+                          hours: 24
             - choose:
               - alias: Perform the run status action
                 conditions:
