@@ -66,3 +66,16 @@ blackout windows that support overnight spans. Requires one `input_text` and one
 helper per fan for full functionality; degrades gracefully without them.
 
 [![Import Humidity Exhaust Fan Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/humidity_exhaust_fan.yaml)
+
+## Appliance notifications & actions (actionable fork)
+
+Fork of Blackshome's [Appliance Notifications & Actions](https://gist.github.com/Blackshome/42586b567d243d432887cadf54e18906)
+(v3.8) that adds a **Silence** action button to the end and reminder notifications. Tracks a power
+sensor to detect an appliance's start/running/end cycle, with optional power/cost/runtime/duration
+tracking, cycle counters, service reminders, a watchdog, run-status dashboard chip, and repeating
+"still not attended to" reminders that stop when a configured entity (e.g. a door sensor) turns on.
+Set **Silence Action** (End Notify section) to an action identifier and a separate automation can
+listen for the resulting `mobile_app_notification_action` event to silence the reminder loop without
+needing the door opened. All other behavior matches the upstream blueprint.
+
+[![Import Appliance Notifications Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/your-org/hass/main/blueprints/appliance-notifications-actionable.yaml)
